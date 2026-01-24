@@ -65,40 +65,41 @@ async def chat(request: ChatRequest):
         if company:
             llm_model = company.get('llm_model', 'gpt-5.2')
     
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
-    chat_instance = LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message="""You are Sevasetu, a multilingual consular assistant for the Consulate General of India, Johannesburg.
+    # Get knowledge base from official sources
+    knowledge_base = get_knowledge_base()
+    context_info = search_knowledge(request.message, knowledge_base)
+    
+    # Build enhanced prompt with official source context
+    system_message = f"""You are Sevasetu, a multilingual consular assistant for the Consulate General of India, Johannesburg.
 
 CRITICAL INSTRUCTIONS:
 1. You MUST respond in the SAME LANGUAGE the user writes in
 2. You support: English, Hindi, Afrikaans, Zulu, Tamil, Telugu, Marathi, Bengali, Gujarati, Punjabi, Urdu, and other Indian/South African languages
 3. ONLY provide information from these official sources:
    - Consulate General of India Johannesburg (cgijoburg.gov.in)
-   - VFS Global Visa Application Centre (vfs.matchlessmfs.com)
-4. If you don't have specific information from these sources, say: "Please visit cgijoburg.gov.in or contact VFS at vfs.matchlessmfs.com for official information"
-5. Never provide information from unofficial sources
+   - VFS Global Visa Application Centre (visa.vfsglobal.com)
+4. If you don't have specific information from these sources, say: "Please visit cgijoburg.gov.in or contact VFS for official information"
 
-KEY SERVICES (from official sources):
-- Passport Services: New, Renewal, Re-issue
-- Visa Services: Tourist, Business, Medical, e-Visa
-- OCI (Overseas Citizen of India) Services
-- Consular Services: Birth/Death Registration, Police Clearance, Attestation
-- Emergency Contact: +27 6830 38144
+OFFICIAL INFORMATION FROM SOURCES:
+{context_info if context_info else 'No specific context found. Guide user to official websites.'}
 
-PROCESS STEPS:
-1. Register - Collect citizenship, service type, location
-2. Upload - Guide on required documents from official websites
-3. Verify - Review application details
-4. Sign - Final submission guidance
+KEY CONTACT INFORMATION:
+- Emergency: +27 6830 38144
+- Email: cons.joburg@mea.gov.in
+- VFS Johannesburg: https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/
 
 LANGUAGE EXAMPLES:
 - Hindi: "मैं आपकी मदद करने के लिए तैयार हूं"
 - Afrikaans: "Ek is gereed om jou te help"
 - Zulu: "Ngilungele ukukusiza"
 
-Always maintain formal, professional tone."""
+Always maintain formal, professional tone and cite official sources."""
+    
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    chat_instance = LlmChat(
+        api_key=api_key,
+        session_id=session_id,
+        system_message=system_message
     ).with_model("openai", llm_model)
     
     user_msg_content = []
