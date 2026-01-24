@@ -7,6 +7,8 @@ import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import Webcam from "react-webcam";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
