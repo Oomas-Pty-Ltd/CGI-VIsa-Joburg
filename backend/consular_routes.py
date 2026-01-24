@@ -65,8 +65,8 @@ async def chat(request: ChatRequest):
         if company:
             llm_model = company.get('llm_model', 'gpt-5.2')
     
-    # Get knowledge base from official sources
-    knowledge_base = get_knowledge_base()
+    # Get real-time knowledge base from official sources
+    knowledge_base = await get_realtime_knowledge()
     context_info = search_knowledge(request.message, knowledge_base)
     
     # Build enhanced prompt with official source context
