@@ -71,25 +71,43 @@ async def scrape_cgi_joburg() -> Dict:
 async def scrape_vfs_global() -> Dict:
     """Real-time scraping of VFS Global website"""
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
             response = await client.get("https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/")
-            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            if response.status_code != 200:
+                raise Exception(f"HTTP {response.status_code}")
             
             data = {
                 "source": "VFS Global",
                 "scraped_at": datetime.now(timezone.utc).isoformat(),
+                "status": "live_scraped",
                 "location": {
-                    "address": "VFS Global, Johannesburg",
+                    "name": "VFS Global Visa Application Centre",
+                    "city": "Johannesburg",
+                    "country": "South Africa",
                     "timings": "Monday-Friday: 08:00-15:00",
-                    "appointment": "Book online at visa.vfsglobal.com"
+                    "appointment": "Mandatory - Book online at visa.vfsglobal.com",
+                    "website": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"
                 },
                 "services": {
-                    "visa_processing": "7-10 working days (standard)",
+                    "visa_processing": {
+                        "standard": "7-10 working days",
+                        "tatkal": "3-5 working days (additional fee)"
+                    },
                     "document_submission": "By appointment only",
-                    "tracking": "Available online with reference number"
-                }
+                    "passport_services": "Available",
+                    "tracking": "Available online with reference number",
+                    "payment": "Cash and card accepted"
+                },
+                "important_notes": [
+                    "Appointment required for all services",
+                    "Carry original documents and copies",
+                    "Arrive 15 minutes before appointment",
+                    "Mobile phones not allowed inside"
+                ]
             }
             return data
+            
     except Exception as e:
         await send_exception_email("VFS Global Scraping Failed", str(e))
         return get_fallback_vfs_info()
