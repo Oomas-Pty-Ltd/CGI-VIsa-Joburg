@@ -166,25 +166,64 @@ async def document_scan(request: DocumentScanRequest):
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=str(uuid.uuid4()),
-        system_message=f"""You are a document processing AI. Extract all information from this {request.document_type}.
-        Return the data in JSON format with fields like: full_name, date_of_birth, document_number, nationality, etc."""
+        system_message=f"""You are a document processing AI for Seva Setu Bot.
+
+TASK: Extract ALL information from this {request.document_type} document in ANY language.
+
+INSTRUCTIONS:
+1. Read the document text in its ORIGINAL language (Hindi, English, Afrikaans, Zulu, Tamil, etc.)
+2. Identify key fields: Name, Date of Birth, Document Number, Address, Nationality, Issue Date, Expiry Date, etc.
+3. Translate ALL extracted information to ENGLISH for form filling
+4. Return data in strict JSON format
+
+OUTPUT FORMAT (MUST be valid JSON):
+{{
+  "original_language": "detected language",
+  "document_type": "{request.document_type}",
+  "extracted_fields": {{
+    "full_name": "translated name",
+    "full_name_original": "original script name",
+    "date_of_birth": "YYYY-MM-DD",
+    "document_number": "extracted number",
+    "nationality": "country",
+    "address": "translated address",
+    "issue_date": "YYYY-MM-DD",
+    "expiry_date": "YYYY-MM-DD",
+    "place_of_birth": "city, country"
+  }},
+  "confidence_score": "high/medium/low",
+  "translation_notes": "any important notes"
+}}
+
+Be accurate and thorough."""
     ).with_model("openai", "gpt-5.2")
     
     image_content = ImageContent(image_base64=request.image_base64)
     user_message = UserMessage(
-        text=f"Extract all information from this {request.document_type} document.",
+        text=f"Extract all information from this {request.document_type}. Translate to English if needed.",
         file_contents=[image_content]
     )
     
     try:
         extracted_data = await chat_instance.send_message(user_message)
         
+        # Save extracted data to session
         await db.chat_sessions.update_one(
             {"id": request.session_id},
-            {"$set": {"extracted_data": extracted_data}}
+            {
+                "$set": {
+                    "extracted_data": extracted_data,
+                    "document_type": request.document_type,
+                    "extraction_timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            }
         )
         
-        return {"success": True, "extracted_data": extracted_data}
+        return {
+            "success": True,
+            "extracted_data": extracted_data,
+            "message": "Document processed successfully. Data extracted and translated to English for form filling."
+        }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
