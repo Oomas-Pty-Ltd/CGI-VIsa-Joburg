@@ -85,11 +85,14 @@ async def upload_document(
     return {"success": True, "document_id": file_id, "message": "Document uploaded"}
 
 @router.get("/documents")
-async def get_documents(payload: dict = Depends(verify_local_admin)):
+async def get_documents(limit: int = 100, payload: dict = Depends(verify_local_admin)):
     db = await get_database()
     company_id = payload['company_id']
     
-    documents = await db.documents.find({"company_id": company_id}, {"_id": 0}).to_list(1000)
+    documents = await db.documents.find(
+        {"company_id": company_id}, 
+        {"_id": 0}
+    ).limit(limit).to_list(limit)
     return documents
 
 @router.get("/chat-logs", response_model=List[ChatLog])
