@@ -37,14 +37,12 @@ class FormData(BaseModel):
     form_data: Dict[str, Any]
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    payload: dict = Depends(verify_token)
-):
+async def chat(request: ChatRequest):
     db = await get_database()
     
+    # Allow guest access without token verification for consular bot
     session_id = request.session_id or str(uuid.uuid4())
-    user_id = request.user_id or payload.get('user_id', 'anonymous')
+    user_id = request.user_id or "guest"
     company_id = request.company_id
     
     session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
