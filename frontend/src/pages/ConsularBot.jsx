@@ -38,7 +38,7 @@ export default function ConsularBot() {
     setMessages([
       {
         role: "assistant",
-        content: "🙏 Namaste! I'm Sevasetu, ready to help you with consular services. How may I assist you today?"
+        content: "🙏 Namaste! I'm Seva Setu Bot, ready to help you with consular services. How may I assist you today?"
       }
     ]);
   }, []);
