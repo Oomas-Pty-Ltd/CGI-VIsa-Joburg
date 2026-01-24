@@ -20,7 +20,7 @@ EXCEPTION_EMAIL = "mayurakole@example.com"
 async def scrape_cgi_joburg() -> Dict:
     """Real-time scraping of Consulate General of India Johannesburg website"""
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
             response = await client.get("https://www.cgijoburg.gov.in/")
             soup = BeautifulSoup(response.text, 'html.parser')
             
