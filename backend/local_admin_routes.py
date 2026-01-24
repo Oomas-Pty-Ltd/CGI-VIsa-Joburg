@@ -60,7 +60,8 @@ async def upload_document(
     db = await get_database()
     company_id = payload['company_id']
     
-    upload_dir = f"/app/uploads/{company_id}"
+    upload_base = os.environ.get('UPLOAD_DIR', '/app/uploads')
+    upload_dir = os.path.join(upload_base, company_id)
     os.makedirs(upload_dir, exist_ok=True)
     
     file_id = str(uuid.uuid4())
