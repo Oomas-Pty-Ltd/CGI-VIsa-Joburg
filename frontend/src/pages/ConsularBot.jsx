@@ -207,6 +207,14 @@ export default function ConsularBot() {
                     className="flex-1 min-h-[60px]"
                     data-testid="chat-input"
                   />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".jpg,.jpeg,.png,.pdf"
+                    style={{ display: 'none' }}
+                    data-testid="file-input"
+                  />
                   <div className="flex flex-col gap-2">
                     {browserSupportsSpeechRecognition && (
                       <Button
@@ -215,6 +223,7 @@ export default function ConsularBot() {
                           isRecording ? "bg-red-500 hover:bg-red-600 mic-active" : "bg-[#2E8B57] hover:bg-[#256B47]"
                         } text-white`}
                         data-testid="voice-btn"
+                        title="Voice Input"
                       >
                         <Mic className="w-5 h-5" />
                       </Button>
@@ -223,13 +232,23 @@ export default function ConsularBot() {
                       onClick={() => setShowCamera(true)}
                       className="bg-[#1A2E40] hover:bg-[#132230] text-white"
                       data-testid="camera-btn"
+                      title="Scan Document with Camera"
                     >
                       <Camera className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+                      data-testid="upload-btn"
+                      title="Upload Document (JPG, PNG, PDF)"
+                    >
+                      <FileText className="w-5 h-5" />
                     </Button>
                     <Button
                       onClick={handleSend}
                       className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
                       data-testid="send-btn"
+                      title="Send Message"
                     >
                       <Send className="w-5 h-5" />
                     </Button>
