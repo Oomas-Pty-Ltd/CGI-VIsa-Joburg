@@ -38,7 +38,7 @@ export default function ConsularBot() {
     setMessages([
       {
         role: "assistant",
-        content: "Namaste! I'm Sarthak, your consular assistant. I'll guide you through your application in 4 simple steps. Let's start with your basic information. May I have your full name?"
+        content: "🙏 Namaste! Welcome to the Consulate General of India, Johannesburg. I'm Sarthak, your dedicated consular assistant. How may I help you with your consular services today? I can assist you with passport applications, visa services, OCI cards, and document attestation."
       }
     ]);
   }, []);
