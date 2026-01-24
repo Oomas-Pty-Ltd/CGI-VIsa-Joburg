@@ -24,6 +24,7 @@ dnspython==2.8.0
 ecdsa==0.19.1
 email-validator==2.3.0
 emergentintegrations==0.1.0
+en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl#sha256=293e9547a655b25499198ab15a525b05b9407a75f10255e405e8c3854329ab63
 fastapi==0.110.1
 fastuuid==0.14.0
 filelock==3.20.3
@@ -103,7 +104,6 @@ python-multipart==0.0.21
 pytokens==0.3.0
 pytz==2025.2
 PyYAML==6.0.3
-redis==7.1.0
 referencing==0.37.0
 regex==2026.1.15
 reportlab==4.4.9
