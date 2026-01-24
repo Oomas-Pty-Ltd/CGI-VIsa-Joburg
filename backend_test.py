@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend API Testing for Sarthak-AI Sovereign
-Multi-tenant consular automation platform testing
+Comprehensive Backend API Testing for Seva Setu Bot
+Consulate General of India Johannesburg - Multi-language Bot Testing
 """
 
 import requests
 import sys
 import json
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-class SarthakAPITester:
+class SevaSetuBotTester:
     def __init__(self, base_url="https://secure-consul.preview.emergentagent.com/api"):
         self.base_url = base_url
         self.super_admin_token = None
