@@ -95,6 +95,54 @@ export default function ConsularBot() {
     }
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Invalid file format. Please upload JPG, PNG, or PDF only.');
+      return;
+    }
+
+    // Validate file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File size exceeds 10MB limit.');
+      return;
+    }
+
+    toast.success(`Document "${file.name}" uploaded successfully!`);
+    
+    // Convert to base64 and process
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
+      
+      try {
+        const response = await axios.post(`${API}/consular/document-scan`, {
+          image_base64: base64,
+          document_type: 'passport',
+          session_id: sessionId
+        });
+        
+        if (response.data.success) {
+          toast.success('Document processed! Data extracted and translated.');
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Document scanned successfully! \\n\\n${response.data.extracted_data}` }
+          ]);
+        }
+      } catch (error) {
+        toast.error('Document processing failed. Please try again.');
+      }
+    };
+    reader.readAsDataURL(file);
+    
+    // Reset input
+    e.target.value = '';
+  };
+
   const handleCapture = () => {
     const imageSrc = webcamRef.current.getScreenshot();
     if (imageSrc) {
