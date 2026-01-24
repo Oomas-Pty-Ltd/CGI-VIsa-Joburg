@@ -167,10 +167,11 @@ async def get_analytics(
         "created_at": {"$gte": start_date}
     })
     
-    sessions = await db.chat_sessions.find({
-        "company_id": company_id,
-        "created_at": {"$gte": start_date}
-    }, {"_id": 0}).to_list(10000)
+    sessions = await db.chat_sessions.find(
+        {"company_id": company_id,
+         "created_at": {"$gte": start_date}},
+        {"_id": 0}
+    ).limit(1000).to_list(1000)
     
     total_messages = sum(len(s.get('messages', [])) for s in sessions)
     
