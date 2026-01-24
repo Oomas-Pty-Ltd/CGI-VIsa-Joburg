@@ -137,8 +137,8 @@ export default function ConsularBot() {
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
               <img
-                src="https://images.pexels.com/photos/7709109/pexels-photo-7709109.jpeg"
-                alt="Sarthak AI Assistant"
+                src="https://images.unsplash.com/photo-1705999942286-056551a9144d?q=85"
+                alt="Sarthak AI Consular Assistant"
                 className="w-32 h-32 rounded-full mx-auto mb-4 object-cover border-4 border-[#E06F2C] avatar-pulse"
               />
               <h2 className="text-2xl font-bold text-[#1A2E40] mb-2">Sarthak AI</h2>
@@ -146,7 +146,12 @@ export default function ConsularBot() {
                 <span className="w-3 h-3 bg-[#2E8B57] rounded-full animate-pulse"></span>
                 <span className="text-sm text-gray-600">Online</span>
               </div>
-              <p className="text-sm text-gray-600 mt-4">Multilingual Consular Assistant</p>
+              <p className="text-sm text-gray-600 mt-4">Consulate General of India</p>
+              <p className="text-xs text-gray-500 mt-1">Johannesburg, South Africa</p>
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <p className="text-xs text-gray-500">Multilingual Support</p>
+                <p className="text-xs font-medium text-[#E06F2C]">Hindi | English | Zulu | Afrikaans</p>
+              </div>
             </div>
           </div>
 
