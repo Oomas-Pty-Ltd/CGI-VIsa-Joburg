@@ -124,10 +124,7 @@ async def chat(request: ChatRequest):
     )
 
 @router.post("/document-scan")
-async def document_scan(
-    request: DocumentScanRequest,
-    payload: dict = Depends(verify_token)
-):
+async def document_scan(request: DocumentScanRequest):
     db = await get_database()
     
     api_key = os.environ.get('EMERGENT_LLM_KEY')
@@ -161,10 +158,7 @@ async def document_scan(
         )
 
 @router.post("/form-submit")
-async def form_submit(
-    form: FormData,
-    payload: dict = Depends(verify_token)
-):
+async def form_submit(form: FormData):
     db = await get_database()
     
     await db.chat_sessions.update_one(
@@ -182,10 +176,7 @@ async def form_submit(
     return {"success": True, "message": "Form submitted successfully"}
 
 @router.get("/session/{session_id}")
-async def get_session(
-    session_id: str,
-    payload: dict = Depends(verify_token)
-):
+async def get_session(session_id: str):
     db = await get_database()
     session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
     
@@ -200,7 +191,6 @@ async def get_session(
 @router.post("/voice-input")
 async def voice_input(
     audio_file: UploadFile = File(...),
-    session_id: str = None,
-    payload: dict = Depends(verify_token)
+    session_id: str = None
 ):
     return {"success": True, "message": "Voice processing (placeholder for now)"}
