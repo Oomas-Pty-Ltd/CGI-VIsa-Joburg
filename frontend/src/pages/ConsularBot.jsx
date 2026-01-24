@@ -137,12 +137,14 @@ export default function ConsularBot() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              <img
-                src="https://images.unsplash.com/photo-1705999942286-056551a9144d?q=85"
-                alt="Sevasetu Consular Assistant"
-                className="w-32 h-32 rounded-full mx-auto mb-4 object-cover border-4 border-[#E06F2C] avatar-pulse"
-              />
-              <h2 className="text-2xl font-bold text-[#1A2E40] mb-2">Sevasetu</h2>
+              <div className="w-32 h-32 rounded-full mx-auto mb-4 bg-gradient-to-br from-orange-100 to-orange-50 flex items-center justify-center border-4 border-[#E06F2C] avatar-pulse shadow-lg">
+                <img
+                  src="https://images.unsplash.com/photo-1575516662637-99214ea59f23?q=85"
+                  alt="Namaste - Seva Setu Bot"
+                  className="w-24 h-24 object-contain"
+                />
+              </div>
+              <h2 className="text-2xl font-bold text-[#1A2E40] mb-2">Seva Setu Bot</h2>
               <p className="text-lg text-[#E06F2C] font-semibold mb-3">🙏 Namaste</p>
               <div className="flex items-center justify-center gap-2 mb-4">
                 <span className="w-3 h-3 bg-[#2E8B57] rounded-full animate-pulse"></span>
