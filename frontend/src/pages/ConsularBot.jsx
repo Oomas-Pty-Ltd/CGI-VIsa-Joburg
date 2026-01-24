@@ -103,6 +103,22 @@ export default function ConsularBot() {
     }
   };
 
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+      if (allowedTypes.includes(file.type)) {
+        toast.success(`File "${file.name}" uploaded successfully!`);
+        // Here you would typically process the file
+        // For now, we'll just show a success message
+      } else {
+        toast.error("Please upload only JPG, PNG, or PDF files.");
+      }
+    }
+    // Reset the input
+    event.target.value = '';
+  };
+
   const currentStepIndex = STEPS.findIndex((s) => s.value === currentStep);
 
   return (
