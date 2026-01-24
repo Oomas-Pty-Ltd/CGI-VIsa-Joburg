@@ -6,7 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 security = HTTPBearer()
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'sarthak_ai_sovereign_secret_key_2025')
+JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = 'HS256'
 
 def create_token(user_id: str, user_type: str, company_id: str = None) -> str:
