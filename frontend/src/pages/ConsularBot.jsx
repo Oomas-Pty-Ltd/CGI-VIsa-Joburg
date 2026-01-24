@@ -225,7 +225,22 @@ export default function ConsularBot() {
                           : "bg-white border border-gray-200 text-[#1A2E40]"
                       }`}
                     >
-                      {msg.content}
+                      {msg.role === "assistant" ? (
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkGfm]}
+                          className="prose prose-sm max-w-none
+                            prose-headings:text-[#1A2E40] prose-headings:font-bold
+                            prose-p:text-[#1A2E40] prose-p:my-2
+                            prose-ul:my-2 prose-ol:my-2
+                            prose-li:text-[#1A2E40]
+                            prose-strong:text-[#E06F2C] prose-strong:font-semibold
+                            prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline"
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        msg.content
+                      )}
                     </div>
                   </div>
                 ))}
