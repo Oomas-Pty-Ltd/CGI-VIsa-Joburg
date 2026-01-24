@@ -54,19 +54,18 @@ export default function ConsularBot() {
 
     const userMessage = { role: "user", content: input };
     setMessages((prev) => [...prev, userMessage]);
+    const messageText = input;
     setInput("");
     resetTranscript();
 
     try {
-      const token = localStorage.getItem("token");
       const response = await axios.post(
         `${API}/consular/chat`,
         {
-          message: input,
+          message: messageText,
           session_id: sessionId,
           user_id: "guest"
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
 
       if (!sessionId) {
@@ -79,7 +78,9 @@ export default function ConsularBot() {
       ]);
       setCurrentStep(response.data.step);
     } catch (error) {
-      toast.error("Failed to send message");
+      console.error("Chat error:", error);
+      toast.error("Failed to send message. Please try again.");
+      setMessages((prev) => prev.slice(0, -1));
     }
   };
 
