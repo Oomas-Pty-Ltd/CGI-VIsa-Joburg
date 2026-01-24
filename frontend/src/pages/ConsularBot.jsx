@@ -25,6 +25,7 @@ export default function ConsularBot() {
   const [isRecording, setIsRecording] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const webcamRef = React.useRef(null);
+  const fileInputRef = useRef(null);
   
   const { transcript, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
 
