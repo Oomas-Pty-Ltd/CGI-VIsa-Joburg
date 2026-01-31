@@ -161,6 +161,16 @@ Always cite sources, use proper formatting, and ask for feedback."""
             detail=f"AI service error: {str(e)}"
         )
     
+    # Generate voice response if requested
+    audio_base64 = None
+    if request.enable_voice:
+        try:
+            # Detect language from message
+            lang_code = request.language or "en"
+            audio_base64 = await voice_service.text_to_speech(bot_response, lang_code)
+        except Exception as e:
+            print(f"Voice generation failed: {e}")
+    
     message_entry = {
         "id": str(uuid.uuid4()),
         "role": "user",
@@ -172,7 +182,8 @@ Always cite sources, use proper formatting, and ask for feedback."""
         "id": str(uuid.uuid4()),
         "role": "assistant",
         "content": bot_response,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "has_audio": audio_base64 is not None
     }
     
     await db.chat_sessions.update_one(
@@ -185,7 +196,8 @@ Always cite sources, use proper formatting, and ask for feedback."""
     return ChatResponse(
         session_id=session_id,
         response=bot_response,
-        step=current_step
+        step=current_step,
+        audio_base64=audio_base64
     )
 
 @router.post("/document-scan")
