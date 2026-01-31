@@ -10,6 +10,7 @@ from auth_utils import verify_token
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from presidio_service import mask_pii
 from knowledge_scraper import get_realtime_knowledge, search_knowledge
+from voice_service import voice_service
 from dotenv import load_dotenv
 
 load_dotenv()
