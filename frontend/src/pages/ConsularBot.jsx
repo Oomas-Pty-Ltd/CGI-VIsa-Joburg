@@ -223,19 +223,35 @@ export default function ConsularBot() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              <div className="w-32 h-32 rounded-full mx-auto mb-4 bg-gradient-to-br from-orange-100 to-orange-50 flex items-center justify-center border-4 border-[#E06F2C] avatar-pulse shadow-lg">
+              <div className={`w-32 h-32 rounded-full mx-auto mb-4 bg-gradient-to-br from-orange-100 to-orange-50 flex items-center justify-center border-4 ${
+                isSpeaking ? 'border-[#2E8B57] shadow-lg shadow-green-400 animate-pulse' : 'border-[#E06F2C]'
+              } avatar-pulse shadow-lg transition-all duration-300`}>
                 <img
                   src="https://images.unsplash.com/photo-1575516662637-99214ea59f23?q=85"
                   alt="Namaste - Seva Setu Bot"
-                  className="w-24 h-24 object-contain"
+                  className={`w-24 h-24 object-contain ${isSpeaking ? 'scale-110' : 'scale-100'} transition-transform duration-300`}
                 />
               </div>
               <h2 className="text-2xl font-bold text-[#1A2E40] mb-2">Seva Setu Bot</h2>
               <p className="text-lg text-[#E06F2C] font-semibold mb-3">🙏 Namaste</p>
               <div className="flex items-center justify-center gap-2 mb-4">
-                <span className="w-3 h-3 bg-[#2E8B57] rounded-full animate-pulse"></span>
-                <span className="text-sm text-gray-600">Ready to Help</span>
+                <span className={`w-3 h-3 ${isSpeaking ? 'bg-[#2E8B57]' : 'bg-[#2E8B57]'} rounded-full animate-pulse`}></span>
+                <span className="text-sm text-gray-600">{isSpeaking ? "Speaking..." : "Ready to Help"}</span>
               </div>
+              
+              {/* Voice Toggle */}
+              <div className="mb-4 pt-4 border-t border-gray-200">
+                <label className="flex items-center justify-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableVoice}
+                    onChange={(e) => setEnableVoice(e.target.checked)}
+                    className="w-4 h-4 text-[#E06F2C] rounded focus:ring-[#E06F2C]"
+                  />
+                  <span className="text-sm font-medium text-[#1A2E40]">🔊 Enable Voice Response</span>
+                </label>
+              </div>
+
               <div className="pt-4 border-t border-gray-200">
                 <p className="text-xs text-gray-500 mb-1">Consulate General of India</p>
                 <p className="text-xs text-gray-500 mb-3">Johannesburg, South Africa</p>
