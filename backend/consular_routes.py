@@ -23,11 +23,14 @@ class ChatRequest(BaseModel):
     company_id: Optional[str] = None
     user_id: Optional[str] = None
     image_base64: Optional[str] = None
+    enable_voice: Optional[bool] = False
+    language: Optional[str] = "en"
 
 class ChatResponse(BaseModel):
     session_id: str
     response: str
     step: str
+    audio_base64: Optional[str] = None
 
 class DocumentScanRequest(BaseModel):
     image_base64: str
