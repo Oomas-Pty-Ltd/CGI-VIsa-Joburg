@@ -65,12 +65,19 @@ export default function ConsularBot() {
     resetTranscript();
 
     try {
+      // Detect language from input
+      const isHindi = /[\u0900-\u097F]/.test(messageText);
+      const isTamil = /[\u0B80-\u0BFF]/.test(messageText);
+      const langCode = isHindi ? "hi" : isTamil ? "ta" : "en";
+
       const response = await axios.post(
         `${API}/consular/chat`,
         {
           message: messageText,
           session_id: sessionId,
-          user_id: "guest"
+          user_id: "guest",
+          enable_voice: enableVoice,
+          language: langCode
         }
       );
 
@@ -78,15 +85,40 @@ export default function ConsularBot() {
         setSessionId(response.data.session_id);
       }
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: response.data.response }
-      ]);
+      const botResponse = { role: "assistant", content: response.data.response };
+      setMessages((prev) => [...prev, botResponse]);
       setCurrentStep(response.data.step);
+
+      // Play audio response if available
+      if (response.data.audio_base64 && enableVoice) {
+        playAudio(response.data.audio_base64);
+      }
     } catch (error) {
       console.error("Chat error:", error);
       toast.error("Failed to send message. Please try again.");
       setMessages((prev) => prev.slice(0, -1));
+    }
+  };
+
+  const playAudio = (audioBase64) => {
+    try {
+      setIsSpeaking(true);
+      const audio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
+      audioRef.current = audio;
+      
+      audio.onended = () => {
+        setIsSpeaking(false);
+      };
+      
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        toast.error("Audio playback failed");
+      };
+      
+      audio.play();
+    } catch (error) {
+      setIsSpeaking(false);
+      console.error("Audio play error:", error);
     }
   };
 
