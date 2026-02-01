@@ -13,11 +13,12 @@ Multi-tenant consular automation platform for Indian and South African citizens.
   - Company-specific configuration
   - Document uploads, feature toggles
 
-### 2. Consular Bot Interface (`/bot`)
-- Professional Indian avatar with "Seva Setu Bot" branding
+### 2. Consular Bot Interface (`/consular`)
+- Friendly illustrated Indian avatar in Namaste pose
+- "Here to help you, always!" tagline
 - Progress stepper: Register → Upload → Verify → Sign
 - Voice toggle for TTS responses
-- Welcome message in Namaste style
+- Compliance footer (GDPR, DPDA, POPIA) on bot page only
 
 ### 3. AI-Powered Chat (GPT-5.2)
 - Real-time AI responses with typing animation
@@ -40,46 +41,12 @@ Multi-tenant consular automation platform for Indian and South African citizens.
 - Voice responses when toggle enabled
 - Multi-language support
 
-## Architecture
-
-```
-/app/
-├── backend/
-│   ├── server.py          # FastAPI app
-│   ├── consular_routes.py # Chat, document processing
-│   ├── super_admin_routes.py
-│   ├── local_admin_routes.py
-│   ├── knowledge_scraper.py
-│   └── voice_service.py
-├── frontend/
-│   ├── src/pages/
-│   │   ├── LandingPage.jsx
-│   │   ├── ConsularBot.jsx
-│   │   ├── SuperAdminDashboard.jsx
-│   │   └── LocalAdminDashboard.jsx
-```
-
 ## Test Status (December 2025)
 - Backend: 100% (13/13 tests passed)
 - Frontend: 100% (all UI components verified)
 - Test file: `/app/backend/tests/test_seva_setu_api.py`
 
-## Integrations
-- **OpenAI GPT-5.2** - via Emergent LLM Key
-- **ElevenLabs TTS** - Voice synthesis
-- **MongoDB** - Database
-
-## Known Limitations
-- Talking avatar shows static image (Akool.com API key needed for lip-sync)
-- Some official website scraping has SSL issues (fallback in place)
-
-## Upcoming Tasks (P1-P2)
-1. Language selector dropdown UI
-2. Facebook & Instagram integration
-3. PDF/CSV analytics reports
-4. Docker packaging for KVM deployment
-
 ## URLs
 - Preview: https://consular-genius.preview.emergentagent.com
-- Bot: https://consular-genius.preview.emergentagent.com/bot
+- Bot: https://consular-genius.preview.emergentagent.com/consular
 - Super Admin: https://consular-genius.preview.emergentagent.com/super-admin/login
