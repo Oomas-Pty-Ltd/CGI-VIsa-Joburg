@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, Camera, Send, FileText, Check } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -9,6 +9,12 @@ import Webcam from "react-webcam";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { 
+  BOT_CONFIG, 
+  GREETING_MESSAGE, 
+  ADVISORY_MESSAGES, 
+  SUPPORTED_LANGUAGES 
+} from "../config/botMessages";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
