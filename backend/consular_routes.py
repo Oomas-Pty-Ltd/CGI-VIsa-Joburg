@@ -755,8 +755,237 @@ async def voice_input(
 # INTERACTIVE FORM-FILLING SYSTEM
 # =============================================================================
 
+# Miscellaneous services types (from official CGI form)
+MISC_SERVICE_TYPES = [
+    "Birth Certificate",
+    "Marriage Certificate", 
+    "Death Certificate",
+    "NRI Certificate",
+    "One & the Same Person Certificate",
+    "Life Certificate",
+    "Attestation",
+    "NOC (No Objection Certificate)",
+    "GPA Certificate",
+    "PCC (Police Clearance - Foreign National)"
+]
+
 # Form templates for different services
 FORM_TEMPLATES = {
+    # =========================================================================
+    # MISCELLANEOUS SERVICES FORM (Official CGI Johannesburg Form)
+    # =========================================================================
+    "misc_services": {
+        "name": "Miscellaneous Services Application",
+        "description": "Official CGI Johannesburg form for Birth/Marriage/Death/NRI/One & the Same/Life/Attestation/NOC/GPA Certificate/PCC",
+        "total_steps": 20,
+        "fee_range": "ZAR 225 - 495",
+        "processing_time": "1-4 weeks",
+        "fields": [
+            # Service Selection
+            {"id": "service_type", "label": "Service Required (Birth/Marriage/Death/NRI/One & the Same/Life/Attestation/NOC/GPA Certificate/PCC)", "source": "manual", "required": True, "type": "select", "options": MISC_SERVICE_TYPES},
+            # Applicant Details
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "nationality", "label": "Nationality of Applicant", "source": "profile.nationality", "required": True},
+            {"id": "father_name_nationality", "label": "Full Name of Father & Nationality", "source": "profile.father_name", "required": True, "note": "Format: Name, Nationality"},
+            {"id": "mother_name_nationality", "label": "Full Name of Mother & Nationality", "source": "profile.mother_name", "required": True, "note": "Format: Name, Nationality"},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "place_country_birth", "label": "Place & Country of Birth", "source": "profile.place_of_birth", "required": True},
+            {"id": "spouse_name_nationality", "label": "Name of Spouse & Nationality", "source": "profile.spouse_name", "required": False},
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "profession_employer", "label": "Profession/Employer's Details", "source": "profile.occupation", "required": True},
+            # Visa/Immigration Details
+            {"id": "visa_immigration_status", "label": "Visa / Immigration Status", "source": "manual", "required": True},
+            {"id": "permanent_address_india", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            # Passport Details
+            {"id": "passport_number", "label": "Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "passport_issue_date", "label": "Passport Date of Issue", "source": "document.passport.issue_date", "required": True},
+            {"id": "passport_validity", "label": "Passport Validity/Expiry Date", "source": "document.passport.expiry_date", "required": True},
+            {"id": "passport_place_of_issue", "label": "Passport Place of Issue", "source": "manual", "required": True},
+            # Registration Details
+            {"id": "mission_registration", "label": "Are you registered with Indian Mission? (If yes, provide registration number and date)", "source": "manual", "required": False},
+            # Declaration
+            {"id": "declaration_place", "label": "Declaration Place (City where you're signing)", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # BIRTH CERTIFICATE (Using Misc Form)
+    # =========================================================================
+    "birth_certificate": {
+        "name": "Birth Certificate Application",
+        "description": "Registration of birth for Indian citizens born abroad",
+        "total_steps": 22,
+        "fee": "ZAR 405",
+        "processing_time": "1-4 weeks",
+        "fields": [
+            # Service pre-selected
+            {"id": "service_type", "label": "Service Type", "source": "auto", "required": True, "default": "Birth Certificate"},
+            # Child Details
+            {"id": "child_full_name", "label": "Child's Full Name", "source": "manual", "required": True},
+            {"id": "child_dob", "label": "Child's Date of Birth", "source": "manual", "required": True},
+            {"id": "child_place_birth", "label": "Child's Place & Country of Birth", "source": "manual", "required": True},
+            {"id": "child_gender", "label": "Child's Gender", "source": "manual", "required": True},
+            # Father (Applicant) Details
+            {"id": "father_name", "label": "Father's Full Name", "source": "profile.name", "required": True},
+            {"id": "father_nationality", "label": "Father's Nationality", "source": "profile.nationality", "required": True},
+            {"id": "father_passport", "label": "Father's Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "father_passport_issue", "label": "Father's Passport Issue Date", "source": "document.passport.issue_date", "required": True},
+            {"id": "father_passport_expiry", "label": "Father's Passport Expiry Date", "source": "document.passport.expiry_date", "required": True},
+            # Mother Details
+            {"id": "mother_name", "label": "Mother's Full Name", "source": "family.spouse.name", "required": True},
+            {"id": "mother_nationality", "label": "Mother's Nationality", "source": "manual", "required": True},
+            {"id": "mother_passport", "label": "Mother's Passport Number", "source": "family.spouse.passport_number", "required": False},
+            # Parents Marriage Details
+            {"id": "marriage_date", "label": "Parents' Marriage Date", "source": "document.marriage_certificate.issue_date", "required": True},
+            {"id": "marriage_place", "label": "Parents' Marriage Place", "source": "manual", "required": True},
+            # Contact Details
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "permanent_address_india", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            # Immigration & Declaration
+            {"id": "visa_status", "label": "Visa / Immigration Status", "source": "manual", "required": True},
+            {"id": "mission_registration", "label": "Indian Mission Registration Number (if registered)", "source": "manual", "required": False},
+            {"id": "declaration_place", "label": "Declaration Place", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # MARRIAGE CERTIFICATE (Using Misc Form)
+    # =========================================================================
+    "marriage_certificate": {
+        "name": "Marriage Certificate Application",
+        "description": "Registration of marriage for Indian citizens",
+        "total_steps": 24,
+        "fee": "ZAR 492",
+        "processing_time": "1-2 weeks",
+        "fields": [
+            {"id": "service_type", "label": "Service Type", "source": "auto", "required": True, "default": "Marriage Certificate"},
+            # Groom Details
+            {"id": "groom_name", "label": "Groom's Full Name", "source": "profile.name", "required": True},
+            {"id": "groom_nationality", "label": "Groom's Nationality", "source": "profile.nationality", "required": True},
+            {"id": "groom_dob", "label": "Groom's Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "groom_place_birth", "label": "Groom's Place of Birth", "source": "profile.place_of_birth", "required": True},
+            {"id": "groom_father_name", "label": "Groom's Father's Name & Nationality", "source": "profile.father_name", "required": True},
+            {"id": "groom_mother_name", "label": "Groom's Mother's Name & Nationality", "source": "profile.mother_name", "required": True},
+            {"id": "groom_passport", "label": "Groom's Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "groom_passport_issue", "label": "Groom's Passport Issue Date", "source": "document.passport.issue_date", "required": True},
+            {"id": "groom_passport_expiry", "label": "Groom's Passport Expiry Date", "source": "document.passport.expiry_date", "required": True},
+            # Bride Details
+            {"id": "bride_name", "label": "Bride's Full Name", "source": "family.spouse.name", "required": True},
+            {"id": "bride_nationality", "label": "Bride's Nationality", "source": "manual", "required": True},
+            {"id": "bride_dob", "label": "Bride's Date of Birth", "source": "family.spouse.dob", "required": True},
+            {"id": "bride_place_birth", "label": "Bride's Place of Birth", "source": "manual", "required": True},
+            {"id": "bride_father_name", "label": "Bride's Father's Name & Nationality", "source": "manual", "required": True},
+            {"id": "bride_mother_name", "label": "Bride's Mother's Name & Nationality", "source": "manual", "required": True},
+            {"id": "bride_passport", "label": "Bride's Passport Number", "source": "family.spouse.passport_number", "required": False},
+            # Marriage Details
+            {"id": "marriage_date", "label": "Date of Marriage", "source": "manual", "required": True},
+            {"id": "marriage_place", "label": "Place of Marriage", "source": "manual", "required": True},
+            # Contact & Address
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "permanent_address_india", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            {"id": "declaration_place", "label": "Declaration Place", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # DEATH CERTIFICATE (Using Misc Form)
+    # =========================================================================
+    "death_certificate": {
+        "name": "Death Certificate Application",
+        "description": "Registration of death for Indian citizens who died abroad",
+        "total_steps": 18,
+        "fee": "ZAR 405",
+        "processing_time": "1-4 weeks",
+        "fields": [
+            {"id": "service_type", "label": "Service Type", "source": "auto", "required": True, "default": "Death Certificate"},
+            # Deceased Person Details
+            {"id": "deceased_name", "label": "Deceased Person's Full Name", "source": "manual", "required": True},
+            {"id": "deceased_nationality", "label": "Deceased's Nationality", "source": "manual", "required": True},
+            {"id": "deceased_dob", "label": "Deceased's Date of Birth", "source": "manual", "required": True},
+            {"id": "deceased_date_of_death", "label": "Date of Death", "source": "manual", "required": True},
+            {"id": "deceased_place_of_death", "label": "Place of Death", "source": "manual", "required": True},
+            {"id": "deceased_cause_of_death", "label": "Cause of Death", "source": "manual", "required": True},
+            {"id": "deceased_passport", "label": "Deceased's Passport Number", "source": "manual", "required": True},
+            {"id": "deceased_father_name", "label": "Deceased's Father's Name", "source": "manual", "required": True},
+            {"id": "deceased_mother_name", "label": "Deceased's Mother's Name", "source": "manual", "required": True},
+            # Applicant Details
+            {"id": "applicant_name", "label": "Applicant's Full Name", "source": "profile.name", "required": True},
+            {"id": "relationship_to_deceased", "label": "Relationship to Deceased", "source": "manual", "required": True},
+            {"id": "applicant_passport", "label": "Applicant's Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "permanent_address_india", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            {"id": "declaration_place", "label": "Declaration Place", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # ATTESTATION SERVICE (Using Misc Form)
+    # =========================================================================
+    "attestation": {
+        "name": "Document Attestation Application",
+        "description": "Attestation of documents by the Consulate",
+        "total_steps": 16,
+        "fee": "ZAR 225-417 per page",
+        "processing_time": "1-2 weeks",
+        "fields": [
+            {"id": "service_type", "label": "Service Type", "source": "auto", "required": True, "default": "Attestation"},
+            {"id": "document_type", "label": "Type of Document to be Attested", "source": "manual", "required": True, "note": "e.g., Educational certificate, Power of Attorney, Affidavit, etc."},
+            {"id": "number_of_pages", "label": "Number of Pages to be Attested", "source": "manual", "required": True},
+            {"id": "purpose_of_attestation", "label": "Purpose of Attestation", "source": "manual", "required": True},
+            # Applicant Details
+            {"id": "full_name", "label": "Applicant's Full Name", "source": "profile.name", "required": True},
+            {"id": "nationality", "label": "Nationality", "source": "profile.nationality", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "father_name_nationality", "label": "Father's Name & Nationality", "source": "profile.father_name", "required": True},
+            {"id": "mother_name_nationality", "label": "Mother's Name & Nationality", "source": "profile.mother_name", "required": True},
+            {"id": "passport_number", "label": "Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "passport_validity", "label": "Passport Validity", "source": "document.passport.expiry_date", "required": True},
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "permanent_address_india", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            {"id": "declaration_place", "label": "Declaration Place", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # LIFE CERTIFICATE (Using Misc Form)
+    # =========================================================================
+    "life_certificate": {
+        "name": "Life Certificate Application",
+        "description": "Life certificate for pensioners",
+        "total_steps": 14,
+        "fee": "ZAR 225",
+        "processing_time": "1 week",
+        "fields": [
+            {"id": "service_type", "label": "Service Type", "source": "auto", "required": True, "default": "Life Certificate"},
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "nationality", "label": "Nationality", "source": "profile.nationality", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "father_name_nationality", "label": "Father's Name & Nationality", "source": "profile.father_name", "required": True},
+            {"id": "mother_name_nationality", "label": "Mother's Name & Nationality", "source": "profile.mother_name", "required": True},
+            {"id": "pension_account_number", "label": "Pension Account Number / PPO Number", "source": "manual", "required": True},
+            {"id": "pension_disbursing_authority", "label": "Pension Disbursing Authority/Bank", "source": "manual", "required": True},
+            {"id": "passport_number", "label": "Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "passport_validity", "label": "Passport Validity", "source": "document.passport.expiry_date", "required": True},
+            {"id": "present_address_sa", "label": "Present Address in South Africa", "source": "profile.current_address", "required": True},
+            {"id": "phone_number", "label": "Phone Number", "source": "profile.mobile", "required": True},
+            {"id": "email_address", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "declaration_place", "label": "Declaration Place", "source": "manual", "required": True}
+        ]
+    },
+    
+    # =========================================================================
+    # PASSPORT SERVICES
+    # =========================================================================
     "passport_renewal": {
         "name": "Passport Renewal Application",
         "total_steps": 12,
@@ -818,26 +1047,6 @@ FORM_TEMPLATES = {
             {"id": "email", "label": "Email Address", "source": "profile.email", "required": True},
             {"id": "mobile", "label": "Mobile Number", "source": "profile.mobile", "required": True},
             {"id": "emergency_contact", "label": "Emergency Contact", "source": "profile.emergency_contact", "required": True}
-        ]
-    },
-    "birth_registration": {
-        "name": "Child Birth Registration",
-        "total_steps": 14,
-        "fields": [
-            {"id": "child_name", "label": "Child's Full Name", "source": "manual", "required": True},
-            {"id": "child_dob", "label": "Child's Date of Birth", "source": "manual", "required": True},
-            {"id": "child_place_of_birth", "label": "Place of Birth", "source": "manual", "required": True},
-            {"id": "child_gender", "label": "Child's Gender", "source": "manual", "required": True},
-            {"id": "father_name", "label": "Father's Name", "source": "profile.name", "required": True},
-            {"id": "father_passport", "label": "Father's Passport Number", "source": "profile.passport_number", "required": True},
-            {"id": "father_nationality", "label": "Father's Nationality", "source": "profile.nationality", "required": True},
-            {"id": "mother_name", "label": "Mother's Name", "source": "family.spouse.name", "required": True},
-            {"id": "mother_passport", "label": "Mother's Passport Number", "source": "family.spouse.passport_number", "required": False},
-            {"id": "mother_nationality", "label": "Mother's Nationality", "source": "manual", "required": True},
-            {"id": "marriage_date", "label": "Parents' Marriage Date", "source": "document.marriage_certificate.issue_date", "required": True},
-            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
-            {"id": "email", "label": "Email Address", "source": "profile.email", "required": True},
-            {"id": "mobile", "label": "Mobile Number", "source": "profile.mobile", "required": True}
         ]
     },
     "pcc_application": {
