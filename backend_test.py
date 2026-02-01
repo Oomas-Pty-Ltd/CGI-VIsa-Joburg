@@ -294,7 +294,7 @@ class SevaSetuBotTester:
 
     def run_all_tests(self):
         """Run comprehensive test suite"""
-        print("🚀 Starting Sarthak-AI Sovereign API Testing...")
+        print("🚀 Starting Seva Setu Bot API Testing...")
         print("=" * 60)
         
         # Core API Tests
