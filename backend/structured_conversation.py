@@ -672,7 +672,7 @@ async def handle_service_details(session_id: str, user_input: str, conversation:
     
     elif waiting_for == "applicant_name":
         if len(user_input) > 2:
-            collected_data["applicant_name"] = user_message.strip()
+            collected_data["applicant_name"] = user_input.title()  # Use user_input, not user_message
             await update_conversation(session_id, {"collected_data": collected_data})
             service_id = conversation.get("selected_service", {}).get("id", "")
             return await get_document_checklist_message(conversation, service_id, config)
