@@ -659,10 +659,22 @@ export default function ConsularBot() {
                     Create Profile
                   </Button>
                 ) : (
-                  <div className="mt-2 p-3 bg-green-50 rounded-lg border border-green-200" data-testid="profile-info">
-                    <p className="text-xs font-semibold text-green-800 uppercase">Your Profile</p>
-                    <p className="text-sm font-bold text-green-700">{userProfile.name}</p>
-                    <p className="text-xs text-green-600">ID: {userProfile.profile_id}</p>
+                  <div className="mt-2 space-y-2">
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200" data-testid="profile-info">
+                      <p className="text-xs font-semibold text-green-800 uppercase">Your Profile</p>
+                      <p className="text-sm font-bold text-green-700">{userProfile.name}</p>
+                      <p className="text-xs text-green-600">ID: {userProfile.profile_id}</p>
+                    </div>
+                    
+                    {/* Start Application Button */}
+                    <Button
+                      onClick={() => setShowServiceSelector(true)}
+                      className="w-full bg-gradient-to-r from-[#E06F2C] to-[#FF8C42] hover:from-[#C55D20] hover:to-[#E06F2C] text-white"
+                      data-testid="start-application-btn"
+                    >
+                      <FileText className="w-4 h-4 mr-2" />
+                      Start Application
+                    </Button>
                   </div>
                 )}
               </div>
