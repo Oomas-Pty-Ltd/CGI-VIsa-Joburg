@@ -429,16 +429,27 @@ export default function ConsularBot() {
 
   const typeMessage = async (fullMessage) => {
     return new Promise((resolve) => {
+      // For short messages, show instantly
+      if (fullMessage.length < 100) {
+        setMessages((prev) => [...prev, { role: "assistant", content: fullMessage }]);
+        resolve();
+        return;
+      }
+      
+      // For longer messages, use fast chunked typing
       let currentText = "";
       let index = 0;
-      const typingSpeed = 20; // milliseconds per character
+      const chunkSize = 10; // Characters per update
+      const typingSpeed = 15; // milliseconds per chunk
       
       // Add empty message that will be updated
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
       
       const typeInterval = setInterval(() => {
         if (index < fullMessage.length) {
-          currentText += fullMessage[index];
+          // Add chunk of characters at once
+          const end = Math.min(index + chunkSize, fullMessage.length);
+          currentText = fullMessage.substring(0, end);
           setMessages((prev) => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1] = {
@@ -447,7 +458,7 @@ export default function ConsularBot() {
             };
             return newMessages;
           });
-          index++;
+          index = end;
         } else {
           clearInterval(typeInterval);
           resolve();
