@@ -43,7 +43,7 @@ def set_knowledge_cache(data: Dict):
 async def scrape_cgi_joburg() -> Dict:
     """Real-time scraping of Consulate General of India Johannesburg website"""
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as client:
             response = await client.get("https://www.cgijoburg.gov.in/")
             
             if response.status_code != 200:
@@ -88,7 +88,7 @@ async def scrape_cgi_joburg() -> Dict:
             return data
             
     except Exception as e:
-        await send_exception_email("CGI Joburg Scraping Failed", str(e))
+        # Don't send email on every failure - just return fallback
         return get_fallback_knowledge()
 
 async def scrape_vfs_global() -> Dict:
