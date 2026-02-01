@@ -685,6 +685,119 @@ export default function ConsularBot() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Profile Creation Dialog */}
+      <Dialog open={showProfileForm} onOpenChange={setShowProfileForm}>
+        <DialogContent className="max-w-md" data-testid="profile-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-[#1A2E40] flex items-center gap-2">
+              <User className="w-6 h-6 text-[#E06F2C]" />
+              Create Your Profile
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-gray-600">
+              To proceed with your application, please provide your details. This helps us serve you better.
+            </p>
+            
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="profile-name" className="flex items-center gap-2">
+                  <User className="w-4 h-4" /> Full Name
+                </Label>
+                <Input
+                  id="profile-name"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Enter your full name"
+                  className="mt-1"
+                  data-testid="profile-name-input"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="profile-email" className="flex items-center gap-2">
+                  <Mail className="w-4 h-4" /> Email Address
+                </Label>
+                <Input
+                  id="profile-email"
+                  type="email"
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="your.email@example.com"
+                  className="mt-1"
+                  data-testid="profile-email-input"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="profile-mobile" className="flex items-center gap-2">
+                  <Phone className="w-4 h-4" /> Mobile Number
+                </Label>
+                <Input
+                  id="profile-mobile"
+                  type="tel"
+                  value={profileForm.mobile}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, mobile: e.target.value }))}
+                  placeholder="+27 XX XXX XXXX"
+                  className="mt-1"
+                  data-testid="profile-mobile-input"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="profile-dob" className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4" /> Date of Birth
+                </Label>
+                <Input
+                  id="profile-dob"
+                  type="date"
+                  value={profileForm.dob}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, dob: e.target.value }))}
+                  className="mt-1"
+                  data-testid="profile-dob-input"
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3 pt-4">
+              <Button
+                onClick={handleCreateProfile}
+                className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+                data-testid="create-profile-btn"
+              >
+                <Check className="w-4 h-4 mr-2" />
+                Create Profile
+              </Button>
+              <Button
+                onClick={() => setShowProfileForm(false)}
+                variant="outline"
+                className="flex-1"
+                data-testid="cancel-profile-btn"
+              >
+                Cancel
+              </Button>
+            </div>
+            
+            <p className="text-xs text-gray-500 text-center">
+              Your information is secure and will only be used for consular services.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Profile Status Badge */}
+      {userProfile && (
+        <div className="fixed bottom-4 left-4 bg-green-100 border border-green-300 rounded-lg px-4 py-2 shadow-lg" data-testid="profile-badge">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-green-600" />
+            <span className="text-sm text-green-800 font-medium">
+              Profile: {userProfile.profile_id}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
