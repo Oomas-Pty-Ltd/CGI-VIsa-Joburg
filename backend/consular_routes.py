@@ -1020,7 +1020,16 @@ Your progress has been saved. Say **"continue"** or **"resume"** when you're rea
     # =========================================================================
     if status == "consent_pending":
         if user_message == "yes" or user_message == "i agree" or user_message == "agree":
-            # Consent given - archive documents
+            # Start with first field
+            field = fields[0]
+            extracted_value = extract_value_from_source(field["source"], profile, documents, family)
+            
+            # Prepare form_data with first field value
+            initial_form_data = {}
+            if extracted_value:
+                initial_form_data[field["id"]] = extracted_value
+            
+            # Consent given - archive documents and store initial form_data
             await db.form_sessions.update_one(
                 {"session_id": request.session_id},
                 {"$set": {
@@ -1028,13 +1037,10 @@ Your progress has been saved. Say **"continue"** or **"resume"** when you're rea
                     "consent_timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "in_progress",
                     "current_step": 1,
+                    "form_data": initial_form_data,
                     "archived_documents": [d.get("id") for d in documents]
                 }}
             )
-            
-            # Start with first field
-            field = fields[0]
-            extracted_value = extract_value_from_source(field["source"], profile, documents, family)
             
             progress = int((1 / total_steps) * 100)
             
