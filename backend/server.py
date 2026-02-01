@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
@@ -19,6 +20,8 @@ from super_admin_routes import router as super_admin_router
 from local_admin_routes import router as local_admin_router
 from consular_routes import router as consular_router
 from whatsapp_routes import router as whatsapp_router
+from monitoring_routes import router as monitoring_router
+from monitoring_service import start_background_monitoring
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -30,7 +33,10 @@ db = client[os.environ['DB_NAME']]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_super_admin()
+    # Start background monitoring
+    monitoring_task = asyncio.create_task(start_background_monitoring())
     yield
+    monitoring_task.cancel()
     client.close()
 
 app = FastAPI(lifespan=lifespan)
