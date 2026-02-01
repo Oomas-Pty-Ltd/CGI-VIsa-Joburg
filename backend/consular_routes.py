@@ -41,6 +41,70 @@ class FormData(BaseModel):
     session_id: str
     form_data: Dict[str, Any]
 
+class ProfileRequest(BaseModel):
+    name: str
+    email: str
+    mobile: str
+    dob: str
+    profile_id: str
+    session_id: Optional[str] = None
+
+@router.post("/create-profile")
+async def create_profile(request: ProfileRequest):
+    """Create user profile with unique ID"""
+    db = await get_database()
+    
+    # Check if profile already exists with this email
+    existing = await db.user_profiles.find_one({"email": request.email}, {"_id": 0})
+    if existing:
+        return {
+            "success": True,
+            "profile_id": existing.get("profile_id"),
+            "message": "Profile already exists"
+        }
+    
+    profile = {
+        "id": str(uuid.uuid4()),
+        "profile_id": request.profile_id,
+        "name": request.name,
+        "email": request.email,
+        "mobile": request.mobile,
+        "dob": request.dob,
+        "session_id": request.session_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "documents": [],
+        "applications": []
+    }
+    
+    await db.user_profiles.insert_one(profile)
+    
+    # Update session with profile
+    if request.session_id:
+        await db.chat_sessions.update_one(
+            {"id": request.session_id},
+            {"$set": {"profile_id": request.profile_id, "user_verified": True}}
+        )
+    
+    return {
+        "success": True,
+        "profile_id": request.profile_id,
+        "message": "Profile created successfully"
+    }
+
+@router.get("/profile/{profile_id}")
+async def get_profile(profile_id: str):
+    """Get user profile by profile ID"""
+    db = await get_database()
+    profile = await db.user_profiles.find_one({"profile_id": profile_id}, {"_id": 0})
+    
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found"
+        )
+    
+    return profile
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     db = await get_database()
