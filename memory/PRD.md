@@ -13,9 +13,12 @@
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Landing Page | ✅ | Professional UI, navigation to all portals |
+| Landing Page | ✅ | Professional UI, navigation |
 | Consular Bot Chat | ✅ | AI-powered (GPT-5.2), typing indicator |
 | Multi-language (Backend) | ✅ | Hindi, Tamil, English auto-detect |
+| **Language Selector Dropdown** | ✅ | **NEW** - 5 languages: English, Hindi, Tamil, Zulu, Afrikaans |
+| **Feedback Mechanism (👍👎)** | ✅ | **NEW** - Under each bot response with toast notifications |
+| **Mic Recording State** | ✅ | **NEW** - Green (idle) → Red (recording) with toast |
 | Text-to-Speech | ✅ | ElevenLabs integration |
 | Avatar Display | ✅ | Placeholder image with speaking indicator |
 | File Upload | ✅ | JPG, PNG, PDF validation |
@@ -27,7 +30,7 @@
 | Local Admin Portal | ✅ | Basic routes |
 | Knowledge Scraper | ✅ | Real-time from cgijoburg.gov.in |
 | Markdown Rendering | ✅ | Rich formatted responses |
-| System Prompt (Updated) | ✅ | Aligned with new CGI requirements |
+| System Prompt (Updated) | ✅ | Aligned with CGI requirements |
 
 ---
 
