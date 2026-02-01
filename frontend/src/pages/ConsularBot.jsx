@@ -671,8 +671,8 @@ export default function ConsularBot() {
                 {/* Avatar Image/Video */}
                 <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
                   <img
-                    src="https://images.unsplash.com/photo-1766857454322-d902dfb4a532?q=85&w=400"
-                    alt="Seva Setu Bot - Professional Indian Consular Assistant"
+                    src="https://static.prod-images.emergentagent.com/jobs/076c0d02-c826-4888-981b-eccb66be0046/images/d359a32861e2715b1f3fe86630b740ca96254b26244c902ee07a55cbbe7e9fc5.png"
+                    alt="Seva Setu Bot - Professional Indian Consular Assistant in Namaste Pose"
                     className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
                   />
                   
