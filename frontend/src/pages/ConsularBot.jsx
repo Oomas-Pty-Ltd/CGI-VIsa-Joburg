@@ -15,13 +15,102 @@ import remarkGfm from 'remark-gfm';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// 50+ Languages support for Indian and South African citizens
 const LANGUAGES = [
-  { code: "en", label: "English", flag: "🇬🇧" },
-  { code: "hi", label: "हिंदी", flag: "🇮🇳" },
-  { code: "ta", label: "தமிழ்", flag: "🇮🇳" },
+  // Indian Languages
+  { code: "en", label: "English", flag: "🇮🇳" },
+  { code: "hi", label: "हिंदी (Hindi)", flag: "🇮🇳" },
+  { code: "bn", label: "বাংলা (Bengali)", flag: "🇮🇳" },
+  { code: "te", label: "తెలుగు (Telugu)", flag: "🇮🇳" },
+  { code: "mr", label: "मराठी (Marathi)", flag: "🇮🇳" },
+  { code: "ta", label: "தமிழ் (Tamil)", flag: "🇮🇳" },
+  { code: "gu", label: "ગુજરાતી (Gujarati)", flag: "🇮🇳" },
+  { code: "kn", label: "ಕನ್ನಡ (Kannada)", flag: "🇮🇳" },
+  { code: "ml", label: "മലയാളം (Malayalam)", flag: "🇮🇳" },
+  { code: "or", label: "ଓଡ଼ିଆ (Odia)", flag: "🇮🇳" },
+  { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)", flag: "🇮🇳" },
+  { code: "as", label: "অসমীয়া (Assamese)", flag: "🇮🇳" },
+  { code: "mai", label: "मैथिली (Maithili)", flag: "🇮🇳" },
+  { code: "sat", label: "ᱥᱟᱱᱛᱟᱲᱤ (Santali)", flag: "🇮🇳" },
+  { code: "ks", label: "کٲشُر (Kashmiri)", flag: "🇮🇳" },
+  { code: "ne", label: "नेपाली (Nepali)", flag: "🇮🇳" },
+  { code: "sd", label: "سنڌي (Sindhi)", flag: "🇮🇳" },
+  { code: "kok", label: "कोंकणी (Konkani)", flag: "🇮🇳" },
+  { code: "doi", label: "डोगरी (Dogri)", flag: "🇮🇳" },
+  { code: "mni", label: "মৈতৈলোন্ (Manipuri)", flag: "🇮🇳" },
+  { code: "brx", label: "बड़ो (Bodo)", flag: "🇮🇳" },
+  { code: "ur", label: "اردو (Urdu)", flag: "🇮🇳" },
+  { code: "sa", label: "संस्कृतम् (Sanskrit)", flag: "🇮🇳" },
+  // South African Languages
+  { code: "af", label: "Afrikaans", flag: "🇿🇦" },
   { code: "zu", label: "isiZulu", flag: "🇿🇦" },
-  { code: "af", label: "Afrikaans", flag: "🇿🇦" }
+  { code: "xh", label: "isiXhosa", flag: "🇿🇦" },
+  { code: "nso", label: "Sepedi", flag: "🇿🇦" },
+  { code: "st", label: "Sesotho", flag: "🇿🇦" },
+  { code: "tn", label: "Setswana", flag: "🇿🇦" },
+  { code: "ss", label: "siSwati", flag: "🇿🇦" },
+  { code: "ve", label: "Tshivenda", flag: "🇿🇦" },
+  { code: "ts", label: "Xitsonga", flag: "🇿🇦" },
+  { code: "nr", label: "isiNdebele", flag: "🇿🇦" },
+  // International Languages
+  { code: "ar", label: "العربية (Arabic)", flag: "🌍" },
+  { code: "fr", label: "Français (French)", flag: "🌍" },
+  { code: "pt", label: "Português (Portuguese)", flag: "🌍" },
+  { code: "es", label: "Español (Spanish)", flag: "🌍" },
+  { code: "de", label: "Deutsch (German)", flag: "🌍" },
+  { code: "it", label: "Italiano (Italian)", flag: "🌍" },
+  { code: "ru", label: "Русский (Russian)", flag: "🌍" },
+  { code: "zh", label: "中文 (Chinese)", flag: "🌍" },
+  { code: "ja", label: "日本語 (Japanese)", flag: "🌍" },
+  { code: "ko", label: "한국어 (Korean)", flag: "🌍" },
+  { code: "th", label: "ไทย (Thai)", flag: "🌍" },
+  { code: "vi", label: "Tiếng Việt (Vietnamese)", flag: "🌍" },
+  { code: "id", label: "Bahasa Indonesia", flag: "🌍" },
+  { code: "ms", label: "Bahasa Melayu", flag: "🌍" },
+  { code: "sw", label: "Kiswahili (Swahili)", flag: "🌍" },
+  { code: "am", label: "አማርኛ (Amharic)", flag: "🌍" },
+  { code: "he", label: "עברית (Hebrew)", flag: "🌍" },
+  { code: "fa", label: "فارسی (Persian)", flag: "🌍" },
+  { code: "tr", label: "Türkçe (Turkish)", flag: "🌍" },
+  { code: "pl", label: "Polski (Polish)", flag: "🌍" },
+  { code: "uk", label: "Українська (Ukrainian)", flag: "🌍" },
+  { code: "nl", label: "Nederlands (Dutch)", flag: "🌍" }
 ];
+
+// Document types with validity rules
+const DOCUMENT_TYPES = {
+  passport: { name: "Passport", validityType: "expiry", copyValidDays: 90 },
+  birthCertificate: { name: "Birth Certificate", validityType: "permanent", copyValidDays: 90 },
+  deathCertificate: { name: "Death Certificate", validityType: "permanent", copyValidDays: 90 },
+  marriageCertificate: { name: "Marriage Certificate", validityType: "affidavit", copyValidDays: 90, needsAffidavit: true },
+  drivingLicense: { name: "Driving License", validityType: "expiry", copyValidDays: 90 },
+  nationalId: { name: "National ID / Aadhar", validityType: "permanent", copyValidDays: 90 },
+  panCard: { name: "PAN Card", validityType: "permanent", copyValidDays: 90 },
+  voterCard: { name: "Voter ID Card", validityType: "permanent", copyValidDays: 90 },
+  addressProof: { name: "Address Proof", validityType: "expiry", copyValidDays: 90 },
+  photograph: { name: "Passport Photo", validityType: "expiry", maxAgeDays: 180, copyValidDays: 90 },
+  policeReport: { name: "Police Report", validityType: "expiry", maxAgeDays: 90, copyValidDays: 90 },
+  affidavit: { name: "Affidavit", validityType: "expiry", maxAgeDays: 90, copyValidDays: 90 }
+};
+
+// Available services from CGI and VFS
+const SERVICES = [
+  { id: "passport_new", name: "New Passport", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 2 },
+  { id: "passport_renewal", name: "Passport Renewal", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 2 },
+  { id: "passport_lost", name: "Lost Passport", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 4 },
+  { id: "visa_tourist", name: "Tourist Visa", category: "Visa", fee: 510, processingDays: "5-7 days", docsRequired: 1 },
+  { id: "visa_business", name: "Business Visa", category: "Visa", fee: 1500, processingDays: "5-7 days", docsRequired: 1 },
+  { id: "visa_student", name: "Student Visa", category: "Visa", fee: 150, processingDays: "4-6 weeks", docsRequired: 4 },
+  { id: "oci_fresh", name: "Fresh OCI Card", category: "OCI", fee: 5015, processingDays: "8-12 weeks", docsRequired: 3 },
+  { id: "oci_renewal", name: "OCI Renewal", category: "OCI", fee: 765, processingDays: "4-6 weeks", docsRequired: 2 },
+  { id: "pcc", name: "Police Clearance Certificate", category: "Miscellaneous", fee: 495, processingDays: "2-4 weeks", docsRequired: 2 },
+  { id: "birth_reg", name: "Child Birth Registration", category: "Miscellaneous", fee: 405, processingDays: "1-4 weeks", docsRequired: 4 },
+  { id: "marriage_cert", name: "Marriage Certificate", category: "Miscellaneous", fee: 492, processingDays: "1-2 weeks", docsRequired: 2 },
+  { id: "attestation", name: "Document Attestation", category: "Miscellaneous", fee: 225, processingDays: "1-2 weeks", docsRequired: 1 },
+  { id: "renunciation", name: "Renunciation of Citizenship", category: "Miscellaneous", fee: 1395, processingDays: "4-8 weeks", docsRequired: 5 },
+  { id: "emergency_cert", name: "Emergency Travel Document", category: "Emergency", fee: 315, processingDays: "1-3 days", docsRequired: 2 }
+];
+
 
 const STEPS = [
   { id: 1, label: "Register", value: "register" },
