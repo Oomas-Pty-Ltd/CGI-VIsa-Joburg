@@ -744,6 +744,70 @@ export default function ConsularBot() {
 
           <div className="lg:col-span-8">
             <div className="glass-card rounded-xl shadow-lg flex flex-col" style={{ height: "600px" }}>
+              {/* Form Filling Progress Bar */}
+              {formFillingMode && formProgress.total > 0 && (
+                <div className="px-6 py-3 bg-gradient-to-r from-orange-50 to-white border-b border-orange-200" data-testid="form-progress">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-[#E06F2C]" />
+                      <span className="text-sm font-semibold text-[#1A2E40]">{selectedService?.name}</span>
+                    </div>
+                    <span className="text-xs font-bold text-[#E06F2C]">
+                      Step {formProgress.current}/{formProgress.total} • {formProgress.percent}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-gradient-to-r from-[#E06F2C] to-[#FF8C42] h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${formProgress.percent}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs text-gray-500">
+                      {formStatus === 'consent_pending' && '⏳ Waiting for consent'}
+                      {formStatus === 'in_progress' && '📝 Filling form...'}
+                      {formStatus === 'paused' && '⏸️ Paused'}
+                      {formStatus === 'review' && '👁️ Review mode'}
+                      {formStatus === 'completed' && '✅ Completed'}
+                    </span>
+                    {formFillingMode && (
+                      <button 
+                        onClick={() => { setFormFillingMode(false); setSelectedService(null); }}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Cancel Application
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Service Selector */}
+              {showServiceSelector && (
+                <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-white border-b border-blue-200" data-testid="service-selector">
+                  <p className="text-sm font-semibold text-[#1A2E40] mb-3">📋 Select a Service:</p>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                    {SERVICES.map((service) => (
+                      <button
+                        key={service.id}
+                        onClick={() => startFormFilling(service)}
+                        className="p-3 text-left bg-white border border-gray-200 rounded-lg hover:border-[#E06F2C] hover:bg-orange-50 transition-all"
+                        data-testid={`service-${service.id}`}
+                      >
+                        <p className="text-sm font-semibold text-[#1A2E40]">{service.name}</p>
+                        <p className="text-xs text-gray-500">R {service.fee} • {service.processingDays}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <button 
+                    onClick={() => setShowServiceSelector(false)}
+                    className="mt-2 text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    ← Back to chat
+                  </button>
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto p-6 space-y-4" data-testid="chat-messages">
                 {messages.map((msg, index) => (
                   <div
