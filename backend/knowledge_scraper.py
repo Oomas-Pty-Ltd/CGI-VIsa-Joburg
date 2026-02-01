@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import json
 from typing import List, Dict, Optional
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import smtplib
 from email.mime.text import MIMEText
@@ -16,6 +16,29 @@ OFFICIAL_SOURCES = [
 ]
 
 EXCEPTION_EMAIL = "mayurakole@example.com"
+
+# Cache for knowledge base - refreshes every 30 minutes
+_knowledge_cache = {
+    "data": None,
+    "timestamp": None,
+    "cache_ttl_minutes": 30
+}
+
+def get_cached_knowledge() -> Optional[Dict]:
+    """Get cached knowledge if still valid"""
+    if _knowledge_cache["data"] is None or _knowledge_cache["timestamp"] is None:
+        return None
+    
+    cache_age = datetime.now(timezone.utc) - _knowledge_cache["timestamp"]
+    if cache_age.total_seconds() < _knowledge_cache["cache_ttl_minutes"] * 60:
+        return _knowledge_cache["data"]
+    
+    return None
+
+def set_knowledge_cache(data: Dict):
+    """Set knowledge cache"""
+    _knowledge_cache["data"] = data
+    _knowledge_cache["timestamp"] = datetime.now(timezone.utc)
 
 async def scrape_cgi_joburg() -> Dict:
     """Real-time scraping of Consulate General of India Johannesburg website"""
