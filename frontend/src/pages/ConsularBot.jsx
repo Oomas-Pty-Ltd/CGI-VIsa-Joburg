@@ -48,12 +48,25 @@ export default function ConsularBot() {
       localStorage.setItem("token", guestToken);
     }
     
-    setMessages([
+    // Build initial messages array with greeting and active advisories
+    const initialMessages = [
       {
         role: "assistant",
-        content: "🙏 Namaste! I'm Seva Setu Bot, ready to help you with consular services. How may I assist you today?"
+        content: GREETING_MESSAGE
       }
-    ]);
+    ];
+    
+    // Add active advisory messages
+    ADVISORY_MESSAGES.filter(adv => adv.active).forEach(advisory => {
+      initialMessages.push({
+        role: "advisory",
+        type: advisory.type,
+        title: advisory.title,
+        content: advisory.content
+      });
+    });
+    
+    setMessages(initialMessages);
   }, []);
 
   useEffect(() => {
