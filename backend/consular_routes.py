@@ -11,6 +11,9 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from presidio_service import mask_pii
 from knowledge_scraper import get_realtime_knowledge, search_knowledge
 from voice_service import voice_service
+from structured_conversation import process_user_input, get_or_create_conversation
+from admin_config import get_admin_config, log_exception
+from application_tracking import create_application, get_user_applications, get_application
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +28,9 @@ class ChatRequest(BaseModel):
     image_base64: Optional[str] = None
     enable_voice: Optional[bool] = False
     language: Optional[str] = "en"
+    profile_id: Optional[str] = None
+    user_name: Optional[str] = None
+    use_structured_flow: Optional[bool] = True  # New: Use structured conversation
 
 class ChatResponse(BaseModel):
     session_id: str
