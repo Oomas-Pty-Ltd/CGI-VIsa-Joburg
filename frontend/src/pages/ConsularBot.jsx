@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, Camera, Send, FileText, Check, ThumbsUp, ThumbsDown, Globe } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, ThumbsUp, ThumbsDown, Globe, User, Mail, Phone, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import Webcam from "react-webcam";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
