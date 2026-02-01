@@ -94,7 +94,7 @@ async def scrape_cgi_joburg() -> Dict:
 async def scrape_vfs_global() -> Dict:
     """Real-time scraping of VFS Global website"""
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as client:
             response = await client.get("https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/")
             
             if response.status_code != 200:
