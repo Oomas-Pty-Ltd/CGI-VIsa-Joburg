@@ -176,10 +176,38 @@ export default function ConsularBot() {
       SpeechRecognition.stopListening();
       setIsRecording(false);
     } else {
-      SpeechRecognition.startListening({ continuous: true });
+      SpeechRecognition.startListening({ continuous: true, language: selectedLanguage === 'hi' ? 'hi-IN' : selectedLanguage === 'ta' ? 'ta-IN' : 'en-US' });
       setIsRecording(true);
+      toast.info("Listening... Speak now");
     }
   };
+
+  const handleFeedback = async (messageIndex, isPositive) => {
+    const feedbackType = isPositive ? 'positive' : 'negative';
+    setFeedbackGiven(prev => ({ ...prev, [messageIndex]: feedbackType }));
+    
+    try {
+      await axios.post(`${API}/consular/feedback`, {
+        session_id: sessionId,
+        message_index: messageIndex,
+        feedback: feedbackType,
+        timestamp: new Date().toISOString()
+      });
+      toast.success(isPositive ? "Thanks for the positive feedback! 👍" : "Thanks for the feedback. We'll improve! 🙏");
+    } catch (error) {
+      // Silently log - feedback is non-critical
+      console.log("Feedback logged locally");
+      toast.success(isPositive ? "Thanks for the feedback! 👍" : "We appreciate your feedback! 🙏");
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
