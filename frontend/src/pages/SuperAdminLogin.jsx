@@ -45,7 +45,7 @@ export default function SuperAdminLogin() {
           <Shield className="w-16 h-16 text-[#E06F2C]" />
         </div>
         <h1 className="text-3xl font-bold text-center text-[#1A2E40] mb-2">Super Admin</h1>
-        <p className="text-center text-gray-600 mb-8">Sarthak-AI Sovereign</p>
+        <p className="text-center text-gray-600 mb-8">Seva Setu Bot</p>
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div>

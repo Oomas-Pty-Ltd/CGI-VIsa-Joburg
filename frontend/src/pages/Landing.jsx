@@ -11,7 +11,7 @@ export default function Landing() {
       <nav className="container mx-auto px-6 py-6 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <Shield className="w-8 h-8 text-[#E06F2C]" />
-          <h1 className="text-2xl font-bold text-[#1A2E40]">Sarthak-AI Sovereign</h1>
+          <h1 className="text-2xl font-bold text-[#1A2E40]">Seva Setu Bot</h1>
         </div>
         <div className="flex gap-4">
           <Button

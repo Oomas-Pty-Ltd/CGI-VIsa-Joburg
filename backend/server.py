@@ -53,7 +53,7 @@ async def init_super_admin():
 
 @api_router.get("/")
 async def root():
-    return {"message": "Sarthak-AI Sovereign API", "status": "running"}
+    return {"message": "Seva Setu Bot API", "status": "running"}
 
 api_router.include_router(auth_router)
 api_router.include_router(super_admin_router)

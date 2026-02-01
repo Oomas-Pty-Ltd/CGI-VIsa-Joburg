@@ -35,7 +35,7 @@ async def whatsapp_webhook(message: WhatsAppMessage):
         await db.whatsapp_users.insert_one(user)
     
     if message_text in ["hi", "hello", "start", "help"]:
-        reply = """🙏 Namaste! Welcome to Sarthak-AI Sovereign.
+        reply = """🙏 Namaste! Welcome to Seva Setu Bot.
 
 I can help you with:
 1️⃣ Passport applications
