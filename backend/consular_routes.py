@@ -114,10 +114,27 @@ def calculate_document_validity(doc_type: str, is_original: bool, issue_date: st
         "needs_affidavit": rules.get("needs_affidavit", False)
     }
     
+    def parse_date(date_str):
+        """Parse date string and ensure it's timezone aware"""
+        if not date_str:
+            return None
+        try:
+            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except:
+            # Try parsing as simple date
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                return dt.replace(tzinfo=timezone.utc)
+            except:
+                return None
+    
     if not is_original:
         # Copy validity - 90 days from issue
-        if issue_date:
-            issue = datetime.fromisoformat(issue_date.replace('Z', '+00:00'))
+        issue = parse_date(issue_date)
+        if issue:
             copy_expiry = issue + timedelta(days=rules.get("copy_valid_days", 90))
             days_remaining = (copy_expiry - now).days
             
@@ -142,7 +159,7 @@ def calculate_document_validity(doc_type: str, is_original: bool, issue_date: st
             if rules.get("needs_affidavit"):
                 result["needs_affidavit"] = True
         elif expiry_date:
-            expiry = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+            expiry = parse_date(expiry_date)
             days_remaining = (expiry - now).days
             
             if days_remaining <= 0:
