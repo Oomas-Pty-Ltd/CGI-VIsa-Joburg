@@ -444,6 +444,24 @@ export default function ConsularBot() {
                     {isSpeaking ? "🎙️ Speaking..." : "✨ Ready to Assist"}
                   </span>
                 </div>
+                
+                {/* Profile Button */}
+                {!userProfile ? (
+                  <Button
+                    onClick={() => setShowProfileForm(true)}
+                    className="w-full bg-[#1A2E40] hover:bg-[#132230] text-white mt-2"
+                    data-testid="open-profile-btn"
+                  >
+                    <User className="w-4 h-4 mr-2" />
+                    Create Profile
+                  </Button>
+                ) : (
+                  <div className="mt-2 p-3 bg-green-50 rounded-lg border border-green-200" data-testid="profile-info">
+                    <p className="text-xs font-semibold text-green-800 uppercase">Your Profile</p>
+                    <p className="text-sm font-bold text-green-700">{userProfile.name}</p>
+                    <p className="text-xs text-green-600">ID: {userProfile.profile_id}</p>
+                  </div>
+                )}
               </div>
               
               {/* Voice Toggle - Premium Design */}
