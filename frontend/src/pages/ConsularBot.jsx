@@ -260,38 +260,66 @@ export default function ConsularBot() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              <div className={`relative w-40 h-40 rounded-full mx-auto mb-4 transition-all duration-500 ${
+              {/* Video Avatar Container */}
+              <div className={`relative w-full aspect-square max-w-xs mx-auto mb-4 rounded-full overflow-hidden transition-all duration-500 ${
                 isSpeaking ? 'ring-4 ring-[#2E8B57] ring-offset-4 ring-offset-white shadow-2xl shadow-green-400/50 scale-105' : 'ring-4 ring-[#E06F2C] ring-offset-4 ring-offset-white shadow-xl'
               }`}>
-                <img
-                  src="https://images.unsplash.com/photo-1766857454322-d902dfb4a532?q=85"
-                  alt="Seva Setu Bot - Modern India Representative"
-                  className={`w-full h-full rounded-full object-cover ${isSpeaking ? 'brightness-110' : 'brightness-100'} transition-all duration-500`}
-                />
+                {/* Avatar Image/Video */}
+                <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
+                  <img
+                    src="https://images.unsplash.com/photo-1766857454322-d902dfb4a532?q=85&w=400"
+                    alt="Seva Setu Bot - Professional Indian Consular Assistant"
+                    className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
+                  />
+                  
+                  {/* Overlay when speaking - simulates mouth movement */}
+                  {isSpeaking && (
+                    <div className="absolute inset-0 bg-gradient-to-t from-green-500/20 to-transparent pointer-events-none">
+                      <div className="absolute bottom-1/3 left-1/2 transform -translate-x-1/2">
+                        <div className="flex gap-1 animate-pulse">
+                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '100ms'}}></div>
+                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '200ms'}}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Speaking indicator badge */}
                 {isSpeaking && (
-                  <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
-                    <div className="flex gap-1 bg-white px-3 py-1 rounded-full shadow-lg">
-                      <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                      <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                      <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
+                  <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 z-10">
+                    <div className="flex gap-1 bg-white px-4 py-2 rounded-full shadow-lg border-2 border-[#2E8B57]">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
+                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
+                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
+                      </div>
+                      <span className="text-xs font-semibold text-[#2E8B57] ml-2">Speaking</span>
                     </div>
                   </div>
                 )}
               </div>
               
-              <h2 className="text-2xl font-bold text-[#1A2E40] mb-2">Seva Setu Bot</h2>
-              <p className="text-lg text-[#E06F2C] font-semibold mb-1">🙏 Namaste</p>
-              <p className="text-sm text-gray-600 italic mb-4">Representing Modern India</p>
-              
-              <div className="flex items-center justify-center gap-2 mb-4 bg-gradient-to-r from-orange-50 to-green-50 py-2 px-4 rounded-full">
-                <span className={`w-3 h-3 rounded-full ${isSpeaking ? 'bg-[#2E8B57] animate-pulse' : 'bg-gray-400'}`}></span>
-                <span className={`text-sm font-medium ${isSpeaking ? 'text-[#2E8B57]' : 'text-gray-600'}`}>
-                  {isSpeaking ? "🎙️ Speaking..." : "Ready to Assist"}
-                </span>
+              {/* Bot Info */}
+              <div className="space-y-3">
+                <h2 className="text-2xl font-bold text-[#1A2E40]">Seva Setu Bot</h2>
+                <p className="text-lg font-semibold text-[#E06F2C]">🙏 Namaste</p>
+                <p className="text-sm text-gray-600 italic">Representing Modern India</p>
+                
+                {/* Status Indicator */}
+                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 ${
+                  isSpeaking ? 'bg-gradient-to-r from-green-100 to-green-50' : 'bg-gradient-to-r from-orange-100 to-orange-50'
+                }`}>
+                  <span className={`w-3 h-3 rounded-full ${isSpeaking ? 'bg-[#2E8B57] animate-pulse' : 'bg-[#E06F2C]'}`}></span>
+                  <span className={`text-sm font-semibold ${isSpeaking ? 'text-[#2E8B57]' : 'text-[#1A2E40]'}`}>
+                    {isSpeaking ? "🎙️ Speaking..." : "✨ Ready to Assist"}
+                  </span>
+                </div>
               </div>
               
-              {/* Voice Toggle with better styling */}
-              <div className="mb-4 pt-4 border-t border-gray-200">
+              {/* Voice Toggle - Premium Design */}
+              <div className="mt-6 pt-6 border-t-2 border-gray-100">
                 <label className="flex items-center justify-center gap-3 cursor-pointer group">
                   <div className="relative">
                     <input
@@ -299,24 +327,46 @@ export default function ConsularBot() {
                       checked={enableVoice}
                       onChange={(e) => setEnableVoice(e.target.checked)}
                       className="sr-only peer"
+                      data-testid="voice-toggle"
                     />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2E8B57]"></div>
+                    <div className="w-14 h-7 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-7 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-[#2E8B57]"></div>
                   </div>
-                  <span className="text-sm font-semibold text-[#1A2E40] group-hover:text-[#E06F2C] transition-colors">
-                    {enableVoice ? "🔊 Voice Enabled" : "🔇 Voice Disabled"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{enableVoice ? "🔊" : "🔇"}</span>
+                    <div className="text-left">
+                      <p className="text-sm font-bold text-[#1A2E40] group-hover:text-[#E06F2C] transition-colors">
+                        {enableVoice ? "Voice Enabled" : "Voice Disabled"}
+                      </p>
+                      <p className="text-xs text-gray-500">Toggle to hear responses</p>
+                    </div>
+                  </div>
                 </label>
-                <p className="text-xs text-gray-500 mt-2">Toggle to hear responses</p>
+                
+                {/* Note about video avatar */}
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-xs text-blue-800">
+                    💡 <strong>Demo Mode:</strong> Full video avatar with lip-sync available with Akool upgrade
+                  </p>
+                </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-200">
-                <p className="text-xs text-gray-500 mb-1">Consulate General of India</p>
-                <p className="text-xs text-gray-500 mb-3">Johannesburg, South Africa</p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  <span className="text-xs px-2 py-1 bg-orange-100 text-[#E06F2C] rounded-full">Hindi</span>
-                  <span className="text-xs px-2 py-1 bg-orange-100 text-[#E06F2C] rounded-full">English</span>
-                  <span className="text-xs px-2 py-1 bg-orange-100 text-[#E06F2C] rounded-full">Zulu</span>
-                  <span className="text-xs px-2 py-1 bg-orange-100 text-[#E06F2C] rounded-full">Afrikaans</span>
+              {/* Organization Info */}
+              <div className="mt-6 pt-6 border-t-2 border-gray-100 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Official Representative</p>
+                  <p className="text-sm font-bold text-[#1A2E40] mt-1">Consulate General of India</p>
+                  <p className="text-sm text-gray-600">Johannesburg, South Africa</p>
+                </div>
+                
+                {/* Language Badges */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Supported Languages</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Hindi</span>
+                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">English</span>
+                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Zulu</span>
+                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Afrikaans</span>
+                  </div>
                 </div>
               </div>
             </div>
