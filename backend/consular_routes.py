@@ -328,6 +328,36 @@ async def get_session(session_id: str):
     
     return session
 
+class FeedbackRequest(BaseModel):
+    session_id: Optional[str] = None
+    message_index: int
+    feedback: str  # 'positive' or 'negative'
+    timestamp: Optional[str] = None
+
+@router.post("/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """Store user feedback for bot responses"""
+    db = await get_database()
+    
+    feedback_entry = {
+        "id": str(uuid.uuid4()),
+        "session_id": request.session_id,
+        "message_index": request.message_index,
+        "feedback": request.feedback,
+        "timestamp": request.timestamp or datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.feedback.insert_one(feedback_entry)
+    
+    # Also update session with feedback
+    if request.session_id:
+        await db.chat_sessions.update_one(
+            {"id": request.session_id},
+            {"$push": {"feedback": feedback_entry}}
+        )
+    
+    return {"success": True, "message": "Feedback recorded"}
+
 @router.post("/voice-input")
 async def voice_input(
     audio_file: UploadFile = File(...),
