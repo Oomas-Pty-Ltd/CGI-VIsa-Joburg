@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, Camera, Send, FileText, Check } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, ThumbsUp, ThumbsDown, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -7,10 +7,19 @@ import axios from "axios";
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import Webcam from "react-webcam";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+const LANGUAGES = [
+  { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "hi", label: "हिंदी", flag: "🇮🇳" },
+  { code: "ta", label: "தமிழ்", flag: "🇮🇳" },
+  { code: "zu", label: "isiZulu", flag: "🇿🇦" },
+  { code: "af", label: "Afrikaans", flag: "🇿🇦" }
+];
 
 const STEPS = [
   { id: 1, label: "Register", value: "register" },
