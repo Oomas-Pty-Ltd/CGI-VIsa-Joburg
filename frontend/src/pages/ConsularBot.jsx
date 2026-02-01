@@ -81,10 +81,10 @@ export default function ConsularBot() {
     setIsTyping(true);
 
     try {
-      // Detect language from input
+      // Use selected language or auto-detect from input
       const isHindi = /[\u0900-\u097F]/.test(messageText);
       const isTamil = /[\u0B80-\u0BFF]/.test(messageText);
-      const langCode = isHindi ? "hi" : isTamil ? "ta" : "en";
+      const langCode = isHindi ? "hi" : isTamil ? "ta" : selectedLanguage;
 
       const response = await axios.post(
         `${API}/consular/chat`,
