@@ -400,29 +400,56 @@ export default function ConsularBot() {
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                     data-testid={`message-${index}`}
                   >
-                    <div
-                      className={`max-w-md px-4 py-3 rounded-lg ${
-                        msg.role === "user"
-                          ? "bg-[#E06F2C] text-white"
-                          : "bg-white border border-gray-200 text-[#1A2E40]"
-                      }`}
-                    >
-                      {msg.role === "assistant" ? (
-                        <div className="prose prose-sm max-w-none
-                            prose-headings:text-[#1A2E40] prose-headings:font-bold
-                            prose-p:text-[#1A2E40] prose-p:my-2
-                            prose-ul:my-2 prose-ol:my-2
-                            prose-li:text-[#1A2E40]
-                            prose-strong:text-[#E06F2C] prose-strong:font-semibold
-                            prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
+                    {/* Advisory Messages - Special styling */}
+                    {msg.role === "advisory" ? (
+                      <div className={`max-w-lg px-4 py-3 rounded-lg border-l-4 ${
+                        msg.type === "alert" 
+                          ? "bg-red-50 border-red-500 text-red-900" 
+                          : msg.type === "warning"
+                          ? "bg-amber-50 border-amber-500 text-amber-900"
+                          : "bg-blue-50 border-blue-500 text-blue-900"
+                      }`}>
+                        <div className="flex items-start gap-2 mb-2">
+                          <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                            msg.type === "alert" ? "text-red-600" : 
+                            msg.type === "warning" ? "text-amber-600" : "text-blue-600"
+                          }`} />
+                          <h4 className="font-bold text-sm">{msg.title}</h4>
+                        </div>
+                        <div className="prose prose-sm max-w-none ml-7
+                            prose-p:my-1 prose-p:text-current
+                            prose-ul:my-1 prose-li:text-current
+                            prose-strong:font-bold">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
                           </ReactMarkdown>
                         </div>
-                      ) : (
-                        msg.content
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div
+                        className={`max-w-md px-4 py-3 rounded-lg ${
+                          msg.role === "user"
+                            ? "bg-[#E06F2C] text-white"
+                            : "bg-white border border-gray-200 text-[#1A2E40]"
+                        }`}
+                      >
+                        {msg.role === "assistant" ? (
+                          <div className="prose prose-sm max-w-none
+                              prose-headings:text-[#1A2E40] prose-headings:font-bold
+                              prose-p:text-[#1A2E40] prose-p:my-2
+                              prose-ul:my-2 prose-ol:my-2
+                              prose-li:text-[#1A2E40]
+                              prose-strong:text-[#E06F2C] prose-strong:font-semibold
+                              prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          msg.content
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 
