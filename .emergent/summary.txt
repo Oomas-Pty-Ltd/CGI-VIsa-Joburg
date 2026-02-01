@@ -1,104 +1,303 @@
 <analysis>Here is the summary of the session:
 
 **original_problem_statement:**
-The user wants to build Sarthak-AI Sovereign, a multi-tenant, offline-capable consular automation platform for Indian and South African citizens, compliant with GDPR, DPDA, and POPIA. The project was later renamed to Seva Setu Bot.
+The user wants to build Seva Setu Bot (originally Sarthak-AI Sovereign), a multi-tenant, offline-capable consular automation platform for Indian and South African citizens, compliant with GDPR, DPDA, and POPIA.
 
 **PRODUCT REQUIREMENTS:**
 - **Multi-Tenant Infrastructure:** Super Admin to create company accounts and a Local Admin self-service portal.
-- **Consular Workflow:** A clean White/Saffron themed UI with an Indian Avatar and a progress stepper (Register ➔ Upload ➔ Verify ➔ Sign).
+- **Consular Workflow:** A clean White/Saffron themed UI with an Indian Avatar and a progress stepper.
 - **Inputs:** Support for multi-language mic (50+ languages), camera for document scanning, and secure file attachments.
-- **Intelligence:** Use a Multimodal Vision model to auto-populate forms from documents. Build an offline Knowledge Vault by scraping authorized URLs (e.g., , ).
+- **Intelligence:** Use a Multimodal Vision model to auto-populate forms from documents. Build an offline Knowledge Vault by scraping authorized URLs (e.g., , , ).
 - **Post-Submission:** Generate a secure PDF form and email it to the applicant and admin.
 - **Analytics:** Provide lead reports (PDF/CSV) via a local SMTP.
-- **Bot Persona:** The bot should be named Seva Setu Bot and have a professional, interactive, and human-like conversational flow, including user verification, admin escalation, and getting user feedback.
-- **Talking Avatar:** The avatar should be interactive, with audio-visual capabilities, and narrate responses while also typing them in the chat.
-- **Social Channel Integration:** The bot should work on WhatsApp, Facebook, and Instagram.
+- **Bot Persona:** A professional, interactive, and human-like conversational flow, including user verification, admin escalation, and feedback.
+- **Talking Avatar:** An interactive, audio-visual avatar.
+- **Profile & Document Management:** Robust user profiles with family linking and document management that tracks validity.
+- **Interactive Form Filling:** A step-by-step, conversational process to fill out application forms using only pre-uploaded documents.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack application named Seva Setu Bot has been built using React, FastAPI, and MongoDB. The application includes a Super Admin dashboard, Local Admin functionalities, and a consular chat interface. Key features implemented are a chat system powered by OpenAI, real-time web scraping for a knowledge base, text-to-speech using ElevenLabs, and a UI that has been refined multiple times based on user feedback. The bot has been renamed from Sarthak-AI Sovereign to Seva Setu Bot throughout the application.
+A full-stack application (Seva Setu Bot) using React, FastAPI, and MongoDB. It includes a chat interface, admin dashboards, and several advanced features. The bot's conversational flow has been significantly enhanced to be interactive and step-by-step. Key implemented features include: OpenAI-powered chat, ElevenLabs TTS, real-time web scraping, a feedback mechanism, language selection, robust user profile creation with family linking, document validity tracking, and a comprehensive, interactive form-filling system for various consular services.
 
 **Last working item**:
-    - Last item agent was working: The user provided a highly detailed system prompt to define a new, professional, and step-by-step conversational flow for the Seva Setu Bot. The agent acknowledged these new instructions and was about to begin implementation. This task involves a major refactor of the bot's core logic to be more interactive, handle user verification, manage document creation securely, and include intelligent admin escalation for errors.
+    - Last item agent was working: The user reported two critical errors after the latest feature deployment:
+1.  An error during the interactive form-filling process: 
+2.  An error when trying to upload documents: 
+The agent acknowledged the errors and was about to begin the investigation.
     - Status: NOT STARTED
     - Agent Testing Done: N
-    - Which testing method agent to use? both
+    - Which testing method agent to use? backend testing agent
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Implement the new professional conversational flow (Priority: P0)
-  - Issue 2: The user repeatedly reports the app preview is not working or shows an unexpected error, even when the agent's tests pass. (Priority: P0)
+  - Issue 1: Interactive form-filling fails with a generic error message. (Priority: P0)
+  - Issue 2: Document upload is failing. (Priority: P0)
 
   Issues Detail:
-  - **Issue 1: Implement new professional conversational flow**
-     - Attempted fixes: None. This is a new task.
+  - **Issue 1: Interactive form-filling fails**
+     - Attempted fixes: None.
      - Next debug checklist:
-        - Modify  to incorporate the new step-by-step logic.
-        - Update the system prompt for the LLM call to match the user's provided text exactly.
-        - Implement user verification (Name, Email, Mobile, DOB) before starting form-filling.
-        - Add logic for admin escalation via Email, WhatsApp/SMS (Twilio), and Slack for critical errors.
-        - Implement a feedback mechanism (👍👎) at the end of conversations.
-        - Ensure all interactions are logged.
-     - Why fix this issue and what will be achieved with the fix?: This is a direct and detailed request from the user to make the bot more professional, secure, and user-friendly, moving it closer to a production-ready state.
+        - Check backend logs (==> /var/log/supervisor/backend.err.log <==
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4334]
+INFO:     Stopping reloader process [3604]
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [4703] using WatchFiles
+INFO:     Started server process [4705]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'consular_routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4705]
+INFO:     Started server process [5008]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [5008]
+INFO:     Stopping reloader process [4703]
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [5050] using WatchFiles
+INFO:     Started server process [5052]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests/test_form_filling.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [5052]
+INFO:     Started server process [5854]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[92m12:56:04 - LiteLLM:INFO[0m: utils.py:3427 - 
+LiteLLM completion() model= gpt-5.2; provider = openai
+2026-02-01 12:56:04,862 - LiteLLM - INFO - 
+LiteLLM completion() model= gpt-5.2; provider = openai
+[92m12:56:13 - LiteLLM:INFO[0m: utils.py:1307 - Wrapper: Completed Call, calling success_handler
+2026-02-01 12:56:13,456 - LiteLLM - INFO - Wrapper: Completed Call, calling success_handler
+[92m12:56:27 - LiteLLM:INFO[0m: utils.py:1307 - Wrapper: Completed Call, calling success_handler
+2026-02-01 12:56:27,844 - LiteLLM - INFO - Wrapper: Completed Call, calling success_handler
+WARNING:  WatchFiles detected changes in 'consular_routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [5854]
+INFO:     Started server process [6993]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6993]
+INFO:     Stopping reloader process [5050]
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [7008] using WatchFiles
+INFO:     Started server process [7010]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [46] using WatchFiles
+INFO:     Started server process [84]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [46] using WatchFiles
+INFO:     Started server process [91]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'consular_routes.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [91]
+INFO:     Started server process [238]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [238]
+INFO:     Stopping reloader process [46]
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [317] using WatchFiles
+INFO:     Started server process [319]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [48] using WatchFiles
+
+==> /var/log/supervisor/backend.out.log <==
+INFO:     10.64.131.202:50114 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:58398 - "GET /api/consular/form-session/test-continue-bug-1769950587 HTTP/1.1" 200 OK
+INFO:     10.64.131.202:50114 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.136.226:59464 - "GET /api/consular/form-session/test-continue-bug-1769950587 HTTP/1.1" 200 OK
+INFO:     10.64.131.206:51386 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:45240 - "GET /api/consular/form-session/test-continue-bug-1769950587 HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.9:59520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.203:35082 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.203:35082 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.138.62:53992 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:53078 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.138.62:53992 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.138.62:53992 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:53078 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.9:59520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:53078 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:42258 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:53078 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.9:59520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.7:51356 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:42258 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.136.226:37934 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:39688 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.136.226:37934 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:53078 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.13:34722 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:42258 - "GET /api/consular/form-session/test-persist-a054f315 HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56520 - "GET /api/consular/form-session/non-existent-session HTTP/1.1" 404 Not Found
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.7:44460 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.202:44412 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.204:51770 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:47072 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.34:36064 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:56518 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:34302 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.203:51324 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:58366 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.203:49246 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.205:46084 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.131.206:57440 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.135.173:41848 - "POST /api/consular/form-filling HTTP/1.1" 200 OK
+INFO:     10.64.129.10:59898 - "POST /api/consular/create-profile HTTP/1.1" 200 OK
+INFO:     10.64.129.9:60094 - "POST /api/consular/create-profile HTTP/1.1" 200 OK
+INFO:     10.64.131.206:47534 - "POST /api/consular/document-scan HTTP/1.1" 422 Unprocessable Entity
+INFO:     10.64.131.203:36594 - "POST /api/consular/document-scan HTTP/1.1" 422 Unprocessable Entity
+INFO:     10.64.131.203:60398 - "POST /api/consular/document-scan HTTP/1.1" 422 Unprocessable Entity
+INFO:     10.64.129.10:35352 - "POST /api/consular/form-filling HTTP/1.1" 422 Unprocessable Entity
+INFO:     10.64.129.7:55020 - "POST /api/consular/form-filling HTTP/1.1" 200 OK) immediately after the error occurs in the chat flow.
+        - Use  to manually test the  endpoint, replicating the exact sequence of user inputs (consent -> confirm field -> etc.) to isolate the failing step.
+        - Review the state management logic in , specifically how  are retrieved, updated, and persisted in MongoDB between requests. Pay close attention to the  and  fields.
+     - Why fix this issue and what will be achieved with the fix?: This is the core feature most recently developed. Fixing it is critical to validate the new interactive application flow.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix?: Both. Backend for the new logic, and frontend for the conversational experience.
+     - Should Test frontend/backend/both after fix?: Both.
+     - Blocked on other issue: Potentially blocked by Issue 2 if form-filling relies on a successful upload.
 
-  - **Issue 2: Recurring frontend preview failure for the user**
-     - Attempted fixes: The agent has previously addressed CORS errors, authentication issues, and a duplicate function declaration (). The agent has also dismissed a  error as cosmetic. However, the user continues to see a blank or broken page.
+  - **Issue 2: Document upload is failing**
+     - Attempted fixes: None.
      - Next debug checklist:
-        - Do not dismiss any console errors, including the  error. Investigate if it's a symptom of a larger issue with script loading or execution order.
-        - Check the browser's network tab in the preview environment to see if any assets (JS, CSS, images) are failing to load.
-        - Review  for race conditions or state management issues that might only appear under specific loading conditions.
-        - Use  on the live preview URL to ensure the HTML is being served correctly, then check for JavaScript errors in the browser console.
-     - Why fix this issue and what will be achieved with the fix?: The user cannot test or verify any of the implemented features if the preview is broken. Fixing this is critical for user confidence and feedback.
-     - Status: IN PROGRESS
-     - Is recurring issue? Y
-     - Should Test frontend/backend/both after fix?: Frontend.
-     - Blocked on other issue: None.
+        - Replicate the issue from the frontend and inspect the browser's developer console (Network and Console tabs) for the exact error message from the API call.
+        - Check the backend logs for tracebacks related to the document upload endpoint ().
+        - Verify the file handling logic in , including Pydantic models for the request and any security/validation checks.
+     - Why fix this issue and what will be achieved with the fix?: The entire application flow depends on users being able to upload documents. This is a fundamental feature that is currently broken.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix?: Both.
 
 **In progress Task List**:
   - None.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - **P0:** Integrate a real AI avatar using  API. The user agreed to a placeholder but wants a real talking avatar.
-    - **P1:** Implement functional mic and camera features for voice input and document scanning. The user reported they are not working.
-    - **P1:** Add a language selector dropdown in the UI for users to switch languages manually.
+    - **P1:** Implement functional Mic (voice input) and Camera (for document scanning) features. This is a long-standing core requirement.
+    - **P1:** Implement placeholders for admin escalation via Email, WhatsApp (Twilio), and Slack for critical errors, pending user-provided credentials.
+    - **P2:** Integrate a real AI avatar using  API (user has agreed to a placeholder for now).
 
     Future Tasks:
-    - Integrate with Facebook and Instagram messaging via Meta Business Suite.
+    - Integrate with Facebook and Instagram messaging.
     - Create a final deployment package for the user's KVM 8 server.
     - Add a scheduled feedback analysis dashboard for admins.
+    - Implement PDF generation for completed application forms.
 
 **Completed work in this session**
-- **Application Scaffolding:** Built the initial FastAPI backend and React frontend.
-- **Multi-Tenancy Foundation:** Created Super Admin and Local Admin routes and basic dashboard pages.
-- **Core Chatbot:** Implemented the  with an interactive chat interface ().
-- **AI Integration:** Integrated OpenAI GPT for conversational AI and ElevenLabs for Text-to-Speech.
-- **Knowledge Base:** Implemented a real-time web scraper () to pull information from .
-- **Functionality & UX:**
-  - Implemented secure file uploads with format validation.
-  - Added multi-language support (backend) and markdown rendering for formatted responses (frontend).
-  - Implemented an interactive talking avatar with audio playback and visual cues.
-  - Added a typing indicator to simulate a real conversation.
-  - Renamed the entire project from Sarthak-AI Sovereign to Seva Setu Bot.
-- **Documentation:** Created  and .
-- **Bug Fixes:** Resolved numerous issues including CORS, authentication, SSL errors in scraping, and a frontend compilation error.
+- **Application Stability:** Fixed login flows and stabilized the application, verified with comprehensive testing.
+- **New Conversational Flow:** Implemented the user's detailed system prompt for a more professional and guided bot interaction.
+- **Feedback & Language:** Added a thumbs up/down feedback mechanism and a language selector dropdown with over 50 languages.
+- **Advanced Profile Management:** Built a backend system and UI for user profile creation, including family member linking and detailed document management (type, expiry, validity status).
+- **Interactive Form-Filling System:** Created a complete, step-by-step, conversational form-filling engine that works from pre-uploaded documents. It handles user consent, field-by-field confirmation, edits, and a progress bar.
+- **Miscellaneous Services Form:** Analyzed a user-provided PDF and integrated a 20-step form template for Miscellaneous Consular Services.
+- **Documentation:** Created extensive testing and requirements documents (, ) and consistently updated .
 
 **Earlier issues found/mentioned but not fixed**
    - **Issue 1: Mic and Camera not working**
      - Debug checklist:
-       - Check  to see if event handlers for the mic and camera buttons are implemented.
-       - Verify that the browser is requesting and has been granted permissions for the microphone and camera.
-       - Implement the Web Speech API for voice recognition and  for camera access.
-     - Why to solve this issue and what will be achieved with this?: This was a core requirement in the original problem statement for a multi-modal interface.
+       - Check  to implement event handlers for the mic/camera buttons.
+       - Use the Web Speech API for voice recognition and  for camera access.
+       - Ensure browser permissions are requested correctly.
+     - Why to solve this issue and what will be achieved with this?: It is a core requirement from the original problem statement to allow multi-modal input.
      - Should Test frontend/backend/both after fix: Frontend.
-     - Is recurring issue? N
+     - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
-  - None.
+  - **Issue:** The user has previously reported the frontend preview being blank or showing unexpected error, even when agent tests passed. While the agent's recent checks were successful, this is a high-risk issue that may reappear. The user's current inability to upload documents could be related.
+  - **Recurrence count:** 2+
+  - **Status:** IN PROGRESS (Monitoring)
 
 **Code Architecture**
 
@@ -107,92 +306,89 @@ A full-stack application named Seva Setu Bot has been built using React, FastAPI
 - **Frontend:** React, Tailwind CSS, Shadcn/UI
 - **Backend:** FastAPI, Python
 - **Database:** MongoDB
-- **AI/ML:** OpenAI (Chat Completion), ElevenLabs (Text-to-Speech), Web Scraping (BeautifulSoup)
-- **Authentication:** JWT (JSON Web Tokens)
-- **Deployment:** Docker, Emergent Cloud (for preview)
+- **AI/ML:** OpenAI (Chat Completion), ElevenLabs (Text-to-Speech)
+- **Authentication:** JWT
 
 **key DB schema**
-  - **users:** {email, password_hash, role ('super_admin', 'local_admin', 'guest')}
-  - **companies:** {name, created_by, admins}
-  - **chat_sessions:** {session_id, user_id, created_at}
-  - **chat_logs:** {session_id, message, sender, timestamp}
+  - **users:** {email, password_hash, role}
+  - **profiles:** {profile_id, full_name, email, mobile, dob, family_members: [profile_id], documents: [{doc_id, doc_type, url, expiry_date, status}]}
+  - **chat_sessions:** {session_id, user_id, created_at, messages: []}
+  - **form_sessions:** {session_id, profile_id, service_id, status, current_step, form_data: {}, completed_fields: []}
   - **knowledge_cache:** {url, content, last_scraped}
 
 **changes in tech stack**
   - None.
 
 **All files of reference**
-- : Main FastAPI application, sets up routes and middleware.
-- : Core logic for the chatbot, including LLM calls, knowledge base integration, and voice generation.
-- : Handles real-time web scraping from official consulate websites.
-- : The primary frontend component containing the entire chat UI, state management, and API call logic.
-- : A list of all requested features to track progress.
-- : Auto-generated documentation for the project.
+- : The most heavily modified file. Contains all logic for chat, profiles, documents, and the new interactive form-filling system.
+- : The monolithic frontend component. Contains all UI and state for chat, profile display, language selection, feedback, and the form-filling UI.
+- : Contains the current product requirements and a log of completed features.
+- : Detailed document with test cases for external testing.
+- : In-depth use cases for the enhanced profile and document management features.
 
 **Areas that need refactoring**:
--  is becoming a monolithic component. It handles chat messages, avatar display, audio playback, file uploads, and typing animations. It should be broken down into smaller, reusable components (e.g., , , ) to improve maintainability.
+-  has grown extremely large and complex. It urgently needs to be broken down into smaller, manageable components (e.g., , , , ) to improve maintainability and prevent bugs.
 
 **key api endpoints**
+- : Main endpoint for standard chat.
+- : Create a new user profile.
+- : Add a document to a profile.
+- : Handles the new step-by-step form-filling interaction.
+- : Submits user feedback for a message.
 - : Super admin login.
-- : Creates a temporary session for guest users.
-- : Main endpoint for sending and receiving chat messages.
-- : Retrieves analytics for the super admin dashboard.
-- : Creates a new company.
 
 **Critical Info for New Agent**
-- The project is now called **Seva Setu Bot**. You must use this name.
-- The user's highest priority is implementing the new, detailed conversational flow they provided in their last messages. This is a non-negotiable next step.
-- The user repeatedly experiences issues with the live preview (blank screen, unexpected error) even when your local tests pass. **Do not dismiss this**. It's a critical bug that prevents the user from testing your work. Prioritize investigating and fixing the root cause.
-- The user has requested to mimic features from chatbots on  and . You should be ready to analyze and replicate their key functionalities.
-- The user wants to eventually use  for the avatar but has agreed to a placeholder for now to ensure all other features are working. Keep this future task in mind.
+- **PRIORITY #1:** The user is blocked by two critical bugs: the document upload failure and the error in the interactive form-filling flow. You must fix these two issues before implementing any new features.
+- The user wants features developed and tested one at a time to ensure stability.
+- The  file is a major source of technical debt. While you shouldn't refactor it without a request, be aware that its complexity may cause subtle bugs.
+- Always update the documentation (, etc.) after completing a feature. The user expects this.
 
 **documents and test reports created in this job**
-  - /app/test_reports/iteration_1.json
-  - /app/test_reports/iteration_2.json
-  - /app/test_reports/iteration_3.json
-  - /app/DOCUMENTATION.md
-  - /app/FEATURE_CHECKLIST.md
+  - /app/test_reports/iteration_4.json to /app/test_reports/iteration_8.json
+  - /app/memory/PRD.md
+  - /app/EXTERNAL_TESTING_DOCUMENT.md
+  - /app/USE_CASES_AND_TEST_CASES.md
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User asks to add features from other live bots:** User requested to add all features from bots on  and  and expressed discomfort with the current state, asking for comprehensive testing. (In Progress)
-2.  **User asks for status:** User asked about the current status and if the bot is in an advanced stage, stating the need to go live. (Addressed)
-3.  **User provides detailed bot instructions:** User provided a very long, detailed prompt defining the entire conversational flow, including user verification, admin escalation, and error handling. (New Task)
-4.  **User requests fixes and avatar:** User complains the bot is not writing in Hindi script, asks for better NLP/LLM, feedback mechanism, document reading/translation, and secure file uploads. Also asks for Super Admin login details again. (Partially Addressed)
-5.  **User complains about real-time scanning & avatar:** User asks if scanning is real-time, wants changes logged, exceptions emailed, and the avatar to be a namaste symbol. (Addressed)
-6.  **User reports multi-language issue:** User states the bot only interacts in English and must use  and  as knowledge sources. (Addressed)
-7.  **User reports chat not working again & requests name change:** User reports the bot is not answering, and wants the name changed to Sevasetu bot with the avatar simply saying Namaste. (Addressed)
-8.  **User reports chat and features not working:** User states the preview is visible but msg sending failed and mic/other resources are not working. (Addressed, but mic/camera still pending)
-9.  **User asks for better avatar and live preview link:** User wants a live preview link and a better, more professional Indian avatar. (Addressed)
-10. **User reports recurring error:** User states they are repeatedly seeing an error and cannot preview or test the application. (In Progress)
+1.  **User reports errors:** User states they are getting an error during form-filling (Sorry, there was an error...) and a document upload failed error. (Highest Priority - Pending Fix)
+2.  **User provides PDF form:** User uploaded  to be used as a template. (Completed)
+3.  **User requests major enhancements:** User asked for 50+ languages, advanced profile/family management, document validity tracking, and integration with . Also requested test case documentation. (Completed)
+4.  **User requests interactive form-filling bot:** User provided detailed requirements for a step-by-step, conversational form-filling bot that uses existing documents. (Completed)
+5.  **User confirms action:** User asked agent to push documents to GitHub and continue development one feature at a time. (In Progress)
+6.  **User requests docs on GitHub:** User asked for the test document to be displayed and for all files to be pushed to a GitHub repo. (Addressed by guiding user to Save to Github button)
+7.  **User can't see avatar/access docs:** User reported not seeing the avatar and asked how to access test documents. (Addressed, agent confirmed it works on their end and provided access instructions)
+8.  **User asks for confirmation and updated docs:** User asked for confirmation of what is done/remaining and requested an updated testing document. (Addressed)
+9.  **User provides new system prompt:** User provided a final, detailed system prompt for the bot's persona and interaction rules. (Completed)
+10. **User gives go-ahead on error fixing:** User confirmed that errors should be fixed first before adding new functionality and stated they don't have Twilio/Slack credentials ready yet. (Acknowledged)
 
 **Project Health Check:**
 - **Broken:**
-  - The live preview environment is unstable for the user.
-  - Mic and Camera functionalities are not implemented.
+  - Document upload functionality.
+  - Interactive form-filling flow.
+  - Mic and Camera functionalities (not implemented).
 - **Mocked:**
-  - The  talking avatar is currently a placeholder video.
+  - The  talking avatar is a placeholder video.
+  - Admin alert integrations (Twilio/Slack/Email) are not fully implemented pending credentials.
 
 **3rd Party Integrations**
  - **OpenAI GPT-5.2:** Uses Emergent LLM Key for chat intelligence.
  - **ElevenLabs:** Uses Emergent LLM Key for text-to-speech.
- - **Twilio:** Configured for WhatsApp messaging. Awaiting full implementation for admin alerts.
+ - **Twilio (Planned):** Configured for WhatsApp messaging. Awaiting credentials for full implementation.
  - **Akool.com (Planned):** For realistic AI talking avatar. Requires user API key.
- - **Gmail, Slack, Google Sheets (Planned):** For admin alerts and logging as per the new conversational flow.
+ - **Gmail, Slack (Planned):** For admin alerts.
 
 **Testing status**
   - Testing agent used after significant changes: YES
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created:
-    - 
-    - 
-    - 
-  - Known regressions: The frontend preview is intermittently failing for the user.
+    -  through 
+  - Known regressions: Document upload and interactive form-filling are newly broken.
 
 **Credentials to test flow:**
 - **Super Admin Login:**
   - **Email:** 
   - **Password:** 
+- **Test Profile (in DB):**  (has documents attached for testing form-filling).
 
 **What agent forgot to execute**
-- **Mic and Camera Functionality:** The agent has not implemented the logic for the microphone (voice input) and camera (document scanning) buttons, despite them being part of the original request and the user mentioning they don't work.
-- **Definitive Frontend Fix:** The agent has made several attempts to fix the frontend but has not found the root cause of why the user consistently sees a broken preview. The agent has tended to dismiss user-reported errors (like PostHog) if its own isolated tests pass.</analysis>
+- The agent has consistently deferred the implementation of the **Mic and Camera functionality**, which has been a core user requirement from the beginning.</analysis>

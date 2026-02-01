@@ -114,7 +114,7 @@
 ## Test Credentials
 - **Super Admin:** superadmin@sarthak.ai / Admin@2025
 - **Test Profile:** AMIT-19850315-TEST
-- **Preview:** https://seva-setu-1.preview.emergentagent.com
+- **Preview:** https://seva-bridge-1.preview.emergentagent.com
 
 ---
 

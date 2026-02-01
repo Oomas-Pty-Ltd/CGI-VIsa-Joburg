@@ -14,7 +14,7 @@
 **Actor:** Indian/South African citizen  
 **Precondition:** User has internet access  
 **Flow:**
-1. User opens https://seva-setu-1.preview.emergentagent.com/consular
+1. User opens https://seva-bridge-1.preview.emergentagent.com/consular
 2. User clicks "Create Profile" button
 3. System displays profile form with fields:
    - Full Name (required)

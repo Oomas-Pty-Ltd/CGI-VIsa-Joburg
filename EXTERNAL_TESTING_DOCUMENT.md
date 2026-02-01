@@ -3,7 +3,7 @@
 
 **Version:** 1.0  
 **Date:** December 2025  
-**Preview URL:** https://seva-setu-1.preview.emergentagent.com
+**Preview URL:** https://seva-bridge-1.preview.emergentagent.com
 
 ---
 
@@ -126,12 +126,12 @@ Seva Setu Bot is a multi-tenant, AI-powered consular automation platform for the
 ### 4.1 Super Admin
 - **Email:** `superadmin@sarthak.ai`
 - **Password:** `Admin@2025`
-- **URL:** https://seva-setu-1.preview.emergentagent.com/super-admin/login
+- **URL:** https://seva-bridge-1.preview.emergentagent.com/super-admin/login
 
 ### 4.2 Preview URLs
-- **Landing Page:** https://seva-setu-1.preview.emergentagent.com/
-- **Consular Bot:** https://seva-setu-1.preview.emergentagent.com/consular
-- **Super Admin Dashboard:** https://seva-setu-1.preview.emergentagent.com/super-admin/dashboard
+- **Landing Page:** https://seva-bridge-1.preview.emergentagent.com/
+- **Consular Bot:** https://seva-bridge-1.preview.emergentagent.com/consular
+- **Super Admin Dashboard:** https://seva-bridge-1.preview.emergentagent.com/super-admin/dashboard
 
 ---
 
@@ -205,7 +205,7 @@ Seva Setu Bot is a multi-tenant, AI-powered consular automation platform for the
 **Actor:** Indian citizen in South Africa  
 **Precondition:** User has internet access  
 **Steps:**
-1. User opens https://seva-setu-1.preview.emergentagent.com/consular
+1. User opens https://seva-bridge-1.preview.emergentagent.com/consular
 2. Bot greets: "Namaste! How can I assist you?"
 3. User types: "I need to renew my passport"
 4. Bot responds with passport renewal requirements and fees (ZAR 1,395 for 36 pages)
