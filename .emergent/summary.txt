@@ -1,0 +1,198 @@
+<analysis>Here is the summary of the session:
+
+**original_problem_statement:**
+The user wants to build Sarthak-AI Sovereign, a multi-tenant, offline-capable consular automation platform for Indian and South African citizens, compliant with GDPR, DPDA, and POPIA. The project was later renamed to Seva Setu Bot.
+
+**PRODUCT REQUIREMENTS:**
+- **Multi-Tenant Infrastructure:** Super Admin to create company accounts and a Local Admin self-service portal.
+- **Consular Workflow:** A clean White/Saffron themed UI with an Indian Avatar and a progress stepper (Register ➔ Upload ➔ Verify ➔ Sign).
+- **Inputs:** Support for multi-language mic (50+ languages), camera for document scanning, and secure file attachments.
+- **Intelligence:** Use a Multimodal Vision model to auto-populate forms from documents. Build an offline Knowledge Vault by scraping authorized URLs (e.g., , ).
+- **Post-Submission:** Generate a secure PDF form and email it to the applicant and admin.
+- **Analytics:** Provide lead reports (PDF/CSV) via a local SMTP.
+- **Bot Persona:** The bot should be named Seva Setu Bot and have a professional, interactive, and human-like conversational flow, including user verification, admin escalation, and getting user feedback.
+- **Talking Avatar:** The avatar should be interactive, with audio-visual capabilities, and narrate responses while also typing them in the chat.
+- **Social Channel Integration:** The bot should work on WhatsApp, Facebook, and Instagram.
+
+**User's preferred language**: English
+
+**what currently exists?**
+A full-stack application named Seva Setu Bot has been built using React, FastAPI, and MongoDB. The application includes a Super Admin dashboard, Local Admin functionalities, and a consular chat interface. Key features implemented are a chat system powered by OpenAI, real-time web scraping for a knowledge base, text-to-speech using ElevenLabs, and a UI that has been refined multiple times based on user feedback. The bot has been renamed from Sarthak-AI Sovereign to Seva Setu Bot throughout the application.
+
+**Last working item**:
+    - Last item agent was working: The user provided a highly detailed system prompt to define a new, professional, and step-by-step conversational flow for the Seva Setu Bot. The agent acknowledged these new instructions and was about to begin implementation. This task involves a major refactor of the bot's core logic to be more interactive, handle user verification, manage document creation securely, and include intelligent admin escalation for errors.
+    - Status: NOT STARTED
+    - Agent Testing Done: N
+    - Which testing method agent to use? both
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  - Issue 1: Implement the new professional conversational flow (Priority: P0)
+  - Issue 2: The user repeatedly reports the app preview is not working or shows an unexpected error, even when the agent's tests pass. (Priority: P0)
+
+  Issues Detail:
+  - **Issue 1: Implement new professional conversational flow**
+     - Attempted fixes: None. This is a new task.
+     - Next debug checklist:
+        - Modify  to incorporate the new step-by-step logic.
+        - Update the system prompt for the LLM call to match the user's provided text exactly.
+        - Implement user verification (Name, Email, Mobile, DOB) before starting form-filling.
+        - Add logic for admin escalation via Email, WhatsApp/SMS (Twilio), and Slack for critical errors.
+        - Implement a feedback mechanism (👍👎) at the end of conversations.
+        - Ensure all interactions are logged.
+     - Why fix this issue and what will be achieved with the fix?: This is a direct and detailed request from the user to make the bot more professional, secure, and user-friendly, moving it closer to a production-ready state.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix?: Both. Backend for the new logic, and frontend for the conversational experience.
+
+  - **Issue 2: Recurring frontend preview failure for the user**
+     - Attempted fixes: The agent has previously addressed CORS errors, authentication issues, and a duplicate function declaration (). The agent has also dismissed a  error as cosmetic. However, the user continues to see a blank or broken page.
+     - Next debug checklist:
+        - Do not dismiss any console errors, including the  error. Investigate if it's a symptom of a larger issue with script loading or execution order.
+        - Check the browser's network tab in the preview environment to see if any assets (JS, CSS, images) are failing to load.
+        - Review  for race conditions or state management issues that might only appear under specific loading conditions.
+        - Use  on the live preview URL to ensure the HTML is being served correctly, then check for JavaScript errors in the browser console.
+     - Why fix this issue and what will be achieved with the fix?: The user cannot test or verify any of the implemented features if the preview is broken. Fixing this is critical for user confidence and feedback.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix?: Frontend.
+     - Blocked on other issue: None.
+
+**In progress Task List**:
+  - None.
+
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - **P0:** Integrate a real AI avatar using  API. The user agreed to a placeholder but wants a real talking avatar.
+    - **P1:** Implement functional mic and camera features for voice input and document scanning. The user reported they are not working.
+    - **P1:** Add a language selector dropdown in the UI for users to switch languages manually.
+
+    Future Tasks:
+    - Integrate with Facebook and Instagram messaging via Meta Business Suite.
+    - Create a final deployment package for the user's KVM 8 server.
+    - Add a scheduled feedback analysis dashboard for admins.
+
+**Completed work in this session**
+- **Application Scaffolding:** Built the initial FastAPI backend and React frontend.
+- **Multi-Tenancy Foundation:** Created Super Admin and Local Admin routes and basic dashboard pages.
+- **Core Chatbot:** Implemented the  with an interactive chat interface ().
+- **AI Integration:** Integrated OpenAI GPT for conversational AI and ElevenLabs for Text-to-Speech.
+- **Knowledge Base:** Implemented a real-time web scraper () to pull information from .
+- **Functionality & UX:**
+  - Implemented secure file uploads with format validation.
+  - Added multi-language support (backend) and markdown rendering for formatted responses (frontend).
+  - Implemented an interactive talking avatar with audio playback and visual cues.
+  - Added a typing indicator to simulate a real conversation.
+  - Renamed the entire project from Sarthak-AI Sovereign to Seva Setu Bot.
+- **Documentation:** Created  and .
+- **Bug Fixes:** Resolved numerous issues including CORS, authentication, SSL errors in scraping, and a frontend compilation error.
+
+**Earlier issues found/mentioned but not fixed**
+   - **Issue 1: Mic and Camera not working**
+     - Debug checklist:
+       - Check  to see if event handlers for the mic and camera buttons are implemented.
+       - Verify that the browser is requesting and has been granted permissions for the microphone and camera.
+       - Implement the Web Speech API for voice recognition and  for camera access.
+     - Why to solve this issue and what will be achieved with this?: This was a core requirement in the original problem statement for a multi-modal interface.
+     - Should Test frontend/backend/both after fix: Frontend.
+     - Is recurring issue? N
+
+**Known issue recurrence from previous fork**
+  - None.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Frontend:** React, Tailwind CSS, Shadcn/UI
+- **Backend:** FastAPI, Python
+- **Database:** MongoDB
+- **AI/ML:** OpenAI (Chat Completion), ElevenLabs (Text-to-Speech), Web Scraping (BeautifulSoup)
+- **Authentication:** JWT (JSON Web Tokens)
+- **Deployment:** Docker, Emergent Cloud (for preview)
+
+**key DB schema**
+  - **users:** {email, password_hash, role ('super_admin', 'local_admin', 'guest')}
+  - **companies:** {name, created_by, admins}
+  - **chat_sessions:** {session_id, user_id, created_at}
+  - **chat_logs:** {session_id, message, sender, timestamp}
+  - **knowledge_cache:** {url, content, last_scraped}
+
+**changes in tech stack**
+  - None.
+
+**All files of reference**
+- : Main FastAPI application, sets up routes and middleware.
+- : Core logic for the chatbot, including LLM calls, knowledge base integration, and voice generation.
+- : Handles real-time web scraping from official consulate websites.
+- : The primary frontend component containing the entire chat UI, state management, and API call logic.
+- : A list of all requested features to track progress.
+- : Auto-generated documentation for the project.
+
+**Areas that need refactoring**:
+-  is becoming a monolithic component. It handles chat messages, avatar display, audio playback, file uploads, and typing animations. It should be broken down into smaller, reusable components (e.g., , , ) to improve maintainability.
+
+**key api endpoints**
+- : Super admin login.
+- : Creates a temporary session for guest users.
+- : Main endpoint for sending and receiving chat messages.
+- : Retrieves analytics for the super admin dashboard.
+- : Creates a new company.
+
+**Critical Info for New Agent**
+- The project is now called **Seva Setu Bot**. You must use this name.
+- The user's highest priority is implementing the new, detailed conversational flow they provided in their last messages. This is a non-negotiable next step.
+- The user repeatedly experiences issues with the live preview (blank screen, unexpected error) even when your local tests pass. **Do not dismiss this**. It's a critical bug that prevents the user from testing your work. Prioritize investigating and fixing the root cause.
+- The user has requested to mimic features from chatbots on  and . You should be ready to analyze and replicate their key functionalities.
+- The user wants to eventually use  for the avatar but has agreed to a placeholder for now to ensure all other features are working. Keep this future task in mind.
+
+**documents and test reports created in this job**
+  - /app/test_reports/iteration_1.json
+  - /app/test_reports/iteration_2.json
+  - /app/test_reports/iteration_3.json
+  - /app/DOCUMENTATION.md
+  - /app/FEATURE_CHECKLIST.md
+
+**Last 10 User Messages and any pending HUMAN messages**
+1.  **User asks to add features from other live bots:** User requested to add all features from bots on  and  and expressed discomfort with the current state, asking for comprehensive testing. (In Progress)
+2.  **User asks for status:** User asked about the current status and if the bot is in an advanced stage, stating the need to go live. (Addressed)
+3.  **User provides detailed bot instructions:** User provided a very long, detailed prompt defining the entire conversational flow, including user verification, admin escalation, and error handling. (New Task)
+4.  **User requests fixes and avatar:** User complains the bot is not writing in Hindi script, asks for better NLP/LLM, feedback mechanism, document reading/translation, and secure file uploads. Also asks for Super Admin login details again. (Partially Addressed)
+5.  **User complains about real-time scanning & avatar:** User asks if scanning is real-time, wants changes logged, exceptions emailed, and the avatar to be a namaste symbol. (Addressed)
+6.  **User reports multi-language issue:** User states the bot only interacts in English and must use  and  as knowledge sources. (Addressed)
+7.  **User reports chat not working again & requests name change:** User reports the bot is not answering, and wants the name changed to Sevasetu bot with the avatar simply saying Namaste. (Addressed)
+8.  **User reports chat and features not working:** User states the preview is visible but msg sending failed and mic/other resources are not working. (Addressed, but mic/camera still pending)
+9.  **User asks for better avatar and live preview link:** User wants a live preview link and a better, more professional Indian avatar. (Addressed)
+10. **User reports recurring error:** User states they are repeatedly seeing an error and cannot preview or test the application. (In Progress)
+
+**Project Health Check:**
+- **Broken:**
+  - The live preview environment is unstable for the user.
+  - Mic and Camera functionalities are not implemented.
+- **Mocked:**
+  - The  talking avatar is currently a placeholder video.
+
+**3rd Party Integrations**
+ - **OpenAI GPT-5.2:** Uses Emergent LLM Key for chat intelligence.
+ - **ElevenLabs:** Uses Emergent LLM Key for text-to-speech.
+ - **Twilio:** Configured for WhatsApp messaging. Awaiting full implementation for admin alerts.
+ - **Akool.com (Planned):** For realistic AI talking avatar. Requires user API key.
+ - **Gmail, Slack, Google Sheets (Planned):** For admin alerts and logging as per the new conversational flow.
+
+**Testing status**
+  - Testing agent used after significant changes: YES
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created:
+    - 
+    - 
+    - 
+  - Known regressions: The frontend preview is intermittently failing for the user.
+
+**Credentials to test flow:**
+- **Super Admin Login:**
+  - **Email:** 
+  - **Password:** 
+
+**What agent forgot to execute**
+- **Mic and Camera Functionality:** The agent has not implemented the logic for the microphone (voice input) and camera (document scanning) buttons, despite them being part of the original request and the user mentioning they don't work.
+- **Definitive Frontend Fix:** The agent has made several attempts to fix the frontend but has not found the root cause of why the user consistently sees a broken preview. The agent has tended to dismiss user-reported errors (like PostHog) if its own isolated tests pass.</analysis>

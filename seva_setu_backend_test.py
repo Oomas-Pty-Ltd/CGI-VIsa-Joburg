@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 class SevaSetuBotTester:
-    def __init__(self, base_url="https://secure-consul.preview.emergentagent.com/api"):
+    def __init__(self, base_url="https://seva-setu-1.preview.emergentagent.com/api"):
         self.base_url = base_url
         self.super_admin_token = None
         self.local_admin_token = None
