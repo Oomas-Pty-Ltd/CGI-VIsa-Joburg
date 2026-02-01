@@ -195,11 +195,18 @@ export default function ConsularBot() {
       return;
     }
 
+    // Ensure session ID exists
+    let currentSessionId = sessionId;
+    if (!currentSessionId) {
+      currentSessionId = "session_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      setSessionId(currentSessionId);
+    }
+
     setIsTyping(true);
     
     try {
       const response = await axios.post(`${API}/consular/form-filling`, {
-        session_id: sessionId,
+        session_id: currentSessionId,
         profile_id: userProfile.profile_id,
         service_type: selectedService.id,
         message: messageText,
@@ -208,6 +215,16 @@ export default function ConsularBot() {
       });
 
       const data = response.data;
+      
+      // Check for error status from API
+      if (data.status === "error") {
+        toast.error(data.response || "An error occurred");
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: data.response }
+        ]);
+        return;
+      }
       
       // Update form progress
       setFormProgress({
@@ -231,10 +248,12 @@ export default function ConsularBot() {
       }
 
     } catch (error) {
-      toast.error("Error processing form. Please try again.");
+      console.error("Form filling error:", error);
+      const errorMessage = error.response?.data?.detail || "Error processing form. Please try again.";
+      toast.error(errorMessage);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "❌ Sorry, there was an error. Please try again or type **STOP** to pause." }
+        { role: "assistant", content: `❌ **Error:** ${errorMessage}\n\nPlease try again or type **STOP** to pause and continue later.` }
       ]);
     } finally {
       setIsTyping(false);
