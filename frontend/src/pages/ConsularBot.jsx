@@ -93,22 +93,25 @@ const DOCUMENT_TYPES = {
   affidavit: { name: "Affidavit", validityType: "expiry", maxAgeDays: 90, copyValidDays: 90 }
 };
 
-// Available services from CGI and VFS
+// Available services from CGI and VFS (Official Miscellaneous Services Form)
 const SERVICES = [
-  { id: "passport_new", name: "New Passport", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 2 },
+  // Passport Services
   { id: "passport_renewal", name: "Passport Renewal", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 2 },
-  { id: "passport_lost", name: "Lost Passport", category: "Passport", fee: 1395, processingDays: "4-6 weeks", docsRequired: 4 },
-  { id: "visa_tourist", name: "Tourist Visa", category: "Visa", fee: 510, processingDays: "5-7 days", docsRequired: 1 },
-  { id: "visa_business", name: "Business Visa", category: "Visa", fee: 1500, processingDays: "5-7 days", docsRequired: 1 },
-  { id: "visa_student", name: "Student Visa", category: "Visa", fee: 150, processingDays: "4-6 weeks", docsRequired: 4 },
-  { id: "oci_fresh", name: "Fresh OCI Card", category: "OCI", fee: 5015, processingDays: "8-12 weeks", docsRequired: 3 },
-  { id: "oci_renewal", name: "OCI Renewal", category: "OCI", fee: 765, processingDays: "4-6 weeks", docsRequired: 2 },
-  { id: "pcc", name: "Police Clearance Certificate", category: "Miscellaneous", fee: 495, processingDays: "2-4 weeks", docsRequired: 2 },
-  { id: "birth_reg", name: "Child Birth Registration", category: "Miscellaneous", fee: 405, processingDays: "1-4 weeks", docsRequired: 4 },
-  { id: "marriage_cert", name: "Marriage Certificate", category: "Miscellaneous", fee: 492, processingDays: "1-2 weeks", docsRequired: 2 },
-  { id: "attestation", name: "Document Attestation", category: "Miscellaneous", fee: 225, processingDays: "1-2 weeks", docsRequired: 1 },
-  { id: "renunciation", name: "Renunciation of Citizenship", category: "Miscellaneous", fee: 1395, processingDays: "4-8 weeks", docsRequired: 5 },
-  { id: "emergency_cert", name: "Emergency Travel Document", category: "Emergency", fee: 315, processingDays: "1-3 days", docsRequired: 2 }
+  
+  // Visa Services
+  { id: "tourist_visa", name: "Tourist Visa", category: "Visa", fee: 510, processingDays: "5-7 days", docsRequired: 1 },
+  
+  // OCI Services
+  { id: "oci_application", name: "OCI Card Application", category: "OCI", fee: 5015, processingDays: "8-12 weeks", docsRequired: 3 },
+  
+  // Miscellaneous Services (Official CGI Form)
+  { id: "misc_services", name: "Miscellaneous Services (General)", category: "Miscellaneous", fee: "225-495", processingDays: "1-4 weeks", docsRequired: 2, description: "Birth/Marriage/Death/NRI/One & the Same/Life/Attestation/NOC/GPA Certificate/PCC" },
+  { id: "birth_certificate", name: "Birth Certificate", category: "Miscellaneous", fee: 405, processingDays: "1-4 weeks", docsRequired: 4 },
+  { id: "marriage_certificate", name: "Marriage Certificate", category: "Miscellaneous", fee: 492, processingDays: "1-2 weeks", docsRequired: 2 },
+  { id: "death_certificate", name: "Death Certificate", category: "Miscellaneous", fee: 405, processingDays: "1-4 weeks", docsRequired: 3 },
+  { id: "attestation", name: "Document Attestation", category: "Miscellaneous", fee: "225-417/page", processingDays: "1-2 weeks", docsRequired: 1 },
+  { id: "life_certificate", name: "Life Certificate (Pensioners)", category: "Miscellaneous", fee: 225, processingDays: "1 week", docsRequired: 2 },
+  { id: "pcc_application", name: "Police Clearance Certificate", category: "Miscellaneous", fee: 495, processingDays: "2-4 weeks", docsRequired: 2 }
 ];
 
 
