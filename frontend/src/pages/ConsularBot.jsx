@@ -219,7 +219,85 @@ export default function ConsularBot() {
     scrollToBottom();
   }, [messages]);
 
+  // Generate unique profile ID
+  const generateProfileId = (name, dob) => {
+    const namePart = name.replace(/\s+/g, '').substring(0, 4).toUpperCase();
+    const dobPart = dob.replace(/-/g, '');
+    const hash = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${namePart}-${dobPart}-${hash}`;
+  };
+
+  // Handle profile creation
+  const handleCreateProfile = async () => {
+    const { name, email, mobile, dob } = profileForm;
+    
+    if (!name || !email || !mobile || !dob) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+    
+    // Email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    
+    // Mobile validation (basic)
+    if (!/^\+?[\d\s-]{8,}$/.test(mobile)) {
+      toast.error('Please enter a valid mobile number');
+      return;
+    }
+    
+    const profileId = generateProfileId(name, dob);
+    
+    try {
+      const response = await axios.post(`${API}/consular/create-profile`, {
+        name,
+        email,
+        mobile,
+        dob,
+        profile_id: profileId,
+        session_id: sessionId
+      });
+      
+      if (response.data.success) {
+        setUserProfile({
+          ...profileForm,
+          profile_id: profileId
+        });
+        setShowProfileForm(false);
+        setCurrentStep("upload");
+        
+        // Add confirmation message to chat
+        setMessages((prev) => [
+          ...prev,
+          { 
+            role: "assistant", 
+            content: `✅ **Profile Created Successfully!**\n\n**Your Profile ID:** \`${profileId}\`\n\n**Name:** ${name}\n**Email:** ${email}\n**Mobile:** ${mobile}\n**DOB:** ${dob}\n\n---\n\nYou can now proceed with document upload. What service do you need help with?`
+          }
+        ]);
+        
+        toast.success(`Profile created! ID: ${profileId}`);
+      }
+    } catch (error) {
+      toast.error('Failed to create profile. Please try again.');
+    }
+  };
+
+  // Check if user needs profile for certain actions
+  const requiresProfile = (action) => {
+    const profileActions = ['apply', 'submit', 'application', 'form', 'document', 'upload'];
+    return profileActions.some(a => action.toLowerCase().includes(a));
+  };
+
   const handleFileUpload = async (e) => {
+    // Check if profile exists for document upload
+    if (!userProfile) {
+      toast.info('Please create a profile first to upload documents');
+      setShowProfileForm(true);
+      return;
+    }
+    
     const file = e.target.files[0];
     if (!file) return;
 
