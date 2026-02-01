@@ -483,6 +483,11 @@ export default function ConsularBot() {
             </div>
           </div>
         </div>
+        
+        {/* Compliance Footer */}
+        <div className="text-center mt-6 text-xs text-gray-500">
+          <p>GDPR, DPDA & POPIA Compliant • Your data is secure and private</p>
+        </div>
       </div>
 
       <Dialog open={showCamera} onOpenChange={setShowCamera}>
