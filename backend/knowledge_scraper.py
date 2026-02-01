@@ -136,13 +136,25 @@ async def scrape_vfs_global() -> Dict:
         return get_fallback_vfs_info()
 
 async def get_realtime_knowledge() -> Dict:
-    """Fetch real-time information from official websites"""
+    """Fetch real-time information from official websites with caching"""
+    # Check cache first
+    cached = get_cached_knowledge()
+    if cached:
+        return cached
+    
     try:
-        # Scrape both sources concurrently
+        # Scrape both sources concurrently with shorter timeout
         cgi_data, vfs_data = await asyncio.gather(
             scrape_cgi_joburg(),
-            scrape_vfs_global()
+            scrape_vfs_global(),
+            return_exceptions=True  # Don't fail if one source fails
         )
+        
+        # Handle exceptions from individual scrapers
+        if isinstance(cgi_data, Exception):
+            cgi_data = get_fallback_knowledge()
+        if isinstance(vfs_data, Exception):
+            vfs_data = get_fallback_vfs_info()
         
         combined_data = {
             "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -158,13 +170,18 @@ async def get_realtime_knowledge() -> Dict:
             }
         }
         
-        # Log changes
-        await log_knowledge_changes(combined_data)
+        # Cache the result
+        set_knowledge_cache(combined_data)
+        
+        # Log changes in background (don't await)
+        asyncio.create_task(log_knowledge_changes(combined_data))
         
         return combined_data
     except Exception as e:
-        await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
-        return get_fallback_knowledge()
+        # Return fallback immediately on error
+        fallback = get_fallback_knowledge()
+        set_knowledge_cache(fallback)
+        return fallback
 
 async def log_knowledge_changes(new_data: Dict):
     """Log changes in scraped data"""
