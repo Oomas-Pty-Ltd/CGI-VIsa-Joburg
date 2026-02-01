@@ -524,7 +524,12 @@ export default function ConsularBot() {
       return;
     }
 
-    toast.success(`Document "${file.name}" uploaded successfully!`);
+    // Add user message showing upload
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: `📄 Uploading document: ${file.name}` }
+    ]);
+    setIsTyping(true);
     
     // Convert to base64 and process
     const reader = new FileReader();
@@ -532,21 +537,63 @@ export default function ConsularBot() {
       const base64 = reader.result.split(',')[1];
       
       try {
-        const response = await axios.post(`${API}/consular/document-scan`, {
+        // Step 1: Scan the document to extract data
+        const scanResponse = await axios.post(`${API}/consular/document-scan`, {
           image_base64: base64,
           document_type: 'passport',
           session_id: sessionId
         });
         
-        if (response.data.success) {
-          toast.success('Document processed! Data extracted and translated.');
+        let extractedData = {};
+        if (scanResponse.data.success) {
+          // Try to parse extracted data
+          try {
+            const extractedText = scanResponse.data.extracted_data;
+            // Extract JSON if present
+            const jsonMatch = extractedText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              extractedData = JSON.parse(jsonMatch[0]);
+            }
+          } catch (parseError) {
+            console.log("Could not parse extracted data as JSON");
+          }
+        }
+        
+        // Step 2: Save the document to the user's profile
+        const documentType = extractedData?.document_type || 'passport';
+        const saveResponse = await axios.post(`${API}/consular/profile/${userProfile.profile_id}/document`, {
+          profile_id: userProfile.profile_id,
+          document_type: documentType,
+          document_name: file.name,
+          is_original: true,
+          issue_date: extractedData?.extracted_fields?.issue_date || new Date().toISOString().split('T')[0],
+          expiry_date: extractedData?.extracted_fields?.expiry_date || null,
+          document_number: extractedData?.extracted_fields?.document_number || null,
+          extracted_data: extractedData?.extracted_fields || {},
+          file_base64: base64
+        });
+        
+        if (saveResponse.data.success) {
+          toast.success('Document uploaded and saved to your profile!');
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: `Document scanned successfully! \\n\\n${response.data.extracted_data}` }
+            { 
+              role: "assistant", 
+              content: `✅ **Document Uploaded Successfully!**\n\n**Document ID:** \`${saveResponse.data.document_id}\`\n**Status:** ${saveResponse.data.validity?.status || 'Active'}\n\n${scanResponse.data.success ? '**Extracted Information:**\n' + scanResponse.data.extracted_data : 'Document saved without AI extraction.'}\n\n---\n\nYou can now use this document for your applications. Would you like to:\n- 📝 Start a new application\n- 📄 Upload another document`
+            }
           ]);
+        } else {
+          throw new Error('Failed to save document');
         }
       } catch (error) {
-        toast.error('Document processing failed. Please try again.');
+        console.error('Document upload error:', error);
+        toast.error('Document upload failed. Please try again.');
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "❌ **Document upload failed.** Please try again or contact support if the issue persists." }
+        ]);
+      } finally {
+        setIsTyping(false);
       }
     };
     reader.readAsDataURL(file);
