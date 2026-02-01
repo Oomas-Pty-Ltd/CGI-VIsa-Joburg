@@ -1295,6 +1295,12 @@ export default function ConsularBot() {
           </div>
         </div>
       )}
+      
+      {/* Cookie/GDPR Consent Banner */}
+      <ConsentBanner 
+        onAccept={() => console.log("Consent accepted")}
+        onDecline={() => console.log("Consent declined")}
+      />
     </div>
   );
 }
