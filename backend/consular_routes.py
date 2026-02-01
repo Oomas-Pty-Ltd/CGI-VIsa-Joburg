@@ -1009,11 +1009,76 @@ Your progress has been saved. Say **"continue"** or **"resume"** when you're rea
     
     # Handle CONTINUE/RESUME command
     if user_message in ["continue", "resume", "proceed"] and status == "paused":
+        # Update status to in_progress
         await db.form_sessions.update_one(
             {"session_id": request.session_id},
             {"$set": {"status": "in_progress"}}
         )
-        status = "in_progress"
+        
+        # Get current step info and return proper response
+        current_step = form_session.get("current_step", 1)
+        form_data = form_session.get("form_data", {})
+        
+        if current_step <= len(fields):
+            current_field = fields[current_step - 1]
+            current_field_id = current_field["id"]
+            current_value = form_data.get(current_field_id)
+            
+            # Try to get value from documents if not in form_data
+            if not current_value:
+                current_value = extract_value_from_source(current_field["source"], profile, documents, family)
+                if current_value:
+                    form_data[current_field_id] = current_value
+                    await db.form_sessions.update_one(
+                        {"session_id": request.session_id},
+                        {"$set": {"form_data": form_data}}
+                    )
+            
+            progress = int((current_step / total_steps) * 100)
+            progress_bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+            
+            if current_value:
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""▶️ **Resuming Application**
+
+---
+
+**Step {current_step}/{total_steps}** | Progress: **{progress}%** {progress_bar}
+
+📌 **{current_field['label']}**: `{current_value}`
+
+**Is this correct?** Reply YES, NO, or provide a different value.""",
+                    current_step=current_step,
+                    total_steps=total_steps,
+                    progress_percent=progress,
+                    status="in_progress",
+                    current_field=current_field_id,
+                    form_data=form_data,
+                    waiting_for="confirmation"
+                )
+            else:
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""▶️ **Resuming Application**
+
+---
+
+**Step {current_step}/{total_steps}** | Progress: **{progress}%** {progress_bar}
+
+❓ **{current_field['label']}**
+
+{"*(Optional)*" if not current_field.get("required") else "*(Required)*"}
+
+Please provide this information:""",
+                    current_step=current_step,
+                    total_steps=total_steps,
+                    progress_percent=progress,
+                    status="in_progress",
+                    current_field=current_field_id,
+                    form_data=form_data,
+                    waiting_for="input"
+                )
     
     # =========================================================================
     # STATE: CONSENT PENDING
