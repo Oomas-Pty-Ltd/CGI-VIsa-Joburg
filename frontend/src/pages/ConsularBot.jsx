@@ -266,6 +266,30 @@ export default function ConsularBot() {
     setInput("");
     resetTranscript();
     
+    // Check for form filling mode
+    if (formFillingMode) {
+      await handleFormFillingMessage(messageText);
+      return;
+    }
+
+    // Check for service application intent
+    const applicationKeywords = ['apply', 'application', 'start form', 'fill form', 'passport', 'visa', 'oci', 'pcc'];
+    const isApplicationIntent = applicationKeywords.some(kw => messageText.toLowerCase().includes(kw));
+    
+    if (isApplicationIntent && userProfile) {
+      // Show service selector
+      setShowServiceSelector(true);
+      setMessages((prev) => [
+        ...prev,
+        { 
+          role: "assistant", 
+          content: "📋 **Select a Service to Apply**\n\nI'll guide you through the application step-by-step using your saved documents. Which service would you like to apply for?\n\n*Click on a service below to begin:*"
+        }
+      ]);
+      setIsTyping(false);
+      return;
+    }
+    
     // Show typing indicator
     setIsTyping(true);
 
