@@ -37,6 +37,11 @@ class ChatResponse(BaseModel):
     response: str
     step: str
     audio_base64: Optional[str] = None
+    # New fields for structured conversation
+    state: Optional[str] = None
+    waiting_for: Optional[str] = None
+    progress: Optional[Dict[str, Any]] = None
+    consent_given: Optional[bool] = None
 
 class DocumentScanRequest(BaseModel):
     image_base64: str
