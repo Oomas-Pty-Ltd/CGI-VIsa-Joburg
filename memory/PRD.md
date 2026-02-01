@@ -68,14 +68,6 @@
 
 ---
 
-## Key Files
-- Backend: `/app/backend/consular_routes.py`
-- Frontend: `/app/frontend/src/pages/ConsularBot.jsx`
-- Testing Doc: `/app/EXTERNAL_TESTING_DOCUMENT.md`
-- Test Reports: `/app/test_reports/iteration_4.json`
-
----
-
 ## Testing Status
 - **Latest Report:** /app/test_reports/iteration_5.json
 - **Status:** 100% pass rate on new features
