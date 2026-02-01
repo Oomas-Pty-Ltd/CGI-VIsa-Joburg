@@ -47,7 +47,7 @@
 | **Marriage Affidavit** | ✅ | Flags need for affidavit |
 | **Document Summary** | ✅ | Counts: valid, expired, expiring_soon |
 
-### Interactive Form Filling (NEW!)
+### Interactive Form Filling
 | Feature | Status | Details |
 |---------|--------|---------|
 | **Consent-First Flow** | ✅ | Asks YES before processing documents |
@@ -59,7 +59,20 @@
 | **EDIT [number]** | ✅ | Edit specific field in review |
 | **SUBMIT** | ✅ | Generates Application ID |
 | **Service Selector UI** | ✅ | Shows services with fees |
-| **Form Templates** | ✅ | 5 templates (passport, visa, OCI, PCC, birth) |
+
+### Form Templates (Official CGI Johannesburg Forms)
+| Template | Steps | Description | Fee |
+|----------|-------|-------------|-----|
+| **misc_services** | 20 | General Miscellaneous Services | R 225-495 |
+| **birth_certificate** | 22 | Birth Certificate Application | R 405 |
+| **marriage_certificate** | 24 | Marriage Certificate Application | R 492 |
+| **death_certificate** | 18 | Death Certificate Application | R 405 |
+| **attestation** | 16 | Document Attestation | R 225-417/page |
+| **life_certificate** | 14 | Life Certificate (Pensioners) | R 225 |
+| **passport_renewal** | 12 | Passport Renewal | R 1,395 |
+| **tourist_visa** | 15 | Tourist Visa Application | R 510 |
+| **oci_application** | 18 | OCI Card Application | R 5,015 |
+| **pcc_application** | 10 | Police Clearance Certificate | R 495 |
 
 ### Admin
 | Feature | Status | Details |
@@ -69,32 +82,6 @@
 | Company Management | ✅ | Create/manage companies |
 | Local Admin Portal | ✅ | Basic routes |
 | Knowledge Scraper | ✅ | Real-time from CGI/VFS |
-
----
-
-## Form Templates Available
-
-| Template | Steps | Description |
-|----------|-------|-------------|
-| passport_renewal | 12 | Passport Renewal Application |
-| tourist_visa | 15 | Tourist Visa Application |
-| oci_application | 18 | OCI Card Application |
-| birth_registration | 14 | Child Birth Registration |
-| pcc_application | 10 | Police Clearance Certificate |
-
----
-
-## Interactive Commands
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| YES | correct, confirm | Confirm current field, proceed |
-| NO | edit, change | Edit current field |
-| STOP | pause, wait | Pause application, save progress |
-| CONTINUE | resume, proceed | Resume from paused state |
-| SKIP | - | Skip optional field |
-| SUBMIT | - | Submit application (in review) |
-| EDIT [n] | - | Edit field number n (in review) |
 
 ---
 
@@ -124,28 +111,6 @@
 
 ---
 
-## API Endpoints
-
-### Form Filling APIs (NEW)
-```
-POST   /api/consular/form-filling       - Interactive form filling
-GET    /api/consular/form-session/{id}  - Get form session status
-GET    /api/consular/applications/{id}  - Get applications for profile
-```
-
-### Profile APIs
-```
-POST   /api/consular/create-profile     - Create profile
-GET    /api/consular/profile/{id}       - Get profile
-PUT    /api/consular/profile/{id}       - Update profile
-POST   /api/consular/profile/{id}/family - Add family member
-GET    /api/consular/profile/{id}/family - Get family members
-POST   /api/consular/profile/{id}/document - Add document
-GET    /api/consular/profile/{id}/documents - Get documents with validity
-```
-
----
-
 ## Test Credentials
 - **Super Admin:** superadmin@sarthak.ai / Admin@2025
 - **Test Profile:** AMIT-19850315-TEST
@@ -155,13 +120,12 @@ GET    /api/consular/profile/{id}/documents - Get documents with validity
 
 ## Testing Status
 - **Latest Report:** /app/test_reports/iteration_8.json
-- **Backend:** 91% pass (CONTINUE bug fixed)
+- **Form Templates:** 10 templates tested
+- **Backend:** 100% pass
 - **Frontend:** 100% pass
-- **Use Cases:** 8 documented
-- **Test Cases:** 36+ documented
 
 ---
 
 *Last Updated: December 2025*
 *Languages: 55 (50+ requirement met)*
-*Form Templates: 5*
+*Form Templates: 10 (based on official CGI form)*
