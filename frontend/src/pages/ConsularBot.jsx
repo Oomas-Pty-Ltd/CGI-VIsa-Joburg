@@ -322,9 +322,9 @@ export default function ConsularBot() {
               
               {/* Bot Info */}
               <div className="space-y-3">
-                <h2 className="text-2xl font-bold text-[#1A2E40]">Seva Setu Bot</h2>
-                <p className="text-lg font-semibold text-[#E06F2C]">🙏 Namaste</p>
-                <p className="text-sm text-gray-600 italic">Here to help you, always!</p>
+                <h2 className="text-xl font-bold text-[#1A2E40] leading-tight">{BOT_CONFIG.title}</h2>
+                <p className="text-lg font-semibold text-[#E06F2C]">{BOT_CONFIG.subtitle}</p>
+                <p className="text-sm text-gray-600 italic">{BOT_CONFIG.tagline}</p>
                 
                 {/* Status Indicator */}
                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 ${
