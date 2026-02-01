@@ -149,6 +149,12 @@ export default function ConsularBot() {
   const [formProgress, setFormProgress] = useState({ current: 0, total: 0, percent: 0 });
   const [formStatus, setFormStatus] = useState(null);
   const [showServiceSelector, setShowServiceSelector] = useState(false);
+  // Consent and structured conversation states
+  const [consentGiven, setConsentGiven] = useState(false);
+  const [conversationState, setConversationState] = useState("greeting");
+  const [waitingFor, setWaitingFor] = useState(null);
+  const [showApplicationHistory, setShowApplicationHistory] = useState(false);
+  const [applications, setApplications] = useState([]);
   
   const webcamRef = React.useRef(null);
   const fileInputRef = useRef(null);
@@ -168,13 +174,52 @@ export default function ConsularBot() {
     const newSessionId = "session_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
     setSessionId(newSessionId);
     
-    setMessages([
-      {
-        role: "assistant",
-        content: "🙏 Namaste! I'm **Seva Setu Bot**, ready to help you with consular services.\n\n**Quick Actions:**\n- 📝 Start a new application\n- 💬 Ask questions about services\n- 📄 Upload documents\n\nHow may I assist you today?"
-      }
-    ]);
+    // Check if consent was previously given
+    const storedConsent = localStorage.getItem('bot_consent');
+    if (storedConsent) {
+      setConsentGiven(true);
+    }
+    
+    // Initial greeting - will trigger structured conversation
+    setMessages([]);
+    initializeConversation(newSessionId);
   }, []);
+
+  // Initialize conversation with structured flow
+  const initializeConversation = async (sid) => {
+    try {
+      const response = await axios.post(`${API}/consular/chat`, {
+        message: "START",
+        session_id: sid,
+        enable_voice: false,
+        language: selectedLanguage,
+        use_structured_flow: true,
+        user_name: userProfile?.name || null,
+        profile_id: userProfile?.profile_id || null
+      });
+      
+      setMessages([{
+        role: "assistant",
+        content: response.data.response
+      }]);
+      
+      if (response.data.state) {
+        setConversationState(response.data.state);
+      }
+      if (response.data.waiting_for) {
+        setWaitingFor(response.data.waiting_for);
+      }
+      if (response.data.progress) {
+        setFormProgress(response.data.progress);
+      }
+    } catch (error) {
+      console.error("Failed to initialize conversation:", error);
+      setMessages([{
+        role: "assistant",
+        content: "🙏 Namaste! I'm **Seva Setu Bot**, your consular services assistant.\n\nI'll guide you step-by-step for Visa, Passport, PCC, or other services.\n\nDo I have your consent to proceed and assist you? (YES/NO)"
+      }]);
+    }
+  };
 
   useEffect(() => {
     if (transcript) {
