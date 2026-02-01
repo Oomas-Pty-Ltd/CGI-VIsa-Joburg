@@ -39,9 +39,7 @@
 ### P1 - High Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Mic Voice Input | ❌ | Web Speech API needed |
-| Language Selector | ❌ | Manual dropdown |
-| User Profile Creation | ❌ | Name/Email/Mobile/DOB flow |
+| User Profile Creation | ❌ | Name/Email/Mobile/DOB flow with unique ID |
 | Document Unique ID | ❌ | [Name][DOB][App][Date][Doc] format |
 | Admin Escalation - Email | ❌ | Awaiting Gmail credentials |
 | Admin Escalation - SMS | ❌ | Awaiting Twilio credentials |
