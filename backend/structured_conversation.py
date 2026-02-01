@@ -59,18 +59,18 @@ async def get_or_create_conversation(session_id: str, user_name: str = None) -> 
     return conversation
 
 
-async def update_conversation(session_id: str, updates: Dict) -> Dict:
-    """Update conversation state"""
+async def update_conversation(session_id: str, updates: Dict) -> bool:
+    """Update conversation state - returns True if successful"""
     db = await get_database()
     
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     
-    await db.conversations.update_one(
+    result = await db.conversations.update_one(
         {"session_id": session_id},
         {"$set": updates}
     )
     
-    return await get_or_create_conversation(session_id)
+    return result.modified_count > 0
 
 
 async def add_message_to_conversation(session_id: str, role: str, content: str):
