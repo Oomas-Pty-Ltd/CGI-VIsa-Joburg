@@ -40,6 +40,14 @@ export default function ConsularBot() {
   const [isTyping, setIsTyping] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [feedbackGiven, setFeedbackGiven] = useState({});
+  const [userProfile, setUserProfile] = useState(null);
+  const [showProfileForm, setShowProfileForm] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    email: '',
+    mobile: '',
+    dob: ''
+  });
   const webcamRef = React.useRef(null);
   const fileInputRef = useRef(null);
   const audioRef = React.useRef(null);
