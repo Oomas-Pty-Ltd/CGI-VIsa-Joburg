@@ -139,6 +139,13 @@ export default function ConsularBot() {
     mobile: '',
     dob: ''
   });
+  // Form-filling mode states
+  const [formFillingMode, setFormFillingMode] = useState(false);
+  const [selectedService, setSelectedService] = useState(null);
+  const [formProgress, setFormProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [formStatus, setFormStatus] = useState(null);
+  const [showServiceSelector, setShowServiceSelector] = useState(false);
+  
   const webcamRef = React.useRef(null);
   const fileInputRef = useRef(null);
   const audioRef = React.useRef(null);
@@ -156,7 +163,7 @@ export default function ConsularBot() {
     setMessages([
       {
         role: "assistant",
-        content: "🙏 Namaste! I'm Seva Setu Bot, ready to help you with consular services. How may I assist you today?"
+        content: "🙏 Namaste! I'm **Seva Setu Bot**, ready to help you with consular services.\n\n**Quick Actions:**\n- 📝 Start a new application\n- 💬 Ask questions about services\n- 📄 Upload documents\n\nHow may I assist you today?"
       }
     ]);
   }, []);
@@ -166,6 +173,89 @@ export default function ConsularBot() {
       setInput(transcript);
     }
   }, [transcript]);
+
+  // Handle form-filling mode messages
+  const handleFormFillingMessage = async (messageText) => {
+    if (!userProfile) {
+      toast.error("Please create a profile first to start an application");
+      setShowProfileForm(true);
+      return;
+    }
+
+    if (!selectedService) {
+      toast.error("Please select a service first");
+      setShowServiceSelector(true);
+      return;
+    }
+
+    setIsTyping(true);
+    
+    try {
+      const response = await axios.post(`${API}/consular/form-filling`, {
+        session_id: sessionId,
+        profile_id: userProfile.profile_id,
+        service_type: selectedService.id,
+        message: messageText,
+        current_step: formProgress.current,
+        form_data: {}
+      });
+
+      const data = response.data;
+      
+      // Update form progress
+      setFormProgress({
+        current: data.current_step,
+        total: data.total_steps,
+        percent: data.progress_percent
+      });
+      setFormStatus(data.status);
+
+      // Add bot response
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.response, formData: data.form_data }
+      ]);
+
+      // Check if form is completed
+      if (data.status === "completed") {
+        setFormFillingMode(false);
+        setSelectedService(null);
+        toast.success("Application submitted successfully!");
+      }
+
+    } catch (error) {
+      toast.error("Error processing form. Please try again.");
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "❌ Sorry, there was an error. Please try again or type **STOP** to pause." }
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  // Start form filling for a service
+  const startFormFilling = async (service) => {
+    if (!userProfile) {
+      toast.error("Please create a profile first");
+      setShowProfileForm(true);
+      return;
+    }
+
+    setSelectedService(service);
+    setFormFillingMode(true);
+    setShowServiceSelector(false);
+    setFormProgress({ current: 0, total: 0, percent: 0 });
+    
+    // Add initial message
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: `I want to apply for ${service.name}` }
+    ]);
+
+    // Trigger form filling start
+    await handleFormFillingMessage("start");
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
