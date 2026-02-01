@@ -111,6 +111,20 @@
 
 ---
 
+## Bug Fixes (Feb 2026)
+
+### Bug #1: Interactive Form-Filling Error ✅ FIXED
+- **Issue:** "Sorry, there was an error. Please try again or type STOP to pause."
+- **Root Cause:** Session ID was null when form-filling started (before any chat message)
+- **Fix:** Initialize session ID on component mount (ConsularBot.jsx line 167)
+
+### Bug #2: Document Upload Failed ✅ FIXED
+- **Issue:** "document upload failed" message
+- **Root Cause:** Frontend only called `/document-scan` but never saved to profile
+- **Fix:** Now calls both `/document-scan` AND `/profile/{id}/document` endpoints (ConsularBot.jsx lines 560-593)
+
+---
+
 ## Test Credentials
 - **Super Admin:** superadmin@sarthak.ai / Admin@2025
 - **Test Profile:** AMIT-19850315-TEST
@@ -119,13 +133,14 @@
 ---
 
 ## Testing Status
-- **Latest Report:** /app/test_reports/iteration_8.json
+- **Latest Report:** /app/test_reports/iteration_9.json
 - **Form Templates:** 10 templates tested
 - **Backend:** 100% pass
 - **Frontend:** 100% pass
+- **Bug Fixes Verified:** Both bugs fixed and tested
 
 ---
 
-*Last Updated: December 2025*
+*Last Updated: February 2026*
 *Languages: 55 (50+ requirement met)*
 *Form Templates: 10 (based on official CGI form)*
