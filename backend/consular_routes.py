@@ -750,3 +750,796 @@ async def voice_input(
     session_id: str = None
 ):
     return {"success": True, "message": "Voice processing (placeholder for now)"}
+
+# =============================================================================
+# INTERACTIVE FORM-FILLING SYSTEM
+# =============================================================================
+
+# Form templates for different services
+FORM_TEMPLATES = {
+    "passport_renewal": {
+        "name": "Passport Renewal Application",
+        "total_steps": 12,
+        "fields": [
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "place_of_birth", "label": "Place of Birth", "source": "profile.place_of_birth", "required": True},
+            {"id": "gender", "label": "Gender", "source": "profile.gender", "required": True},
+            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
+            {"id": "permanent_address", "label": "Permanent Address", "source": "profile.permanent_address", "required": True},
+            {"id": "father_name", "label": "Father's Name", "source": "profile.father_name", "required": True},
+            {"id": "mother_name", "label": "Mother's Name", "source": "profile.mother_name", "required": True},
+            {"id": "old_passport_number", "label": "Current Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "old_passport_issue_date", "label": "Passport Issue Date", "source": "document.passport.issue_date", "required": True},
+            {"id": "old_passport_expiry_date", "label": "Passport Expiry Date", "source": "document.passport.expiry_date", "required": True},
+            {"id": "emergency_contact", "label": "Emergency Contact", "source": "profile.emergency_contact", "required": True}
+        ]
+    },
+    "tourist_visa": {
+        "name": "Tourist Visa Application",
+        "total_steps": 15,
+        "fields": [
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "nationality", "label": "Nationality", "source": "profile.nationality", "required": True},
+            {"id": "passport_number", "label": "Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "passport_issue_date", "label": "Passport Issue Date", "source": "document.passport.issue_date", "required": True},
+            {"id": "passport_expiry_date", "label": "Passport Expiry Date", "source": "document.passport.expiry_date", "required": True},
+            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
+            {"id": "occupation", "label": "Occupation", "source": "profile.occupation", "required": True},
+            {"id": "email", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "mobile", "label": "Mobile Number", "source": "profile.mobile", "required": True},
+            {"id": "purpose_of_visit", "label": "Purpose of Visit", "source": "manual", "required": True},
+            {"id": "intended_date_of_entry", "label": "Intended Date of Entry", "source": "manual", "required": True},
+            {"id": "duration_of_stay", "label": "Duration of Stay (days)", "source": "manual", "required": True},
+            {"id": "places_to_visit", "label": "Places to Visit in India", "source": "manual", "required": True},
+            {"id": "accommodation_address", "label": "Accommodation Address in India", "source": "manual", "required": True}
+        ]
+    },
+    "oci_application": {
+        "name": "OCI Card Application",
+        "total_steps": 18,
+        "fields": [
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "place_of_birth", "label": "Place of Birth", "source": "profile.place_of_birth", "required": True},
+            {"id": "gender", "label": "Gender", "source": "profile.gender", "required": True},
+            {"id": "current_nationality", "label": "Current Nationality", "source": "profile.nationality", "required": True},
+            {"id": "father_name", "label": "Father's Name", "source": "profile.father_name", "required": True},
+            {"id": "father_nationality", "label": "Father's Nationality", "source": "manual", "required": True},
+            {"id": "mother_name", "label": "Mother's Name", "source": "profile.mother_name", "required": True},
+            {"id": "mother_nationality", "label": "Mother's Nationality", "source": "manual", "required": True},
+            {"id": "spouse_name", "label": "Spouse's Name", "source": "profile.spouse_name", "required": False},
+            {"id": "spouse_nationality", "label": "Spouse's Nationality", "source": "manual", "required": False},
+            {"id": "current_passport_number", "label": "Current Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "previous_indian_passport", "label": "Previous Indian Passport Number", "source": "manual", "required": True},
+            {"id": "renunciation_date", "label": "Date of Renunciation", "source": "manual", "required": True},
+            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
+            {"id": "email", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "mobile", "label": "Mobile Number", "source": "profile.mobile", "required": True},
+            {"id": "emergency_contact", "label": "Emergency Contact", "source": "profile.emergency_contact", "required": True}
+        ]
+    },
+    "birth_registration": {
+        "name": "Child Birth Registration",
+        "total_steps": 14,
+        "fields": [
+            {"id": "child_name", "label": "Child's Full Name", "source": "manual", "required": True},
+            {"id": "child_dob", "label": "Child's Date of Birth", "source": "manual", "required": True},
+            {"id": "child_place_of_birth", "label": "Place of Birth", "source": "manual", "required": True},
+            {"id": "child_gender", "label": "Child's Gender", "source": "manual", "required": True},
+            {"id": "father_name", "label": "Father's Name", "source": "profile.name", "required": True},
+            {"id": "father_passport", "label": "Father's Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "father_nationality", "label": "Father's Nationality", "source": "profile.nationality", "required": True},
+            {"id": "mother_name", "label": "Mother's Name", "source": "family.spouse.name", "required": True},
+            {"id": "mother_passport", "label": "Mother's Passport Number", "source": "family.spouse.passport_number", "required": False},
+            {"id": "mother_nationality", "label": "Mother's Nationality", "source": "manual", "required": True},
+            {"id": "marriage_date", "label": "Parents' Marriage Date", "source": "document.marriage_certificate.issue_date", "required": True},
+            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
+            {"id": "email", "label": "Email Address", "source": "profile.email", "required": True},
+            {"id": "mobile", "label": "Mobile Number", "source": "profile.mobile", "required": True}
+        ]
+    },
+    "pcc_application": {
+        "name": "Police Clearance Certificate Application",
+        "total_steps": 10,
+        "fields": [
+            {"id": "full_name", "label": "Full Name", "source": "profile.name", "required": True},
+            {"id": "dob", "label": "Date of Birth", "source": "profile.dob", "required": True},
+            {"id": "place_of_birth", "label": "Place of Birth", "source": "profile.place_of_birth", "required": True},
+            {"id": "gender", "label": "Gender", "source": "profile.gender", "required": True},
+            {"id": "passport_number", "label": "Passport Number", "source": "profile.passport_number", "required": True},
+            {"id": "father_name", "label": "Father's Name", "source": "profile.father_name", "required": True},
+            {"id": "current_address", "label": "Current Address", "source": "profile.current_address", "required": True},
+            {"id": "permanent_address", "label": "Permanent Address in India", "source": "profile.permanent_address", "required": True},
+            {"id": "purpose", "label": "Purpose of PCC", "source": "manual", "required": True},
+            {"id": "country_required_for", "label": "Country Required For", "source": "manual", "required": True}
+        ]
+    }
+}
+
+class FormFillingRequest(BaseModel):
+    session_id: str
+    profile_id: str
+    service_type: str
+    message: str
+    current_step: Optional[int] = 0
+    form_data: Optional[Dict[str, Any]] = None
+
+class FormFillingResponse(BaseModel):
+    session_id: str
+    response: str
+    current_step: int
+    total_steps: int
+    progress_percent: int
+    status: str  # consent_pending, in_progress, paused, review, completed
+    current_field: Optional[str] = None
+    form_data: Optional[Dict[str, Any]] = None
+    waiting_for: str  # consent, confirmation, input, edit, submit
+
+def extract_value_from_source(source: str, profile: Dict, documents: List, family: List) -> Optional[str]:
+    """Extract value from profile, documents, or family based on source path"""
+    if source == "manual":
+        return None
+    
+    parts = source.split(".")
+    
+    if parts[0] == "profile" and len(parts) > 1:
+        return profile.get(parts[1])
+    
+    elif parts[0] == "document" and len(parts) > 2:
+        doc_type = parts[1]
+        field = parts[2]
+        for doc in documents:
+            if doc.get("document_type") == doc_type:
+                if field == "issue_date":
+                    return doc.get("issue_date")
+                elif field == "expiry_date":
+                    return doc.get("expiry_date")
+                elif field == "document_number":
+                    return doc.get("document_number")
+                # Check extracted_data
+                extracted = doc.get("extracted_data", {})
+                if extracted and field in extracted:
+                    return extracted.get(field)
+        return None
+    
+    elif parts[0] == "family" and len(parts) > 2:
+        relationship = parts[1]
+        field = parts[2]
+        for member in family:
+            if member.get("relationship") == relationship:
+                return member.get(field)
+        return None
+    
+    return None
+
+@router.post("/form-filling", response_model=FormFillingResponse)
+async def interactive_form_filling(request: FormFillingRequest):
+    """Interactive, step-by-step form filling using existing documents"""
+    db = await get_database()
+    
+    # Get or create form session
+    form_session = await db.form_sessions.find_one({"session_id": request.session_id}, {"_id": 0})
+    
+    if not form_session:
+        # Initialize new form session
+        form_session = {
+            "session_id": request.session_id,
+            "profile_id": request.profile_id,
+            "service_type": request.service_type,
+            "status": "consent_pending",
+            "current_step": 0,
+            "consent_given": False,
+            "form_data": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "messages": []
+        }
+        await db.form_sessions.insert_one(form_session)
+    
+    # Get profile and documents
+    profile = await db.user_profiles.find_one({"profile_id": request.profile_id}, {"_id": 0})
+    if not profile:
+        return FormFillingResponse(
+            session_id=request.session_id,
+            response="❌ **Profile not found.** Please create a profile first before starting a form application.",
+            current_step=0,
+            total_steps=0,
+            progress_percent=0,
+            status="error",
+            waiting_for="profile"
+        )
+    
+    documents = profile.get("documents", [])
+    family = profile.get("family_members", [])
+    
+    # Get form template
+    template = FORM_TEMPLATES.get(request.service_type)
+    if not template:
+        available_services = ", ".join(FORM_TEMPLATES.keys())
+        return FormFillingResponse(
+            session_id=request.session_id,
+            response=f"❌ **Unknown service type.** Available services: {available_services}",
+            current_step=0,
+            total_steps=0,
+            progress_percent=0,
+            status="error",
+            waiting_for="service_selection"
+        )
+    
+    total_steps = template["total_steps"]
+    fields = template["fields"]
+    user_message = request.message.strip().lower()
+    
+    # Handle different states
+    status = form_session.get("status", "consent_pending")
+    current_step = form_session.get("current_step", 0)
+    form_data = form_session.get("form_data", {})
+    
+    # Handle STOP command
+    if user_message in ["stop", "pause", "wait"]:
+        await db.form_sessions.update_one(
+            {"session_id": request.session_id},
+            {"$set": {"status": "paused"}}
+        )
+        
+        completed_fields = [f for f in fields[:current_step] if form_data.get(f["id"])]
+        progress = int((current_step / total_steps) * 100)
+        
+        return FormFillingResponse(
+            session_id=request.session_id,
+            response=f"""⏸️ **Application Paused**
+
+**Progress Summary:**
+- Service: **{template['name']}**
+- Completed: **{len(completed_fields)}** of **{total_steps}** fields
+- Progress: **{progress}%**
+
+Your progress has been saved. Say **"continue"** or **"resume"** when you're ready to proceed.
+
+**Completed Fields:**
+{chr(10).join([f"✅ {f['label']}: {form_data.get(f['id'], 'N/A')}" for f in fields[:current_step] if form_data.get(f['id'])])}""",
+            current_step=current_step,
+            total_steps=total_steps,
+            progress_percent=progress,
+            status="paused",
+            form_data=form_data,
+            waiting_for="resume"
+        )
+    
+    # Handle CONTINUE/RESUME command
+    if user_message in ["continue", "resume", "proceed"] and status == "paused":
+        await db.form_sessions.update_one(
+            {"session_id": request.session_id},
+            {"$set": {"status": "in_progress"}}
+        )
+        status = "in_progress"
+    
+    # =========================================================================
+    # STATE: CONSENT PENDING
+    # =========================================================================
+    if status == "consent_pending":
+        if user_message == "yes" or user_message == "i agree" or user_message == "agree":
+            # Consent given - archive documents
+            await db.form_sessions.update_one(
+                {"session_id": request.session_id},
+                {"$set": {
+                    "consent_given": True,
+                    "consent_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "status": "in_progress",
+                    "current_step": 1,
+                    "archived_documents": [d.get("id") for d in documents]
+                }}
+            )
+            
+            # Start with first field
+            field = fields[0]
+            extracted_value = extract_value_from_source(field["source"], profile, documents, family)
+            
+            progress = int((1 / total_steps) * 100)
+            
+            if extracted_value:
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""✅ **Thank you for your consent!**
+
+📋 Documents archived securely for admin staff.
+🔄 Starting **{template['name']}**...
+
+---
+
+**Step 1/{total_steps}** | Progress: **{progress}%** ████░░░░░░
+
+From your documents, I found:
+📌 **{field['label']}**: `{extracted_value}`
+
+**Is this correct?** Reply:
+- **YES** to confirm and continue
+- **NO** to edit this field
+- **STOP** to pause anytime""",
+                    current_step=1,
+                    total_steps=total_steps,
+                    progress_percent=progress,
+                    status="in_progress",
+                    current_field=field["id"],
+                    form_data={field["id"]: extracted_value},
+                    waiting_for="confirmation"
+                )
+            else:
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""✅ **Thank you for your consent!**
+
+📋 Documents archived securely for admin staff.
+🔄 Starting **{template['name']}**...
+
+---
+
+**Step 1/{total_steps}** | Progress: **{progress}%** ████░░░░░░
+
+❓ **{field['label']}**
+
+I couldn't find this in your documents. Please provide this information:""",
+                    current_step=1,
+                    total_steps=total_steps,
+                    progress_percent=progress,
+                    status="in_progress",
+                    current_field=field["id"],
+                    form_data={},
+                    waiting_for="input"
+                )
+        else:
+            # Initial consent prompt
+            doc_summary = []
+            if documents:
+                for doc in documents[:5]:  # Show first 5
+                    validity = doc.get("validity", {}).get("status", "unknown")
+                    emoji = "✅" if validity in ["active", "permanent"] else "⚠️"
+                    doc_summary.append(f"   {emoji} {doc.get('document_name', 'Unknown')}")
+            
+            return FormFillingResponse(
+                session_id=request.session_id,
+                response=f"""🙏 **Namaste! Welcome to the {template['name']} Assistant**
+
+I'll help you complete your application **step-by-step** using the documents already in your profile.
+
+**📁 Your Available Documents:**
+{chr(10).join(doc_summary) if doc_summary else "   ⚠️ No documents found in profile"}
+
+**📋 What I'll Do:**
+1. Extract information from your documents
+2. Show you each field ONE at a time
+3. Ask for your confirmation before proceeding
+4. Allow edits at any step
+5. Archive documents securely for admin staff
+
+**⚠️ CONSENT REQUIRED:**
+Do I have your permission to:
+- ✅ Read your uploaded documents
+- ✅ Extract information to auto-fill this form
+- ✅ Archive documents for admin processing
+
+**Reply YES to proceed or NO to cancel.**""",
+                current_step=0,
+                total_steps=total_steps,
+                progress_percent=0,
+                status="consent_pending",
+                waiting_for="consent"
+            )
+    
+    # =========================================================================
+    # STATE: IN PROGRESS
+    # =========================================================================
+    if status == "in_progress":
+        current_step = form_session.get("current_step", 1)
+        form_data = form_session.get("form_data", {})
+        
+        # Check if current step is valid
+        if current_step > len(fields):
+            # All fields complete - go to review
+            await db.form_sessions.update_one(
+                {"session_id": request.session_id},
+                {"$set": {"status": "review"}}
+            )
+            status = "review"
+        else:
+            current_field = fields[current_step - 1]
+            current_field_id = current_field["id"]
+            
+            # Handle YES (confirm current value)
+            if user_message == "yes" or user_message == "correct" or user_message == "confirm":
+                # Get the pending value
+                pending_value = form_data.get(current_field_id)
+                if pending_value:
+                    # Move to next step
+                    next_step = current_step + 1
+                    
+                    if next_step > len(fields):
+                        # All done - go to review
+                        await db.form_sessions.update_one(
+                            {"session_id": request.session_id},
+                            {"$set": {
+                                "status": "review",
+                                "current_step": next_step,
+                                "form_data": form_data
+                            }}
+                        )
+                        
+                        # Generate review summary
+                        review_lines = []
+                        for i, f in enumerate(fields):
+                            value = form_data.get(f["id"], "Not provided")
+                            review_lines.append(f"{i+1}. **{f['label']}**: {value}")
+                        
+                        return FormFillingResponse(
+                            session_id=request.session_id,
+                            response=f"""🎉 **All Fields Complete!**
+
+**📋 {template['name']} - Final Review**
+
+{chr(10).join(review_lines)}
+
+---
+
+**Please review all information carefully.**
+
+Reply:
+- **SUBMIT** to submit the application
+- **EDIT [number]** to change a specific field (e.g., "EDIT 3")
+- **STOP** to save and continue later""",
+                            current_step=len(fields),
+                            total_steps=total_steps,
+                            progress_percent=100,
+                            status="review",
+                            form_data=form_data,
+                            waiting_for="submit"
+                        )
+                    
+                    # Get next field
+                    next_field = fields[next_step - 1]
+                    extracted_value = extract_value_from_source(next_field["source"], profile, documents, family)
+                    
+                    # Update form_data with next field value
+                    new_form_data = {**form_data}
+                    if extracted_value:
+                        new_form_data[next_field["id"]] = extracted_value
+                    
+                    await db.form_sessions.update_one(
+                        {"session_id": request.session_id},
+                        {"$set": {
+                            "current_step": next_step,
+                            "form_data": new_form_data
+                        }}
+                    )
+                    
+                    progress = int((next_step / total_steps) * 100)
+                    progress_bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+                    
+                    if extracted_value:
+                        return FormFillingResponse(
+                            session_id=request.session_id,
+                            response=f"""✅ **Confirmed:** {current_field['label']} = `{pending_value}`
+
+---
+
+**Step {next_step}/{total_steps}** | Progress: **{progress}%** {progress_bar}
+
+From your documents, I found:
+📌 **{next_field['label']}**: `{extracted_value}`
+
+**Is this correct?** Reply YES, NO, or provide a different value.""",
+                            current_step=next_step,
+                            total_steps=total_steps,
+                            progress_percent=progress,
+                            status="in_progress",
+                            current_field=next_field["id"],
+                            form_data=new_form_data,
+                            waiting_for="confirmation"
+                        )
+                    else:
+                        return FormFillingResponse(
+                            session_id=request.session_id,
+                            response=f"""✅ **Confirmed:** {current_field['label']} = `{pending_value}`
+
+---
+
+**Step {next_step}/{total_steps}** | Progress: **{progress}%** {progress_bar}
+
+❓ **{next_field['label']}**
+
+{"*(Optional)*" if not next_field.get("required") else "*(Required)*"}
+
+Please provide this information (or type SKIP if optional):""",
+                            current_step=next_step,
+                            total_steps=total_steps,
+                            progress_percent=progress,
+                            status="in_progress",
+                            current_field=next_field["id"],
+                            form_data=new_form_data,
+                            waiting_for="input"
+                        )
+            
+            # Handle NO (want to edit)
+            elif user_message == "no" or user_message == "edit" or user_message == "change":
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""✏️ **Edit Mode**
+
+Current value for **{current_field['label']}**: `{form_data.get(current_field_id, 'Not set')}`
+
+Please type the correct value:""",
+                    current_step=current_step,
+                    total_steps=total_steps,
+                    progress_percent=int((current_step / total_steps) * 100),
+                    status="in_progress",
+                    current_field=current_field_id,
+                    form_data=form_data,
+                    waiting_for="input"
+                )
+            
+            # Handle SKIP (for optional fields)
+            elif user_message == "skip" and not current_field.get("required"):
+                next_step = current_step + 1
+                new_form_data = {**form_data}
+                new_form_data[current_field_id] = "N/A (Skipped)"
+                
+                await db.form_sessions.update_one(
+                    {"session_id": request.session_id},
+                    {"$set": {
+                        "current_step": next_step,
+                        "form_data": new_form_data
+                    }}
+                )
+                
+                if next_step > len(fields):
+                    # Move to review
+                    await db.form_sessions.update_one(
+                        {"session_id": request.session_id},
+                        {"$set": {"status": "review"}}
+                    )
+                    status = "review"
+                    # Will be handled in review section
+                else:
+                    next_field = fields[next_step - 1]
+                    extracted_value = extract_value_from_source(next_field["source"], profile, documents, family)
+                    
+                    if extracted_value:
+                        new_form_data[next_field["id"]] = extracted_value
+                    
+                    progress = int((next_step / total_steps) * 100)
+                    
+                    return FormFillingResponse(
+                        session_id=request.session_id,
+                        response=f"""⏭️ **Skipped:** {current_field['label']}
+
+---
+
+**Step {next_step}/{total_steps}** | Progress: **{progress}%**
+
+{'📌 **' + next_field['label'] + '**: `' + str(extracted_value) + '`' if extracted_value else '❓ **' + next_field['label'] + '**'}
+
+{"**Is this correct?** Reply YES or NO." if extracted_value else "Please provide this information:"}""",
+                        current_step=next_step,
+                        total_steps=total_steps,
+                        progress_percent=progress,
+                        status="in_progress",
+                        current_field=next_field["id"],
+                        form_data=new_form_data,
+                        waiting_for="confirmation" if extracted_value else "input"
+                    )
+            
+            # Handle user providing a new value
+            else:
+                # User provided a value - store it
+                new_form_data = {**form_data}
+                new_form_data[current_field_id] = request.message.strip()
+                
+                await db.form_sessions.update_one(
+                    {"session_id": request.session_id},
+                    {"$set": {"form_data": new_form_data}}
+                )
+                
+                progress = int((current_step / total_steps) * 100)
+                
+                return FormFillingResponse(
+                    session_id=request.session_id,
+                    response=f"""📝 **Field Updated**
+
+**{current_field['label']}**: `{request.message.strip()}`
+
+**Is this correct?** Reply:
+- **YES** to confirm and proceed
+- **NO** to edit again""",
+                    current_step=current_step,
+                    total_steps=total_steps,
+                    progress_percent=progress,
+                    status="in_progress",
+                    current_field=current_field_id,
+                    form_data=new_form_data,
+                    waiting_for="confirmation"
+                )
+    
+    # =========================================================================
+    # STATE: REVIEW
+    # =========================================================================
+    if status == "review":
+        form_data = form_session.get("form_data", {})
+        
+        # Handle SUBMIT
+        if user_message == "submit" or user_message == "yes" or user_message == "confirm":
+            # Generate application ID
+            app_id = f"APP-{request.service_type.upper()[:4]}-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+            
+            # Store completed application
+            application = {
+                "application_id": app_id,
+                "profile_id": request.profile_id,
+                "service_type": request.service_type,
+                "service_name": template["name"],
+                "form_data": form_data,
+                "status": "submitted",
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+                "session_id": request.session_id
+            }
+            
+            await db.applications.insert_one(application)
+            
+            # Update form session
+            await db.form_sessions.update_one(
+                {"session_id": request.session_id},
+                {"$set": {
+                    "status": "completed",
+                    "application_id": app_id,
+                    "completed_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
+            # Add to user profile
+            await db.user_profiles.update_one(
+                {"profile_id": request.profile_id},
+                {"$push": {"applications": {"id": app_id, "service": request.service_type, "status": "submitted", "date": datetime.now(timezone.utc).isoformat()}}}
+            )
+            
+            return FormFillingResponse(
+                session_id=request.session_id,
+                response=f"""🎉 **Application Submitted Successfully!**
+
+**Application ID:** `{app_id}`
+
+**📋 {template['name']}**
+
+---
+
+**What's Next:**
+1. ✅ Your application has been received
+2. 📧 You'll receive a confirmation email at `{profile.get('email')}`
+3. 📞 Our admin team will contact you if additional info is needed
+4. 📊 Track your application status using the Application ID
+
+**Estimated Processing Time:** {FORM_TEMPLATES.get(request.service_type, {}).get('processing_time', '2-4 weeks')}
+
+---
+
+Thank you for using Seva Setu Bot! 🙏
+
+**Was this helpful?** 👍 👎""",
+                current_step=total_steps,
+                total_steps=total_steps,
+                progress_percent=100,
+                status="completed",
+                form_data=form_data,
+                waiting_for="feedback"
+            )
+        
+        # Handle EDIT [number]
+        elif user_message.startswith("edit"):
+            parts = user_message.split()
+            if len(parts) > 1:
+                try:
+                    edit_step = int(parts[1])
+                    if 1 <= edit_step <= len(fields):
+                        field_to_edit = fields[edit_step - 1]
+                        
+                        await db.form_sessions.update_one(
+                            {"session_id": request.session_id},
+                            {"$set": {
+                                "status": "in_progress",
+                                "current_step": edit_step
+                            }}
+                        )
+                        
+                        return FormFillingResponse(
+                            session_id=request.session_id,
+                            response=f"""✏️ **Editing Field {edit_step}**
+
+**{field_to_edit['label']}**
+Current value: `{form_data.get(field_to_edit['id'], 'Not set')}`
+
+Please type the new value:""",
+                            current_step=edit_step,
+                            total_steps=total_steps,
+                            progress_percent=int((edit_step / total_steps) * 100),
+                            status="in_progress",
+                            current_field=field_to_edit["id"],
+                            form_data=form_data,
+                            waiting_for="input"
+                        )
+                except ValueError:
+                    pass
+            
+            return FormFillingResponse(
+                session_id=request.session_id,
+                response=f"""❓ **Which field do you want to edit?**
+
+Reply with **EDIT [number]** (e.g., "EDIT 3" to edit field 3)
+
+Or reply **SUBMIT** to submit the application.""",
+                current_step=len(fields),
+                total_steps=total_steps,
+                progress_percent=100,
+                status="review",
+                form_data=form_data,
+                waiting_for="edit_selection"
+            )
+        
+        # Show review again
+        else:
+            review_lines = []
+            for i, f in enumerate(fields):
+                value = form_data.get(f["id"], "Not provided")
+                review_lines.append(f"{i+1}. **{f['label']}**: {value}")
+            
+            return FormFillingResponse(
+                session_id=request.session_id,
+                response=f"""📋 **{template['name']} - Review**
+
+{chr(10).join(review_lines)}
+
+---
+
+Reply:
+- **SUBMIT** to submit the application
+- **EDIT [number]** to change a field (e.g., "EDIT 3")
+- **STOP** to save and continue later""",
+                current_step=len(fields),
+                total_steps=total_steps,
+                progress_percent=100,
+                status="review",
+                form_data=form_data,
+                waiting_for="submit"
+            )
+    
+    # Default response
+    return FormFillingResponse(
+        session_id=request.session_id,
+        response="I'm not sure how to proceed. Please try again or type STOP to pause.",
+        current_step=current_step,
+        total_steps=total_steps,
+        progress_percent=int((current_step / total_steps) * 100) if total_steps > 0 else 0,
+        status=status,
+        form_data=form_data,
+        waiting_for="input"
+    )
+
+@router.get("/form-session/{session_id}")
+async def get_form_session(session_id: str):
+    """Get form filling session status"""
+    db = await get_database()
+    session = await db.form_sessions.find_one({"session_id": session_id}, {"_id": 0})
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Form session not found")
+    
+    return session
+
+@router.get("/applications/{profile_id}")
+async def get_applications(profile_id: str):
+    """Get all applications for a profile"""
+    db = await get_database()
+    applications = await db.applications.find({"profile_id": profile_id}, {"_id": 0}).to_list(100)
+    
+    return {
+        "success": True,
+        "applications": applications,
+        "total": len(applications)
+    }
