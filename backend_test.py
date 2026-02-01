@@ -73,7 +73,7 @@ class SevaSetuBotTester:
         success, response = self.make_request('GET', '')
         self.log_result(
             "API Health Check", 
-            success and response.get('message') == 'Sarthak-AI Sovereign API',
+            success and response.get('message') == 'Seva Setu Bot API',
             f"Response: {response}"
         )
         return success
