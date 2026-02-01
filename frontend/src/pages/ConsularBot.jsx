@@ -64,6 +64,9 @@ export default function ConsularBot() {
     const messageText = input;
     setInput("");
     resetTranscript();
+    
+    // Show typing indicator
+    setIsTyping(true);
 
     try {
       // Detect language from input
@@ -86,9 +89,12 @@ export default function ConsularBot() {
         setSessionId(response.data.session_id);
       }
 
-      const botResponse = { role: "assistant", content: response.data.response };
-      setMessages((prev) => [...prev, botResponse]);
+      // Type out the response with animation
+      const botResponse = response.data.response;
+      await typeMessage(botResponse);
+      
       setCurrentStep(response.data.step);
+      setIsTyping(false);
 
       // Play audio response if available
       if (response.data.audio_base64 && enableVoice) {
@@ -98,7 +104,37 @@ export default function ConsularBot() {
       console.error("Chat error:", error);
       toast.error("Failed to send message. Please try again.");
       setMessages((prev) => prev.slice(0, -1));
+      setIsTyping(false);
     }
+  };
+
+  const typeMessage = async (fullMessage) => {
+    return new Promise((resolve) => {
+      let currentText = "";
+      let index = 0;
+      const typingSpeed = 20; // milliseconds per character
+      
+      // Add empty message that will be updated
+      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      
+      const typeInterval = setInterval(() => {
+        if (index < fullMessage.length) {
+          currentText += fullMessage[index];
+          setMessages((prev) => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              role: "assistant",
+              content: currentText
+            };
+            return newMessages;
+          });
+          index++;
+        } else {
+          clearInterval(typeInterval);
+          resolve();
+        }
+      }, typingSpeed);
+    });
   };
 
   const playAudio = (audioBase64) => {
