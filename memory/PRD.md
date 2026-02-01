@@ -16,9 +16,10 @@
 | Landing Page | ✅ | Professional UI, navigation |
 | Consular Bot Chat | ✅ | AI-powered (GPT-5.2), typing indicator |
 | Multi-language (Backend) | ✅ | Hindi, Tamil, English auto-detect |
-| **Language Selector Dropdown** | ✅ | **NEW** - 5 languages: English, Hindi, Tamil, Zulu, Afrikaans |
-| **Feedback Mechanism (👍👎)** | ✅ | **NEW** - Under each bot response with toast notifications |
-| **Mic Recording State** | ✅ | **NEW** - Green (idle) → Red (recording) with toast |
+| **Language Selector Dropdown** | ✅ | 5 languages: English, Hindi, Tamil, Zulu, Afrikaans |
+| **Feedback Mechanism (👍👎)** | ✅ | Under each bot response with toast notifications |
+| **Mic Recording State** | ✅ | Green (idle) → Red (recording) with toast |
+| **User Profile Creation** | ✅ | **NEW** - Full flow with unique ID: [NAME]-[DOB]-[HASH] |
 | Text-to-Speech | ✅ | ElevenLabs integration |
 | Avatar Display | ✅ | Placeholder image with speaking indicator |
 | File Upload | ✅ | JPG, PNG, PDF validation |
@@ -39,7 +40,6 @@
 ### P1 - High Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
-| User Profile Creation | ❌ | Name/Email/Mobile/DOB flow with unique ID |
 | Document Unique ID | ❌ | [Name][DOB][App][Date][Doc] format |
 | Admin Escalation - Email | ❌ | Awaiting Gmail credentials |
 | Admin Escalation - SMS | ❌ | Awaiting Twilio credentials |
@@ -69,8 +69,9 @@
 ---
 
 ## Testing Status
-- **Latest Report:** /app/test_reports/iteration_5.json
-- **Status:** 100% pass rate on new features
+- **Latest Report:** /app/test_reports/iteration_6.json
+- **Backend:** 100% pass (18/18 tests)
+- **Frontend:** 100% pass
 
 ---
 
