@@ -664,44 +664,78 @@ export default function ConsularBot() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              {/* Video Avatar Container */}
-              <div className={`relative w-full aspect-square max-w-xs mx-auto mb-4 rounded-full overflow-hidden transition-all duration-500 ${
-                isSpeaking ? 'ring-4 ring-[#2E8B57] ring-offset-4 ring-offset-white shadow-2xl shadow-green-400/50 scale-105' : 'ring-4 ring-[#E06F2C] ring-offset-4 ring-offset-white shadow-xl'
-              }`}>
-                {/* Avatar Image/Video */}
-                <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
-                  <img
-                    src="https://static.prod-images.emergentagent.com/jobs/076c0d02-c826-4888-981b-eccb66be0046/images/d359a32861e2715b1f3fe86630b740ca96254b26244c902ee07a55cbbe7e9fc5.png"
-                    alt="Seva Setu Bot - Professional Indian Consular Assistant in Namaste Pose"
-                    className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
-                  />
+              {/* Video Avatar Container with Enhanced Animations */}
+              <div className={`relative w-full aspect-square max-w-xs mx-auto mb-4 transition-all duration-500`}>
+                
+                {/* Animated rings when speaking */}
+                {isSpeaking && (
+                  <>
+                    <div className="absolute inset-0 rounded-full border-4 border-[#2E8B57]/30 animate-ping" style={{animationDuration: '1.5s'}}></div>
+                    <div className="absolute inset-[-8px] rounded-full border-2 border-[#2E8B57]/20 animate-ping" style={{animationDuration: '2s', animationDelay: '0.5s'}}></div>
+                    <div className="absolute inset-[-16px] rounded-full border border-[#2E8B57]/10 animate-ping" style={{animationDuration: '2.5s', animationDelay: '1s'}}></div>
+                  </>
+                )}
+                
+                {/* Main avatar circle */}
+                <div className={`relative w-full h-full rounded-full overflow-hidden transition-all duration-500 ${
+                  isSpeaking 
+                    ? 'ring-4 ring-[#2E8B57] ring-offset-4 ring-offset-white shadow-2xl shadow-green-400/50 scale-105' 
+                    : 'ring-4 ring-[#E06F2C] ring-offset-4 ring-offset-white shadow-xl hover:scale-102'
+                }`}>
+                  {/* Avatar Image */}
+                  <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
+                    <img
+                      src="https://static.prod-images.emergentagent.com/jobs/076c0d02-c826-4888-981b-eccb66be0046/images/d359a32861e2715b1f3fe86630b740ca96254b26244c902ee07a55cbbe7e9fc5.png"
+                      alt="Seva Setu Bot - Professional Indian Consular Assistant in Namaste Pose"
+                      className={`w-full h-full object-cover transition-all duration-500 ${
+                        isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'
+                      }`}
+                    />
+                    
+                    {/* Speaking glow overlay */}
+                    {isSpeaking && (
+                      <div className="absolute inset-0 bg-gradient-to-t from-green-400/20 via-transparent to-green-400/10 pointer-events-none animate-pulse"></div>
+                    )}
+                  </div>
                   
-                  {/* Overlay when speaking - simulates mouth movement */}
+                  {/* Sound wave animation at bottom when speaking */}
                   {isSpeaking && (
-                    <div className="absolute inset-0 bg-gradient-to-t from-green-500/20 to-transparent pointer-events-none">
-                      <div className="absolute bottom-1/3 left-1/2 transform -translate-x-1/2">
-                        <div className="flex gap-1 animate-pulse">
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '100ms'}}></div>
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '200ms'}}></div>
-                        </div>
-                      </div>
+                    <div className="absolute bottom-0 left-0 right-0 h-16 flex items-end justify-center gap-1 pb-2 bg-gradient-to-t from-black/30 to-transparent">
+                      {[...Array(9)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="w-1 bg-white rounded-full animate-pulse"
+                          style={{
+                            height: `${Math.random() * 20 + 8}px`,
+                            animationDelay: `${i * 100}ms`,
+                            animationDuration: '0.5s'
+                          }}
+                        ></div>
+                      ))}
                     </div>
                   )}
                 </div>
                 
-                {/* Speaking indicator badge */}
+                {/* Speaking indicator badge with audio visualizer */}
                 {isSpeaking && (
-                  <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 z-10">
-                    <div className="flex gap-1 bg-white px-4 py-2 rounded-full shadow-lg border-2 border-[#2E8B57]">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
+                  <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 z-10">
+                    <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-lg border-2 border-[#2E8B57] animate-pulse">
+                      {/* Audio bars */}
+                      <div className="flex items-end gap-0.5 h-4">
+                        <span className="w-1 bg-[#2E8B57] rounded-full animate-bounce" style={{height: '40%', animationDelay: '0ms', animationDuration: '0.4s'}}></span>
+                        <span className="w-1 bg-[#2E8B57] rounded-full animate-bounce" style={{height: '80%', animationDelay: '100ms', animationDuration: '0.4s'}}></span>
+                        <span className="w-1 bg-[#2E8B57] rounded-full animate-bounce" style={{height: '60%', animationDelay: '200ms', animationDuration: '0.4s'}}></span>
+                        <span className="w-1 bg-[#2E8B57] rounded-full animate-bounce" style={{height: '100%', animationDelay: '300ms', animationDuration: '0.4s'}}></span>
+                        <span className="w-1 bg-[#2E8B57] rounded-full animate-bounce" style={{height: '50%', animationDelay: '400ms', animationDuration: '0.4s'}}></span>
                       </div>
-                      <span className="text-xs font-semibold text-[#2E8B57] ml-2">Speaking</span>
+                      <span className="text-xs font-semibold text-[#2E8B57]">Speaking</span>
                     </div>
                   </div>
+                )}
+                
+                {/* Idle breathing animation glow */}
+                {!isSpeaking && (
+                  <div className="absolute inset-0 rounded-full border-2 border-[#E06F2C]/20 animate-pulse" style={{animationDuration: '3s'}}></div>
                 )}
               </div>
               
