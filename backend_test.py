@@ -371,7 +371,7 @@ class SevaSetuBotTester:
 
 def main():
     """Main test execution"""
-    tester = SarthakAPITester()
+    tester = SevaSetuBotTester()
     results = tester.run_all_tests()
     
     # Return appropriate exit code
