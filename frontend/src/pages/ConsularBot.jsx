@@ -408,6 +408,27 @@ export default function ConsularBot() {
                     <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Afrikaans</span>
                   </div>
                 </div>
+                
+                {/* Language Selector */}
+                <div className="mt-4 pt-4 border-t-2 border-gray-100">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Select Language</p>
+                  <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                    <SelectTrigger className="w-full" data-testid="language-selector">
+                      <Globe className="w-4 h-4 mr-2" />
+                      <SelectValue placeholder="Select Language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGES.map((lang) => (
+                        <SelectItem key={lang.code} value={lang.code} data-testid={`lang-${lang.code}`}>
+                          <span className="flex items-center gap-2">
+                            <span>{lang.flag}</span>
+                            <span>{lang.label}</span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>
@@ -418,7 +439,7 @@ export default function ConsularBot() {
                 {messages.map((msg, index) => (
                   <div
                     key={index}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                    className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
                     data-testid={`message-${index}`}
                   >
                     <div
@@ -444,6 +465,37 @@ export default function ConsularBot() {
                         msg.content
                       )}
                     </div>
+                    
+                    {/* Feedback buttons for assistant messages */}
+                    {msg.role === "assistant" && index > 0 && (
+                      <div className="flex items-center gap-2 mt-2" data-testid={`feedback-${index}`}>
+                        <span className="text-xs text-gray-400">Was this helpful?</span>
+                        <button
+                          onClick={() => handleFeedback(index, true)}
+                          className={`p-1.5 rounded-full transition-all ${
+                            feedbackGiven[index] === 'positive' 
+                              ? 'bg-green-100 text-green-600' 
+                              : 'hover:bg-gray-100 text-gray-400 hover:text-green-600'
+                          }`}
+                          disabled={!!feedbackGiven[index]}
+                          data-testid={`feedback-up-${index}`}
+                        >
+                          <ThumbsUp className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(index, false)}
+                          className={`p-1.5 rounded-full transition-all ${
+                            feedbackGiven[index] === 'negative' 
+                              ? 'bg-red-100 text-red-600' 
+                              : 'hover:bg-gray-100 text-gray-400 hover:text-red-600'
+                          }`}
+                          disabled={!!feedbackGiven[index]}
+                          data-testid={`feedback-down-${index}`}
+                        >
+                          <ThumbsDown className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 
@@ -460,6 +512,7 @@ export default function ConsularBot() {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               <div className="border-t border-gray-200 p-4">
