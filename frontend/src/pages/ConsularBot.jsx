@@ -373,18 +373,17 @@ export default function ConsularBot() {
               <div className="mt-6 pt-6 border-t-2 border-gray-100 space-y-3">
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Official Representative</p>
-                  <p className="text-sm font-bold text-[#1A2E40] mt-1">Consulate General of India</p>
-                  <p className="text-sm text-gray-600">Johannesburg, South Africa</p>
+                  <p className="text-sm font-bold text-[#1A2E40] mt-1">{BOT_CONFIG.organization}</p>
+                  <p className="text-sm text-gray-600">{BOT_CONFIG.location}</p>
                 </div>
                 
                 {/* Language Badges */}
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Supported Languages</p>
                   <div className="flex flex-wrap justify-center gap-2">
-                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Hindi</span>
-                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">English</span>
-                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Zulu</span>
-                    <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">Afrikaans</span>
+                    {SUPPORTED_LANGUAGES.map((lang) => (
+                      <span key={lang} className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">{lang}</span>
+                    ))}
                   </div>
                 </div>
               </div>
