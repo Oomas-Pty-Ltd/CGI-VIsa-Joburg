@@ -447,6 +447,47 @@ async def chat(request: ChatRequest):
     user_id = request.user_id or "guest"
     company_id = request.company_id
     
+    # Check if using structured conversation flow
+    if request.use_structured_flow:
+        try:
+            # Use new structured conversation system
+            result = await process_user_input(
+                session_id=session_id,
+                user_message=request.message,
+                profile_id=request.profile_id,
+                user_name=request.user_name
+            )
+            
+            # Generate voice response if requested
+            audio_base64 = None
+            if request.enable_voice:
+                try:
+                    lang_code = request.language or "en"
+                    audio_base64 = await voice_service.text_to_speech(result["response"], lang_code)
+                except Exception as e:
+                    print(f"Voice generation failed: {e}")
+            
+            return ChatResponse(
+                session_id=session_id,
+                response=result["response"],
+                step=result.get("state", "greeting"),
+                audio_base64=audio_base64,
+                state=result.get("state"),
+                waiting_for=result.get("waiting_for"),
+                progress=result.get("progress"),
+                consent_given=result.get("consent_given")
+            )
+        except Exception as e:
+            # Log exception and fall back to AI chat
+            await log_exception(
+                "structured_conversation_error",
+                str(e),
+                session_id=session_id,
+                user_id=user_id
+            )
+            # Fall through to AI chat below
+    
+    # Original AI chat flow (fallback or when use_structured_flow=False)
     session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
     
     if not session:
