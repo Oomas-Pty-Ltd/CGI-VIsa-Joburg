@@ -41,6 +41,7 @@ class FormData(BaseModel):
     session_id: str
     form_data: Dict[str, Any]
 
+# Enhanced Profile with Family Support
 class ProfileRequest(BaseModel):
     name: str
     email: str
@@ -48,10 +49,118 @@ class ProfileRequest(BaseModel):
     dob: str
     profile_id: str
     session_id: Optional[str] = None
+    # Extended fields for comprehensive profile
+    gender: Optional[str] = None
+    nationality: Optional[str] = "Indian"
+    father_name: Optional[str] = None
+    mother_name: Optional[str] = None
+    spouse_name: Optional[str] = None
+    place_of_birth: Optional[str] = None
+    current_address: Optional[str] = None
+    permanent_address: Optional[str] = None
+    passport_number: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    occupation: Optional[str] = None
+
+class FamilyMemberRequest(BaseModel):
+    parent_profile_id: str
+    name: str
+    relationship: str  # spouse, child, parent, sibling
+    dob: str
+    gender: Optional[str] = None
+    passport_number: Optional[str] = None
+
+class DocumentUploadRequest(BaseModel):
+    profile_id: str
+    document_type: str
+    document_name: str
+    is_original: bool = False
+    issue_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    document_number: Optional[str] = None
+    issuing_authority: Optional[str] = None
+    extracted_data: Optional[Dict[str, Any]] = None
+    file_base64: Optional[str] = None
+
+# Document validity rules
+DOCUMENT_VALIDITY_RULES = {
+    "passport": {"validity_type": "expiry", "copy_valid_days": 90},
+    "birth_certificate": {"validity_type": "permanent", "copy_valid_days": 90},
+    "death_certificate": {"validity_type": "permanent", "copy_valid_days": 90},
+    "marriage_certificate": {"validity_type": "affidavit", "copy_valid_days": 90, "needs_affidavit": True},
+    "driving_license": {"validity_type": "expiry", "copy_valid_days": 90},
+    "national_id": {"validity_type": "permanent", "copy_valid_days": 90},
+    "pan_card": {"validity_type": "permanent", "copy_valid_days": 90},
+    "voter_card": {"validity_type": "permanent", "copy_valid_days": 90},
+    "address_proof": {"validity_type": "expiry", "copy_valid_days": 90},
+    "photograph": {"validity_type": "expiry", "max_age_days": 180, "copy_valid_days": 90},
+    "police_report": {"validity_type": "expiry", "max_age_days": 90, "copy_valid_days": 90},
+    "affidavit": {"validity_type": "expiry", "max_age_days": 90, "copy_valid_days": 90}
+}
+
+def calculate_document_validity(doc_type: str, is_original: bool, issue_date: str, expiry_date: str = None) -> Dict:
+    """Calculate document validity status"""
+    rules = DOCUMENT_VALIDITY_RULES.get(doc_type, {"validity_type": "expiry", "copy_valid_days": 90})
+    now = datetime.now(timezone.utc)
+    
+    result = {
+        "is_valid": True,
+        "validity_type": rules["validity_type"],
+        "status": "active",
+        "message": "",
+        "days_remaining": None,
+        "needs_affidavit": rules.get("needs_affidavit", False)
+    }
+    
+    if not is_original:
+        # Copy validity - 90 days from issue
+        if issue_date:
+            issue = datetime.fromisoformat(issue_date.replace('Z', '+00:00'))
+            copy_expiry = issue + timedelta(days=rules.get("copy_valid_days", 90))
+            days_remaining = (copy_expiry - now).days
+            
+            if days_remaining <= 0:
+                result["is_valid"] = False
+                result["status"] = "expired"
+                result["message"] = f"Copy expired. Valid only for {rules.get('copy_valid_days', 90)} days from issue."
+            elif days_remaining <= 15:
+                result["status"] = "expiring_soon"
+                result["message"] = f"Copy expires in {days_remaining} days. Please renew."
+            else:
+                result["message"] = f"Copy valid for {days_remaining} more days."
+            result["days_remaining"] = max(0, days_remaining)
+    else:
+        # Original document validity
+        if rules["validity_type"] == "permanent":
+            result["message"] = "Original document - No expiry (permanent)"
+            result["status"] = "permanent"
+        elif rules["validity_type"] == "affidavit":
+            result["message"] = "Original document - May need affidavit for reproduction"
+            result["status"] = "active"
+            if rules.get("needs_affidavit"):
+                result["needs_affidavit"] = True
+        elif expiry_date:
+            expiry = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+            days_remaining = (expiry - now).days
+            
+            if days_remaining <= 0:
+                result["is_valid"] = False
+                result["status"] = "expired"
+                result["message"] = f"Document expired on {expiry_date}"
+            elif days_remaining <= 30:
+                result["status"] = "expiring_soon"
+                result["message"] = f"Expires in {days_remaining} days. Please renew."
+            else:
+                result["message"] = f"Valid until {expiry_date}"
+            result["days_remaining"] = max(0, days_remaining)
+    
+    return result
 
 @router.post("/create-profile")
 async def create_profile(request: ProfileRequest):
-    """Create user profile with unique ID"""
+    """Create comprehensive user profile with unique ID"""
     db = await get_database()
     
     # Check if profile already exists with this email
@@ -60,7 +169,8 @@ async def create_profile(request: ProfileRequest):
         return {
             "success": True,
             "profile_id": existing.get("profile_id"),
-            "message": "Profile already exists"
+            "message": "Profile already exists",
+            "profile": existing
         }
     
     profile = {
@@ -70,10 +180,26 @@ async def create_profile(request: ProfileRequest):
         "email": request.email,
         "mobile": request.mobile,
         "dob": request.dob,
+        "gender": request.gender,
+        "nationality": request.nationality,
+        "father_name": request.father_name,
+        "mother_name": request.mother_name,
+        "spouse_name": request.spouse_name,
+        "place_of_birth": request.place_of_birth,
+        "current_address": request.current_address,
+        "permanent_address": request.permanent_address,
+        "passport_number": request.passport_number,
+        "aadhar_number": request.aadhar_number,
+        "pan_number": request.pan_number,
+        "emergency_contact": request.emergency_contact,
+        "occupation": request.occupation,
         "session_id": request.session_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "documents": [],
-        "applications": []
+        "applications": [],
+        "family_members": [],
+        "is_verified": False
     }
     
     await db.user_profiles.insert_one(profile)
@@ -89,6 +215,184 @@ async def create_profile(request: ProfileRequest):
         "success": True,
         "profile_id": request.profile_id,
         "message": "Profile created successfully"
+    }
+
+@router.put("/profile/{profile_id}")
+async def update_profile(profile_id: str, request: ProfileRequest):
+    """Update existing profile"""
+    db = await get_database()
+    
+    update_data = {
+        "name": request.name,
+        "email": request.email,
+        "mobile": request.mobile,
+        "dob": request.dob,
+        "gender": request.gender,
+        "nationality": request.nationality,
+        "father_name": request.father_name,
+        "mother_name": request.mother_name,
+        "spouse_name": request.spouse_name,
+        "place_of_birth": request.place_of_birth,
+        "current_address": request.current_address,
+        "permanent_address": request.permanent_address,
+        "passport_number": request.passport_number,
+        "aadhar_number": request.aadhar_number,
+        "pan_number": request.pan_number,
+        "emergency_contact": request.emergency_contact,
+        "occupation": request.occupation,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Remove None values
+    update_data = {k: v for k, v in update_data.items() if v is not None}
+    
+    result = await db.user_profiles.update_one(
+        {"profile_id": profile_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return {"success": True, "message": "Profile updated successfully"}
+
+@router.post("/profile/{profile_id}/family")
+async def add_family_member(profile_id: str, request: FamilyMemberRequest):
+    """Add family member to profile"""
+    db = await get_database()
+    
+    # Generate family member ID
+    family_id = f"FAM-{request.name[:4].upper()}-{request.dob.replace('-', '')}-{str(uuid.uuid4())[:4].upper()}"
+    
+    family_member = {
+        "id": family_id,
+        "name": request.name,
+        "relationship": request.relationship,
+        "dob": request.dob,
+        "gender": request.gender,
+        "passport_number": request.passport_number,
+        "added_at": datetime.now(timezone.utc).isoformat(),
+        "documents": []
+    }
+    
+    result = await db.user_profiles.update_one(
+        {"profile_id": profile_id},
+        {"$push": {"family_members": family_member}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return {
+        "success": True,
+        "family_member_id": family_id,
+        "message": f"Family member {request.name} added successfully"
+    }
+
+@router.get("/profile/{profile_id}/family")
+async def get_family_members(profile_id: str):
+    """Get all family members for a profile"""
+    db = await get_database()
+    profile = await db.user_profiles.find_one({"profile_id": profile_id}, {"_id": 0, "family_members": 1})
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return {
+        "success": True,
+        "family_members": profile.get("family_members", [])
+    }
+
+@router.post("/profile/{profile_id}/document")
+async def add_document(profile_id: str, request: DocumentUploadRequest):
+    """Add document to profile with validity tracking"""
+    db = await get_database()
+    
+    # Generate document unique ID: [ProfileID]-[DocType]-[Date]-[Hash]
+    doc_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    doc_hash = str(uuid.uuid4())[:6].upper()
+    document_id = f"{profile_id}-{request.document_type.upper()[:4]}-{doc_date}-{doc_hash}"
+    
+    # Calculate validity
+    validity = calculate_document_validity(
+        request.document_type,
+        request.is_original,
+        request.issue_date or datetime.now(timezone.utc).isoformat(),
+        request.expiry_date
+    )
+    
+    document = {
+        "id": document_id,
+        "document_type": request.document_type,
+        "document_name": request.document_name,
+        "document_number": request.document_number,
+        "is_original": request.is_original,
+        "issue_date": request.issue_date,
+        "expiry_date": request.expiry_date,
+        "issuing_authority": request.issuing_authority,
+        "extracted_data": request.extracted_data,
+        "validity": validity,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "has_file": request.file_base64 is not None
+    }
+    
+    # Store file separately if provided
+    if request.file_base64:
+        await db.document_files.insert_one({
+            "document_id": document_id,
+            "profile_id": profile_id,
+            "file_base64": request.file_base64,
+            "uploaded_at": datetime.now(timezone.utc).isoformat()
+        })
+    
+    result = await db.user_profiles.update_one(
+        {"profile_id": profile_id},
+        {"$push": {"documents": document}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    return {
+        "success": True,
+        "document_id": document_id,
+        "validity": validity,
+        "message": f"Document added successfully. Status: {validity['status']}"
+    }
+
+@router.get("/profile/{profile_id}/documents")
+async def get_documents(profile_id: str):
+    """Get all documents for a profile with current validity status"""
+    db = await get_database()
+    profile = await db.user_profiles.find_one({"profile_id": profile_id}, {"_id": 0, "documents": 1})
+    
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    
+    documents = profile.get("documents", [])
+    
+    # Recalculate validity for each document
+    for doc in documents:
+        doc["validity"] = calculate_document_validity(
+            doc.get("document_type", ""),
+            doc.get("is_original", False),
+            doc.get("issue_date"),
+            doc.get("expiry_date")
+        )
+    
+    # Summary
+    summary = {
+        "total": len(documents),
+        "valid": sum(1 for d in documents if d["validity"]["is_valid"]),
+        "expired": sum(1 for d in documents if not d["validity"]["is_valid"]),
+        "expiring_soon": sum(1 for d in documents if d["validity"]["status"] == "expiring_soon"),
+        "needs_affidavit": sum(1 for d in documents if d["validity"].get("needs_affidavit", False))
+    }
+    
+    return {
+        "success": True,
+        "documents": documents,
+        "summary": summary
     }
 
 @router.get("/profile/{profile_id}")
