@@ -132,7 +132,7 @@ async def scrape_vfs_global() -> Dict:
             return data
             
     except Exception as e:
-        await send_exception_email("VFS Global Scraping Failed", str(e))
+        # Don't send email on every failure - just return fallback
         return get_fallback_vfs_info()
 
 async def get_realtime_knowledge() -> Dict:
