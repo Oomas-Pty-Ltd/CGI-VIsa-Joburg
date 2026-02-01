@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, Camera, Send, FileText, Check, ThumbsUp, ThumbsDown, Globe, User, Mail, Phone, Calendar } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, ThumbsUp, ThumbsDown, Globe, User, Mail, Phone, Calendar, History, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ConsentBanner from '../components/ConsentBanner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
