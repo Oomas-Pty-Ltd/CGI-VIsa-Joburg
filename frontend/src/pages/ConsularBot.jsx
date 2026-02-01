@@ -378,12 +378,34 @@ export default function ConsularBot() {
           session_id: sessionId,
           user_id: "guest",
           enable_voice: enableVoice,
-          language: langCode
+          language: langCode,
+          use_structured_flow: true,
+          user_name: userProfile?.name || null,
+          profile_id: userProfile?.profile_id || null
         }
       );
 
       if (!sessionId) {
         setSessionId(response.data.session_id);
+      }
+
+      // Update conversation state from response
+      if (response.data.state) {
+        setConversationState(response.data.state);
+        
+        // Track consent
+        if (response.data.state === "service_selection" && !consentGiven) {
+          setConsentGiven(true);
+          localStorage.setItem('bot_consent', 'true');
+        }
+      }
+      
+      if (response.data.waiting_for) {
+        setWaitingFor(response.data.waiting_for);
+      }
+      
+      if (response.data.progress) {
+        setFormProgress(response.data.progress);
       }
 
       // Type out the response with animation
