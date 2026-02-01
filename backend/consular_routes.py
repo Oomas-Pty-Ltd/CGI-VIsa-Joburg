@@ -160,18 +160,19 @@ def calculate_document_validity(doc_type: str, is_original: bool, issue_date: st
                 result["needs_affidavit"] = True
         elif expiry_date:
             expiry = parse_date(expiry_date)
-            days_remaining = (expiry - now).days
-            
-            if days_remaining <= 0:
-                result["is_valid"] = False
-                result["status"] = "expired"
-                result["message"] = f"Document expired on {expiry_date}"
-            elif days_remaining <= 30:
-                result["status"] = "expiring_soon"
-                result["message"] = f"Expires in {days_remaining} days. Please renew."
-            else:
-                result["message"] = f"Valid until {expiry_date}"
-            result["days_remaining"] = max(0, days_remaining)
+            if expiry:
+                days_remaining = (expiry - now).days
+                
+                if days_remaining <= 0:
+                    result["is_valid"] = False
+                    result["status"] = "expired"
+                    result["message"] = f"Document expired on {expiry_date}"
+                elif days_remaining <= 30:
+                    result["status"] = "expiring_soon"
+                    result["message"] = f"Expires in {days_remaining} days. Please renew."
+                else:
+                    result["message"] = f"Valid until {expiry_date}"
+                result["days_remaining"] = max(0, days_remaining)
     
     return result
 
