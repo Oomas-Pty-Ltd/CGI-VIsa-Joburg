@@ -66,6 +66,7 @@ api_router.include_router(super_admin_router)
 api_router.include_router(local_admin_router)
 api_router.include_router(consular_router)
 api_router.include_router(whatsapp_router)
+api_router.include_router(monitoring_router)
 
 app.include_router(api_router)
 
