@@ -823,6 +823,31 @@ export default function ConsularBot() {
                   </span>
                 </div>
                 
+                {/* Progress Indicator */}
+                {formProgress.total > 0 && (
+                  <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200" data-testid="progress-indicator">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-blue-800">
+                        Step {formProgress.current}/{formProgress.total}
+                      </span>
+                      <span className="text-xs font-bold text-blue-600">
+                        {formProgress.percent}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-blue-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-blue-500 to-blue-600 transition-all duration-500"
+                        style={{ width: `${formProgress.percent}%` }}
+                      ></div>
+                    </div>
+                    {conversationState && (
+                      <p className="text-xs text-blue-600 mt-2 capitalize">
+                        {conversationState.replace(/_/g, ' ')}
+                      </p>
+                    )}
+                  </div>
+                )}
+                
                 {/* Profile Button */}
                 {!userProfile ? (
                   <Button
