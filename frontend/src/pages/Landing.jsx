@@ -39,8 +39,8 @@ export default function Landing() {
             Multi-Tenant Consular Automation Platform
           </h1>
           <p className="text-xl text-gray-700 leading-relaxed max-w-2xl mx-auto">
-            GDPR & POPIA compliant AI-powered consular services for Indian and South African citizens.
-            Secure, multilingual, and built for scale.
+            Your friendly AI assistant for consular services. Save time, get instant help, 
+            and complete your applications with ease. Available 24/7 in 50+ languages.
           </p>
 
           <div className="flex gap-4 justify-center pt-8">
@@ -62,8 +62,8 @@ export default function Landing() {
 
             <div className="bg-white rounded-xl p-8 shadow-md hover:shadow-lg transition-all" data-testid="feature-card-secure">
               <Shield className="w-12 h-12 text-[#2E8B57] mb-4 mx-auto" />
-              <h3 className="text-xl font-semibold text-[#1A2E40] mb-2">Secure & Compliant</h3>
-              <p className="text-gray-600">Microsoft Presidio PII masking, GDPR & POPIA ready</p>
+              <h3 className="text-xl font-semibold text-[#1A2E40] mb-2">Secure & Private</h3>
+              <p className="text-gray-600">Your data is protected with enterprise-grade security</p>
             </div>
 
             <div className="bg-white rounded-xl p-8 shadow-md hover:shadow-lg transition-all" data-testid="feature-card-multilingual">
