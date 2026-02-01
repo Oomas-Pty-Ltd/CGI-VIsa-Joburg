@@ -163,6 +163,10 @@ export default function ConsularBot() {
       localStorage.setItem("token", guestToken);
     }
     
+    // Generate a session ID immediately for form-filling and other operations
+    const newSessionId = "session_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    setSessionId(newSessionId);
+    
     setMessages([
       {
         role: "assistant",
