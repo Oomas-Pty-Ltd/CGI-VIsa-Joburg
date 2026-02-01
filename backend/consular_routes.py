@@ -310,3 +310,112 @@ async def voice_input(
     session_id: str = None
 ):
     return {"success": True, "message": "Voice processing (placeholder for now)"}
+
+
+# =====================================================================
+# WIDGET ENDPOINT - Concise, focused responses for embedded widget
+# =====================================================================
+
+class WidgetChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    mode: Optional[str] = "concise"  # concise or detailed
+
+class WidgetChatResponse(BaseModel):
+    session_id: str
+    response: str
+
+@router.post("/chat-widget", response_model=WidgetChatResponse)
+async def chat_widget(request: WidgetChatRequest):
+    """
+    Widget-specific chat endpoint with concise, focused responses.
+    Designed for embedded chat widgets on external websites.
+    """
+    db = await get_database()
+    
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    # Get or create session
+    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        session = {
+            "id": session_id,
+            "user_id": "widget_guest",
+            "messages": [],
+            "source": "widget",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.chat_sessions.insert_one(session)
+    
+    # Concise system prompt - KEY TO BETTER BEHAVIOR
+    system_message = """You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.
+
+CRITICAL RULES:
+1. WAIT for user's question. DO NOT volunteer information they didn't ask for.
+2. Give SHORT, DIRECT answers (2-4 sentences max for simple questions).
+3. Only provide step-by-step details when user asks "how to" or "what are the steps".
+4. If user asks a specific question, answer ONLY that question.
+5. Use bullet points only when listing multiple items.
+6. NO lengthy introductions or conclusions.
+7. NO "Is there anything else?" - let user ask.
+
+RESPONSE LENGTH GUIDE:
+- Simple question (what is OCI?) → 2-3 sentences
+- Process question (how to apply?) → Numbered steps, brief
+- Document question (what documents?) → Bullet list only
+
+LANGUAGE: Match the user's language. Hindi → Hindi, English → English.
+
+EXAMPLE GOOD RESPONSES:
+
+User: "What is OCI?"
+You: "OCI (Overseas Citizen of India) is a lifelong visa for foreign nationals of Indian origin. It allows unlimited travel to India without needing separate visas."
+
+User: "How to renew passport?"
+You: "**Passport Renewal Steps:**
+1. Book appointment on passportindia.gov.in
+2. Fill online application form
+3. Visit with: old passport, photos, address proof
+4. Pay fee (R800-1200)
+Processing: 4-6 weeks"
+
+User: "Office timings?"
+You: "**CGI Johannesburg Hours:**
+Mon-Fri: 9:00 AM - 5:30 PM
+Consular services: 9:00 AM - 12:30 PM
+Closed on Indian & SA public holidays"
+
+NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
+    
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    chat_instance = LlmChat(
+        api_key=api_key,
+        session_id=session_id,
+        system_message=system_message
+    ).with_model("openai", "gpt-5.2")
+    
+    user_message = UserMessage(text=request.message)
+    
+    try:
+        bot_response = await chat_instance.send_message(user_message)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Service error: {str(e)}"
+        )
+    
+    # Store messages
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$push": {"messages": {
+            "$each": [
+                {"role": "user", "content": request.message, "timestamp": datetime.now(timezone.utc).isoformat()},
+                {"role": "assistant", "content": bot_response, "timestamp": datetime.now(timezone.utc).isoformat()}
+            ]
+        }}}
+    )
+    
+    return WidgetChatResponse(
+        session_id=session_id,
+        response=bot_response
+    )
