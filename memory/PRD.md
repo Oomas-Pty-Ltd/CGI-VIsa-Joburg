@@ -47,6 +47,20 @@
 | **Marriage Affidavit** | ✅ | Flags need for affidavit |
 | **Document Summary** | ✅ | Counts: valid, expired, expiring_soon |
 
+### Interactive Form Filling (NEW!)
+| Feature | Status | Details |
+|---------|--------|---------|
+| **Consent-First Flow** | ✅ | Asks YES before processing documents |
+| **Step-by-Step Confirmation** | ✅ | One field at a time |
+| **YES/NO Commands** | ✅ | Confirm or edit current field |
+| **STOP/CONTINUE** | ✅ | Pause and resume anytime |
+| **Progress Tracking** | ✅ | Step X/Y with progress bar |
+| **Review Mode** | ✅ | Shows all fields before submit |
+| **EDIT [number]** | ✅ | Edit specific field in review |
+| **SUBMIT** | ✅ | Generates Application ID |
+| **Service Selector UI** | ✅ | Shows services with fees |
+| **Form Templates** | ✅ | 5 templates (passport, visa, OCI, PCC, birth) |
+
 ### Admin
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -58,38 +72,29 @@
 
 ---
 
-## Document Validity Rules
+## Form Templates Available
 
-| Document Type | Original Validity | Copy Validity |
-|---------------|-------------------|---------------|
-| Passport | Until expiry date | 90 days |
-| Birth Certificate | Permanent | 90 days |
-| Death Certificate | Permanent | 90 days |
-| Marriage Certificate | Permanent (may need affidavit) | 90 days |
-| Driving License | Until expiry date | 90 days |
-| National ID / Aadhar | Permanent | 90 days |
-| PAN Card | Permanent | 90 days |
-| Photograph | 6 months max | 90 days |
-| Police Report | 90 days | 90 days |
-| Affidavit | 90 days | 90 days |
+| Template | Steps | Description |
+|----------|-------|-------------|
+| passport_renewal | 12 | Passport Renewal Application |
+| tourist_visa | 15 | Tourist Visa Application |
+| oci_application | 18 | OCI Card Application |
+| birth_registration | 14 | Child Birth Registration |
+| pcc_application | 10 | Police Clearance Certificate |
 
 ---
 
-## Services Available
+## Interactive Commands
 
-| Service | Fee (ZAR) | Processing | Docs Required |
-|---------|-----------|------------|---------------|
-| New Passport | 1,395 | 4-6 weeks | 2 |
-| Passport Renewal | 1,395 | 4-6 weeks | 2 |
-| Tourist Visa | 510 | 5-7 days | 1 |
-| Business Visa | 1,500 | 5-7 days | 1 |
-| Student Visa | 150 | 4-6 weeks | 4 |
-| Fresh OCI | 5,015 | 8-12 weeks | 3 |
-| OCI Renewal | 765 | 4-6 weeks | 2 |
-| PCC | 495 | 2-4 weeks | 2 |
-| Birth Registration | 405 | 1-4 weeks | 4 |
-| Marriage Certificate | 492 | 1-2 weeks | 2 |
-| Attestation | 225 | 1-2 weeks | 1 |
+| Command | Aliases | Action |
+|---------|---------|--------|
+| YES | correct, confirm | Confirm current field, proceed |
+| NO | edit, change | Edit current field |
+| STOP | pause, wait | Pause application, save progress |
+| CONTINUE | resume, proceed | Resume from paused state |
+| SKIP | - | Skip optional field |
+| SUBMIT | - | Submit application (in review) |
+| EDIT [n] | - | Edit field number n (in review) |
 
 ---
 
@@ -98,8 +103,6 @@
 ### P1 - High Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Service Selection UI | ❌ | Service picker in chat |
-| Pre-fill Form from Profile | ❌ | Auto-populate with saved data |
 | Admin Escalation - Email | ❌ | Awaiting Gmail credentials |
 | Admin Escalation - SMS | ❌ | Awaiting Twilio credentials |
 | Admin Escalation - Slack | ❌ | Awaiting webhook URL |
@@ -123,6 +126,13 @@
 
 ## API Endpoints
 
+### Form Filling APIs (NEW)
+```
+POST   /api/consular/form-filling       - Interactive form filling
+GET    /api/consular/form-session/{id}  - Get form session status
+GET    /api/consular/applications/{id}  - Get applications for profile
+```
+
 ### Profile APIs
 ```
 POST   /api/consular/create-profile     - Create profile
@@ -132,20 +142,6 @@ POST   /api/consular/profile/{id}/family - Add family member
 GET    /api/consular/profile/{id}/family - Get family members
 POST   /api/consular/profile/{id}/document - Add document
 GET    /api/consular/profile/{id}/documents - Get documents with validity
-```
-
-### Chat APIs
-```
-POST   /api/consular/chat               - Send chat message
-POST   /api/consular/feedback           - Submit feedback
-GET    /api/consular/session/{id}       - Get session
-```
-
-### Admin APIs
-```
-POST   /api/auth/super-admin/login      - Admin login
-GET    /api/super-admin/analytics       - Dashboard data
-POST   /api/super-admin/companies       - Create company
 ```
 
 ---
@@ -158,39 +154,14 @@ POST   /api/super-admin/companies       - Create company
 ---
 
 ## Testing Status
-- **Latest Report:** /app/test_reports/iteration_7.json
-- **Backend:** 100% pass (20/20 tests)
+- **Latest Report:** /app/test_reports/iteration_8.json
+- **Backend:** 91% pass (CONTINUE bug fixed)
 - **Frontend:** 100% pass
 - **Use Cases:** 8 documented
-- **Test Cases:** 36 documented
-
----
-
-## GitHub Repository Structure
-```
-/app/
-├── backend/
-│   ├── consular_routes.py        # Main API endpoints
-│   ├── server.py                 # FastAPI server
-│   └── tests/
-│       ├── test_seva_setu_api.py
-│       ├── test_profile_api.py
-│       └── test_enhanced_features.py
-├── frontend/src/pages/
-│   ├── ConsularBot.jsx           # 50+ languages, services
-│   ├── Landing.jsx
-│   └── SuperAdminDashboard.jsx
-├── memory/
-│   └── PRD.md                    # This document
-├── test_reports/
-│   └── iteration_1-7.json
-├── USE_CASES_AND_TEST_CASES.md   # Full test documentation
-├── EXTERNAL_TESTING_DOCUMENT.md
-└── DOCUMENTATION.md
-```
+- **Test Cases:** 36+ documented
 
 ---
 
 *Last Updated: December 2025*
 *Languages: 55 (50+ requirement met)*
-*Test Pass Rate: 100%*
+*Form Templates: 5*
