@@ -1,569 +1,378 @@
 # Seva Setu Bot - Complete Documentation
 
-## Table of Contents
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Features](#features)
-4. [Installation & Setup](#installation--setup)
-5. [API Documentation](#api-documentation)
-6. [Avatar System](#avatar-system)
-7. [Multi-Language Support](#multi-language-support)
-8. [Security Features](#security-features)
-9. [Testing](#testing)
-10. [Deployment](#deployment)
+## Overview
+Seva Setu Bot is a multi-channel consular automation platform for the Consulate General of India, Johannesburg. It serves Indian and South African citizens with 24/7 AI-powered assistance.
 
 ---
 
-## Overview
-
-**Seva Setu Bot** is an advanced AI-powered consular automation platform for the Consulate General of India, Johannesburg. It provides multi-lingual, audio-visual assistance for Indian and South African citizens.
-
-### Key Capabilities
-- **Interactive Talking Avatar** with real-time voice synthesis
-- **Multi-language support** (Hindi, English, Afrikaans, Zulu, Tamil, etc.)
-- **Document OCR** with translation
-- **Real-time web scraping** from official sources
-- **Multi-tenant architecture** for companies
-- **GDPR/POPIA compliant** data handling
+## Table of Contents
+1. [Architecture](#architecture)
+2. [Features](#features)
+3. [API Reference](#api-reference)
+4. [Integrations](#integrations)
+5. [Templates](#templates)
+6. [Testing](#testing)
+7. [Deployment](#deployment)
 
 ---
 
 ## Architecture
 
 ### Tech Stack
-```
-Frontend:  React 18 + Tailwind CSS + Shadcn UI
-Backend:   FastAPI + Python 3.11
-Database:  MongoDB
-AI/ML:     OpenAI GPT-5.2 + TTS-1-HD
-Voice:     Web Speech API + OpenAI TTS
-```
+| Component | Technology |
+|-----------|------------|
+| Frontend | React, Tailwind CSS, Shadcn UI |
+| Backend | FastAPI (Python) |
+| Database | MongoDB |
+| AI | OpenAI GPT-5.2 (via Emergent LLM) |
+| Messaging | Twilio (WhatsApp), Facebook Messenger |
+| Monitoring | Custom monitoring service |
 
-### System Components
-
+### Directory Structure
 ```
-┌─────────────────────────────────────────┐
-│         Frontend (React)                │
-│  - Landing Page                         │
-│  - Consular Bot (Avatar + Chat)         │
-│  - Super Admin Dashboard                │
-│  - Local Admin Portal                   │
-└─────────────┬───────────────────────────┘
-              │
-              │ HTTPS/WebSocket
-              │
-┌─────────────▼───────────────────────────┐
-│         Backend (FastAPI)               │
-│  - Auth Routes                          │
-│  - Consular Routes                      │
-│  - Admin Routes                         │
-│  - Voice Service                        │
-│  - Knowledge Scraper                    │
-└─────────────┬───────────────────────────┘
-              │
-    ┌─────────┴─────────┐
-    │                   │
-┌───▼────┐      ┌───────▼──────┐
-│MongoDB │      │  External    │
-│        │      │  - OpenAI    │
-│        │      │  - CGI Site  │
-│        │      │  - VFS Site  │
-└────────┘      └──────────────┘
+/app/
+├── backend/
+│   ├── server.py              # Main FastAPI app
+│   ├── consular_routes.py     # Chat endpoints
+│   ├── whatsapp_routes.py     # WhatsApp integration
+│   ├── facebook_routes.py     # Facebook integration
+│   ├── template_routes.py     # Template management
+│   ├── monitoring_routes.py   # Health & metrics
+│   └── auth_routes.py         # Authentication
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── ConsularBot.jsx    # Full bot interface
+│   │   │   └── Landing.jsx        # Landing page
+│   │   ├── components/
+│   │   │   └── ChatWidget.jsx     # Embeddable widget
+│   │   └── config/
+│   │       └── botMessages.js     # Configurable messages
+│   └── public/
+│       └── embed.js               # Widget embed script
 ```
 
 ---
 
 ## Features
 
-### 1. Interactive Talking Avatar
+### 1. Web Chat (Full Interface)
+- **URL:** `/consular`
+- Full-featured chat with progress stepper
+- Document upload, camera, voice input
+- Multi-language support (50+ languages)
 
-**Visual Characteristics:**
-- Professional Indian woman in traditional attire
-- Represents modern India
-- Namaste greeting gesture
-- Round profile with animated borders
+### 2. Embeddable Widget
+- **Demo:** `/widget-demo`
+- Lightweight chat bubble for embedding on any website
+- Concise AI responses
+- Easy installation with single script tag
 
-**Speaking Indicators:**
-- Green pulsing ring when speaking
-- Animated status dots
-- "Speaking..." text indicator
-- Brightness increase during speech
+### 3. WhatsApp Integration
+- **Webhook:** `/api/whatsapp/webhook`
+- Twilio-powered messaging
+- AI-powered automatic responses
+- Message history tracking
 
-**Voice Capabilities:**
-- OpenAI TTS-1-HD (high quality)
-- Language-specific voices:
-  - English: "Nova" (energetic)
-  - Hindi: "Shimmer" (bright)
-  - Afrikaans: "Alloy" (neutral)
-  - Zulu: "Coral" (warm)
+### 4. Facebook Messenger
+- **Webhook:** `/api/facebook/webhook`
+- Messenger API integration
+- Automatic AI responses
+- Conversation management
 
-### 2. Typing Animation
-
-**Behavior:**
-- Shows "Seva Setu is typing..." with bouncing dots
-- Text appears character-by-character (20ms speed)
-- Synchronized with voice playback
-- Smooth markdown rendering
-
-### 3. Real-Time Web Scraping
-
-**Sources:**
-- cgijoburg.gov.in
-- visa.vfsglobal.com
-
-**Features:**
-- Scrapes every API call
-- Change detection with MD5 hashing
-- Logs: `/app/logs/knowledge_changes.log`
-- Exception emails to: mayurakole@example.com
-
-### 4. Document Processing
-
-**OCR Capabilities:**
-- Reads documents in ANY language
-- Extracts: Name, DOB, Address, Document Number
-- Translates to English for form-filling
-- JSON structured output
-
-**Supported Formats:**
-- Images: JPG, JPEG, PNG
-- Documents: PDF
-- Max size: 10MB
-- MIME validation for security
-
-### 5. Multi-Tenant System
-
-**Super Admin:**
-- Create companies
-- Manage LLM configurations
-- View global analytics
-- Monitor system health
-
-**Local Admin:**
-- Upload knowledge base documents
-- View masked chat logs (Presidio)
-- Toggle voice/camera features
-- Generate analytics reports
+### 5. Template Management
+- Email, WhatsApp, Alert templates
+- Variable substitution
+- User-created custom templates
+- Multi-language support
 
 ---
 
-## Installation & Setup
+## API Reference
 
-### Prerequisites
-```bash
-- Python 3.11+
-- Node.js 18+
-- MongoDB 6.0+
-- Redis (optional, for caching)
+### Chat Endpoints
+
+#### Full Chat (Web)
 ```
-
-### Backend Setup
-
-```bash
-cd /app/backend
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your keys
-
-# Run backend
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
-```
-
-### Frontend Setup
-
-```bash
-cd /app/frontend
-
-# Install dependencies
-yarn install
-
-# Configure environment
-cp .env.example .env
-# Edit REACT_APP_BACKEND_URL
-
-# Run frontend
-yarn start
-```
-
-### Environment Variables
-
-**Backend (.env):**
-```env
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=seva_setu_db
-EMERGENT_LLM_KEY=sk-emergent-xxxxx
-JWT_SECRET=your-secret-key
-SUPER_ADMIN_EMAIL=admin@example.com
-SUPER_ADMIN_PASSWORD=SecurePassword123
-CORS_ORIGINS=*
-UPLOAD_DIR=/app/uploads
-```
-
-**Frontend (.env):**
-```env
-REACT_APP_BACKEND_URL=https://your-domain.com
-WDS_SOCKET_PORT=443
-ENABLE_HEALTH_CHECK=false
-```
-
----
-
-## API Documentation
-
-### Authentication
-
-#### Super Admin Login
-```http
-POST /api/auth/super-admin/login
-Content-Type: application/json
-
-{
-  "email": "superadmin@sarthak.ai",
-  "password": "Admin@2025"
-}
-
-Response:
-{
-  "token": "eyJhbGci...",
-  "user_type": "super_admin",
-  "user_id": "uuid"
-}
-```
-
-#### Local Admin Login
-```http
-POST /api/auth/local-admin/login
-Content-Type: application/json
-
-{
-  "email": "admin@company.com",
-  "password": "password"
-}
-```
-
-### Consular Bot
-
-#### Chat with Avatar
-```http
 POST /api/consular/chat
 Content-Type: application/json
 
 {
-  "message": "I need passport information",
-  "session_id": "uuid" (optional),
-  "user_id": "guest",
-  "enable_voice": true,
+  "message": "What is OCI?",
+  "session_id": "optional-session-id",
+  "enable_voice": false
+}
+```
+
+#### Widget Chat (Concise)
+```
+POST /api/consular/chat-widget
+Content-Type: application/json
+
+{
+  "message": "What is OCI?",
+  "session_id": "optional-session-id"
+}
+```
+
+### WhatsApp Endpoints
+
+#### Status Check
+```
+GET /api/whatsapp/status
+```
+
+#### Send Message
+```
+POST /api/whatsapp/send
+Content-Type: application/json
+
+{
+  "to_number": "+27123456789",
+  "message": "Hello from Seva Setu"
+}
+```
+
+#### Webhook (for Twilio)
+```
+POST /api/whatsapp/webhook
+Content-Type: application/x-www-form-urlencoded
+
+From=whatsapp:+27123456789
+To=whatsapp:+14155238886
+Body=Hello
+MessageSid=SM123456
+```
+
+### Facebook Endpoints
+
+#### Webhook Verification
+```
+GET /api/facebook/webhook?hub.mode=subscribe&hub.verify_token=seva_setu_verify_token&hub.challenge=CHALLENGE_STRING
+```
+
+#### Webhook (for Messages)
+```
+POST /api/facebook/webhook
+Content-Type: application/json
+
+{
+  "object": "page",
+  "entry": [...]
+}
+```
+
+### Template Endpoints
+
+#### List Templates
+```
+GET /api/templates/?category=email&language=en
+```
+
+#### Create Template
+```
+POST /api/templates/
+Content-Type: application/json
+
+{
+  "name": "My Template",
+  "category": "email",
+  "subject": "Hello {{user_name}}",
+  "body": "Dear {{user_name}}, ...",
+  "variables": ["user_name"],
   "language": "en"
 }
-
-Response:
-{
-  "session_id": "uuid",
-  "response": "**Hello!** Here's passport info...",
-  "step": "register",
-  "audio_base64": "base64_encoded_mp3" (if enable_voice=true)
-}
 ```
 
-#### Document Scan with OCR
-```http
-POST /api/consular/document-scan
+#### Render Template
+```
+POST /api/templates/render
 Content-Type: application/json
 
 {
-  "image_base64": "base64_encoded_image",
-  "document_type": "passport",
-  "session_id": "uuid"
-}
-
-Response:
-{
-  "success": true,
-  "extracted_data": {
-    "full_name": "John Doe",
-    "date_of_birth": "1990-01-01",
-    "document_number": "ABC123456",
-    ...
+  "template_id": "template-uuid",
+  "variables": {
+    "user_name": "John"
   }
 }
 ```
 
-### Super Admin
+### Monitoring Endpoints
 
-#### Create Company
-```http
-POST /api/super-admin/companies
-Authorization: Bearer {token}
-Content-Type: application/json
-
-{
-  "name": "Acme Corp",
-  "email": "admin@acme.com",
-  "admin_password": "SecurePass123",
-  "llm_model": "gpt-5.2",
-  "features": {
-    "voice": true,
-    "camera": true
-  }
-}
 ```
-
-#### Get Analytics
-```http
-GET /api/super-admin/analytics/overview
-Authorization: Bearer {token}
-
-Response:
-{
-  "total_companies": 10,
-  "total_sessions": 1500,
-  "total_documents": 500
-}
+GET /api/monitoring/health     # Quick health check
+GET /api/monitoring/status     # Detailed status
+GET /api/monitoring/metrics    # Performance metrics
+GET /api/monitoring/history    # Historical data
 ```
 
 ---
 
-## Avatar System
+## Integrations
 
-### Visual States
+### WhatsApp (Twilio)
 
-**1. Idle State:**
-- Orange ring (#E06F2C)
-- Normal brightness
-- "Ready to Assist" status
-
-**2. Speaking State:**
-- Green pulsing ring (#2E8B57)
-- Increased brightness (110%)
-- Scale: 105%
-- "🎙️ Speaking..." status
-- Bouncing dots animation
-
-**3. Typing State:**
-- Shows typing indicator in chat
-- Orange bouncing dots
-- "Seva Setu is typing..." message
-
-### Voice Toggle
-
-**Component:**
-```jsx
-<label>
-  <input 
-    type="checkbox" 
-    checked={enableVoice}
-    onChange={(e) => setEnableVoice(e.target.checked)}
-  />
-  {enableVoice ? "🔊 Voice Enabled" : "🔇 Voice Disabled"}
-</label>
+#### Setup
+1. Create Twilio account at https://console.twilio.com
+2. Navigate to Messaging > Try WhatsApp
+3. Get Account SID and Auth Token
+4. Configure in `.env`:
+```
+TWILIO_ACCOUNT_SID=your_sid
+TWILIO_AUTH_TOKEN=your_token
+TWILIO_WHATSAPP_NUMBER=+14155238886
 ```
 
-**Behavior:**
-- User can toggle on/off
-- Persists during session
-- Shows clear visual feedback
+5. Configure Webhook URL in Twilio Console:
+```
+When a message comes in: https://your-domain.com/api/whatsapp/webhook
+Status callback URL: https://your-domain.com/api/whatsapp/status-callback
+```
+
+### Facebook Messenger
+
+#### Setup
+1. Create Facebook App at https://developers.facebook.com
+2. Add Messenger product
+3. Generate Page Access Token
+4. Configure in `.env`:
+```
+FB_PAGE_ACCESS_TOKEN=your_token
+FB_VERIFY_TOKEN=seva_setu_verify_token
+FB_APP_SECRET=your_secret
+```
+
+5. Configure Webhook URL in Facebook App:
+```
+Callback URL: https://your-domain.com/api/facebook/webhook
+Verify Token: seva_setu_verify_token
+```
 
 ---
 
-## Multi-Language Support
+## Templates
 
-### Supported Languages
+### Default Templates
 
-| Language | Script | Voice | Detection |
-|----------|--------|-------|-----------|
-| English | Latin | Nova | Default |
-| Hindi | देवनागरी | Shimmer | Regex: `[\u0900-\u097F]` |
-| Tamil | தமிழ் | Nova | Regex: `[\u0B80-\u0BFF]` |
-| Afrikaans | Latin | Alloy | User context |
-| Zulu | Latin | Coral | User context |
+| Name | Category | Language |
+|------|----------|----------|
+| Welcome Email | email | en |
+| Application Status Update | email | en |
+| Appointment Reminder | email | en |
+| WhatsApp Welcome | whatsapp | en |
+| WhatsApp Appointment Reminder | whatsapp | en |
+| System Alert - High Load | alert | en |
+| Fraud Alert | alert | en |
+| स्वागत ईमेल | email | hi |
 
-### Language Detection
-
-```javascript
-// Auto-detect from user input
-const isHindi = /[\u0900-\u097F]/.test(message);
-const isTamil = /[\u0B80-\u0BFF]/.test(message);
-const langCode = isHindi ? "hi" : isTamil ? "ta" : "en";
-```
-
-### Response Format
-
-Bot ALWAYS responds in the SAME language and script:
-- User writes Hindi (देवनागरी) → Bot responds in देवनागरी
-- User writes English → Bot responds in English
-- No romanization or script changes
-
----
-
-## Security Features
-
-### 1. File Upload Validation
-
-```python
-ALLOWED_FORMATS = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-
-# Checks:
-- File extension
-- MIME type (prevents spoofing)
-- File size
-- Filename sanitization
-```
-
-### 2. PII Masking (Microsoft Presidio)
-
-```python
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
-
-# Masks: PERSON, EMAIL, PHONE, LOCATION, DATE_TIME
-masked_text = mask_pii(original_text)
-```
-
-### 3. JWT Authentication
-
-```python
-JWT_ALGORITHM = 'HS256'
-TOKEN_EXPIRY = 7 days
-
-# Roles: super_admin, local_admin, user
-```
-
-### 4. CORS Configuration
-
-```python
-CORS_ORIGINS = ["https://your-domain.com"]
-allow_credentials = True
-allow_methods = ["*"]
-allow_headers = ["*"]
-```
+### Variables
+Templates support variable substitution using `{{variable_name}}` syntax:
+- `{{user_name}}` - User's name
+- `{{appointment_date}}` - Appointment date
+- `{{service_type}}` - Service type
+- `{{status}}` - Application status
 
 ---
 
 ## Testing
 
-### Manual Testing
+### Test Credentials
+- **Super Admin:** `superadmin@sarthak.ai` / `Admin@2025`
+- **Bot URL:** https://consular-genius.preview.emergentagent.com/consular
+- **Widget Demo:** https://consular-genius.preview.emergentagent.com/widget-demo
 
-**1. Test Avatar Speaking:**
+### Test Commands
+
+#### WhatsApp (Mock Mode)
 ```bash
-curl -X POST "https://your-domain.com/api/consular/chat" \
+curl -X POST "https://consular-genius.preview.emergentagent.com/api/whatsapp/webhook" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "From=whatsapp:+27123456789&To=whatsapp:+14155238886&Body=Hello&MessageSid=SM123"
+```
+
+#### Facebook (Mock Mode)
+```bash
+curl -X POST "https://consular-genius.preview.emergentagent.com/api/facebook/webhook" \
   -H "Content-Type: application/json" \
-  -d '{
-    "message": "Tell me about passport services",
-    "enable_voice": true,
-    "language": "en"
-  }'
+  -d '{"object":"page","entry":[{"messaging":[{"sender":{"id":"123"},"message":{"text":"Hello"}}]}]}'
 ```
 
-**2. Test Multi-Language:**
+#### Templates
 ```bash
-# Hindi
-curl -X POST "..." -d '{"message": "मुझे पासपोर्ट की जानकारी चाहिए"}'
-
-# Tamil
-curl -X POST "..." -d '{"message": "கடவுச்சீட்டு பற்றி"}'
-```
-
-**3. Test Document OCR:**
-```bash
-# Convert image to base64
-base64 passport.jpg > passport_b64.txt
-
-curl -X POST ".../document-scan" \
-  -d '{"image_base64": "...base64...", "document_type": "passport"}'
-```
-
-### Automated Testing
-
-Run testing agent:
-```bash
-testing_agent_v3 --task "Test all features"
+curl "https://consular-genius.preview.emergentagent.com/api/templates/"
 ```
 
 ---
 
 ## Deployment
 
+### Environment Variables
+```env
+# Required
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=seva_setu
+EMERGENT_LLM_KEY=your_key
+
+# WhatsApp (Twilio)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_NUMBER=
+
+# Facebook
+FB_PAGE_ACCESS_TOKEN=
+FB_VERIFY_TOKEN=
+FB_APP_SECRET=
+
+# Monitoring
+SMTP_HOST=smtp.gmail.com
+SMTP_USER=
+SMTP_PASSWORD=
+ALERT_EMAILS=
+```
+
 ### Production Checklist
-
-- [ ] Update `.env` with production values
-- [ ] Set `CORS_ORIGINS` to your domain
-- [ ] Enable HTTPS
-- [ ] Configure MongoDB replication
-- [ ] Set up Redis for caching
-- [ ] Enable rate limiting
-- [ ] Configure backup system
-- [ ] Set up monitoring (logs, errors)
-- [ ] Test all endpoints
-- [ ] Load testing
-
-### Kubernetes Deployment
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: seva-setu-backend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: seva-setu-backend
-  template:
-    metadata:
-      labels:
-        app: seva-setu-backend
-    spec:
-      containers:
-      - name: backend
-        image: seva-setu-backend:latest
-        ports:
-        - containerPort: 8001
-        env:
-        - name: MONGO_URL
-          valueFrom:
-            secretKeyRef:
-              name: seva-setu-secrets
-              key: mongo-url
-```
+- [ ] Configure Twilio credentials
+- [ ] Configure Facebook credentials
+- [ ] Set up SMTP for email alerts
+- [ ] Configure webhook URLs in Twilio/Facebook
+- [ ] Set up SSL/TLS
+- [ ] Configure monitoring alerts
+- [ ] Test all channels
 
 ---
 
-## Support & Maintenance
+## Widget Embedding
 
-### Logs Location
+### Installation
+Add this code to your website before `</body>`:
+
+```html
+<script src="https://consular-genius.preview.emergentagent.com/embed.js"></script>
+<script>
+  SevaSetu.init({
+    position: 'bottom-right',
+    primaryColor: '#E06F2C',
+    headerTitle: 'Seva Setu Assistant',
+    greeting: '🙏 Namaste! How can I help you?'
+  });
+</script>
 ```
-/app/logs/knowledge_changes.log  - Web scraping changes
-/app/logs/exception_emails.log   - Exception reports
-/var/log/supervisor/backend.*.log - Backend logs
-/var/log/supervisor/frontend.*.log - Frontend logs
-```
 
-### Exception Monitoring
-All exceptions automatically emailed to: **mayurakole@example.com**
-
-### Contact
-- Emergency Support: +27 6830 38144
-- Email: cons.joburg@mea.gov.in
-- Documentation: This file
+### Customization Options
+| Option | Default | Description |
+|--------|---------|-------------|
+| position | 'bottom-right' | Widget position |
+| primaryColor | '#E06F2C' | Brand color |
+| headerTitle | 'Seva Setu Assistant' | Header title |
+| headerSubtitle | 'Consulate General of India' | Header subtitle |
+| greeting | 'Namaste! How can I help you?' | Welcome message |
+| placeholder | 'Type your question...' | Input placeholder |
 
 ---
 
-## Version History
+## Support
 
-**v1.0.0** (January 2026)
-- Initial release
-- Talking avatar with TTS
-- Multi-language support
-- Real-time web scraping
-- Multi-tenant system
-- Document OCR
-- Security features
-
----
-
-**Built with ❤️ for Consulate General of India, Johannesburg**
+For technical support or integration assistance:
+- **Email:** cons.joburg@mea.gov.in
+- **Emergency:** +27 6830 38144
+- **Website:** https://www.cgijohannesburg.gov.in
