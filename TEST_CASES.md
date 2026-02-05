@@ -81,7 +81,42 @@
 ### TC-WA-002: Incoming Message (Mock)
 - **Endpoint:** POST /api/whatsapp/webhook
 - **Payload:** `From=whatsapp:+27123456789&Body=What is OCI?&MessageSid=SM123`
-- **Expected:** TwiML response with AI-generated answer
+- **Expected:** TwiML response with AI-generated answer including fees, process, contact info
+- **Status:** ✅ PASS
+
+### TC-WA-002a: Passport Fee Query
+- **Payload:** `Body=How much does passport renewal cost?`
+- **Expected:** Response includes R800 (normal), R1,600 (tatkal), processing times
+- **Status:** ✅ PASS
+
+### TC-WA-002b: Office Address Query
+- **Payload:** `Body=What is the address of Indian consulate?`
+- **Expected:** Response includes full address, phone, email
+- **Status:** ✅ PASS
+
+### TC-WA-002c: Emergency Query
+- **Payload:** `Body=I lost my passport! Emergency!`
+- **Expected:** Response includes emergency number +27 6830 38144, police report instructions
+- **Status:** ✅ PASS
+
+### TC-WA-002d: Hindi Language Query
+- **Payload:** `Body=पासपोर्ट बनवाने के लिए क्या डॉक्यूमेंट चाहिए?`
+- **Expected:** Response in Hindi with complete document list
+- **Status:** ✅ PASS
+
+### TC-WA-002e: Fraud Alert Query
+- **Payload:** `Body=Someone called me claiming to be from consulate asking for money`
+- **Expected:** Response warns about scam, advises not to pay, report to police
+- **Status:** ✅ PASS
+
+### TC-WA-002f: OCI Query
+- **Payload:** `Body=How to apply for OCI card?`
+- **Expected:** Response includes fees (R1,500/R750), documents, portal link
+- **Status:** ✅ PASS
+
+### TC-WA-002g: Visa Query
+- **Payload:** `Body=I am South African and want to visit India`
+- **Expected:** Response identifies tourist visa, provides indianvisaonline.gov.in link
 - **Status:** ✅ PASS
 
 ### TC-WA-003: Send Message (Mock)
