@@ -20,6 +20,8 @@ from super_admin_routes import router as super_admin_router
 from local_admin_routes import router as local_admin_router
 from consular_routes import router as consular_router
 from whatsapp_routes import router as whatsapp_router
+from facebook_routes import router as facebook_router
+from template_routes import router as template_router
 from monitoring_routes import router as monitoring_router
 from monitoring_service import start_background_monitoring
 
@@ -33,6 +35,9 @@ db = client[os.environ['DB_NAME']]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_super_admin()
+    # Initialize default templates
+    from template_routes import init_default_templates
+    await init_default_templates()
     # Start background monitoring
     monitoring_task = asyncio.create_task(start_background_monitoring())
     yield
