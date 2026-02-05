@@ -3,50 +3,133 @@
 ## Overview
 Multi-tenant consular automation platform for Indian and South African citizens. GDPR, DPDA, and POPIA compliant.
 
+---
+
 ## Core Features Implemented ✅
 
-### 1. Multi-Tenancy
-- **Super Admin Dashboard** (`/super-admin/login`)
-  - Credentials: `superadmin@sarthak.ai` / `Admin@2025`
-  - Manage companies, view analytics, create local admins
-- **Local Admin Dashboard** (`/admin/login`)
-  - Company-specific configuration
-  - Document uploads, feature toggles
+### 1. Multi-Channel Chat
+- **Web Chat (Full):** `/consular` - Full interface with avatar, progress stepper, voice
+- **Widget (Embeddable):** `/widget-demo` - Lightweight chat bubble for websites
+- **WhatsApp:** `/api/whatsapp/webhook` - Twilio integration (mock mode ready)
+- **Facebook Messenger:** `/api/facebook/webhook` - Meta integration (mock mode ready)
 
-### 2. Consular Bot Interface (`/consular`)
-- Friendly illustrated Indian avatar in Namaste pose
-- "Here to help you, always!" tagline
-- Progress stepper: Register → Upload → Verify → Sign
-- Voice toggle for TTS responses
-- Compliance footer (GDPR, DPDA, POPIA) on bot page only
+### 2. AI-Powered Responses (GPT-5.2)
+- Concise, specific answers (widget: 2-4 sentences)
+- Multi-language support (Hindi, English, Zulu, Afrikaans)
+- Context-aware conversation memory
+- RAG system with government website scraping
 
-### 3. AI-Powered Chat (GPT-5.2)
-- Real-time AI responses with typing animation
-- Multi-language support (Hindi, English, Tamil, Zulu, Afrikaans)
-- RAG system scraping official government websites
-- Markdown-formatted responses
+### 3. Template Management System
+- **Email Templates:** Welcome, status updates, appointment reminders
+- **WhatsApp Templates:** Welcome, reminders
+- **Alert Templates:** System alerts, fraud warnings
+- **Custom Templates:** User-created with variable substitution
+- **Languages:** English, Hindi
 
-### 4. Multimodal Input
-- Text chat input
-- Voice input via Web Speech API
-- Camera document scanning (react-webcam)
-- File upload (JPG, PNG, PDF - max 10MB)
+### 4. Monitoring & Alerting
+- Health check endpoint
+- CPU/Memory/Disk monitoring
+- Alert thresholds (90% load)
+- Email/Webhook notifications
 
-### 5. Document Processing
-- OCR via GPT-5.2 Vision API
-- Multi-language document extraction
-- Auto-translation to English for forms
+### 5. Multi-Tenancy
+- Super Admin Dashboard
+- Local Admin Dashboard
+- Company management
 
-### 6. Text-to-Speech (ElevenLabs)
-- Voice responses when toggle enabled
-- Multi-language support
+---
 
-## Test Status (December 2025)
-- Backend: 100% (13/13 tests passed)
-- Frontend: 100% (all UI components verified)
-- Test file: `/app/backend/tests/test_seva_setu_api.py`
+## Architecture
+
+```
+Frontend (React)     Backend (FastAPI)      External Services
+     │                    │                      │
+     ├── Web Chat ────────┤                      │
+     ├── Widget ──────────┼──── GPT-5.2 ─────────┤
+     │                    ├──── MongoDB ─────────┤
+     │                    ├──── Twilio ──────────┤ WhatsApp
+     │                    ├──── Facebook ────────┤ Messenger
+     │                    └──── SMTP ────────────┤ Alerts
+```
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/consular/chat` | POST | Full chat (verbose) |
+| `/api/consular/chat-widget` | POST | Widget chat (concise) |
+| `/api/whatsapp/webhook` | POST | WhatsApp messages |
+| `/api/whatsapp/send` | POST | Send WhatsApp |
+| `/api/facebook/webhook` | GET/POST | Facebook messages |
+| `/api/facebook/send` | POST | Send Facebook |
+| `/api/templates/` | GET/POST | Template CRUD |
+| `/api/templates/render` | POST | Render with variables |
+| `/api/monitoring/health` | GET | Health check |
+| `/api/monitoring/metrics` | GET | Performance metrics |
+
+---
+
+## Test Status (February 2026)
+- **Total Tests:** 33
+- **Passed:** 33
+- **Failed:** 0
+- **Coverage:** Web, Widget, WhatsApp, Facebook, Templates, Monitoring, Auth
+
+---
+
+## Credentials
+
+### Super Admin
+- **URL:** `/super-admin/login`
+- **Email:** `superadmin@sarthak.ai`
+- **Password:** `Admin@2025`
+
+### Integration Placeholders (Configure in .env)
+- `TWILIO_ACCOUNT_SID` - Twilio Account
+- `TWILIO_AUTH_TOKEN` - Twilio Auth
+- `FB_PAGE_ACCESS_TOKEN` - Facebook Page Token
+
+---
 
 ## URLs
-- Preview: https://consular-genius.preview.emergentagent.com
-- Bot: https://consular-genius.preview.emergentagent.com/consular
-- Super Admin: https://consular-genius.preview.emergentagent.com/super-admin/login
+
+| Page | URL |
+|------|-----|
+| Landing | https://consular-genius.preview.emergentagent.com |
+| Full Bot | https://consular-genius.preview.emergentagent.com/consular |
+| Widget Demo | https://consular-genius.preview.emergentagent.com/widget-demo |
+| Super Admin | https://consular-genius.preview.emergentagent.com/super-admin/login |
+
+---
+
+## Widget Embed Code
+
+```html
+<script src="https://consular-genius.preview.emergentagent.com/embed.js"></script>
+<script>
+  SevaSetu.init({
+    position: 'bottom-right',
+    primaryColor: '#E06F2C'
+  });
+</script>
+```
+
+---
+
+## Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `/app/backend/.env` | Backend config & API keys |
+| `/app/frontend/src/config/botMessages.js` | Bot greeting & advisory messages |
+| `/app/backend/template_routes.py` | Default templates |
+
+---
+
+## Documentation
+
+- `/app/DOCUMENTATION.md` - Complete API & integration docs
+- `/app/TEST_CASES.md` - Test cases & results
+- `/app/ARCHITECTURE_GUIDE.md` - Production deployment guide
