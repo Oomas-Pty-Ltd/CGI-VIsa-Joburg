@@ -150,3 +150,4 @@ yarl==1.22.0
 zipp==3.23.0
 httpx==0.28.1
 psutil==7.2.2
+twilio==9.10.1
