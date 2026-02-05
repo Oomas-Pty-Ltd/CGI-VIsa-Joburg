@@ -284,13 +284,13 @@
 |----------|-------|--------|--------|
 | Web Chat | 6 | 6 | 0 |
 | Widget | 4 | 4 | 0 |
-| WhatsApp | 5 | 5 | 0 |
+| WhatsApp | 12 | 12 | 0 |
 | Facebook | 4 | 4 | 0 |
 | Templates | 6 | 6 | 0 |
 | Monitoring | 3 | 3 | 0 |
 | Authentication | 3 | 3 | 0 |
 | Admin | 2 | 2 | 0 |
-| **TOTAL** | **33** | **33** | **0** |
+| **TOTAL** | **40** | **40** | **0** |
 
 ---
 
