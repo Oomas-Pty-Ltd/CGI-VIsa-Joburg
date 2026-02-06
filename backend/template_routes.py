@@ -253,23 +253,27 @@ Stay vigilant. Stay safe.""",
 # =====================================================================
 async def init_default_templates():
     """Initialize default templates in database"""
-    db = await get_database()
-    
-    for template in DEFAULT_TEMPLATES:
-        existing = await db.templates.find_one({
-            "name": template["name"],
-            "category": template["category"]
-        })
+    try:
+        db = await get_database()
         
-        if not existing:
-            template_doc = {
-                "id": str(uuid.uuid4()),
-                **template,
-                "created_by": "system",
-                "created_by_type": "system",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            await db.templates.insert_one(template_doc)
+        for template in DEFAULT_TEMPLATES:
+            existing = await db.templates.find_one({
+                "name": template["name"],
+                "category": template["category"]
+            })
+            
+            if not existing:
+                template_doc = {
+                    "id": str(uuid.uuid4()),
+                    **template,
+                    "created_by": "system",
+                    "created_by_type": "system",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.templates.insert_one(template_doc)
+    except Exception as e:
+        # Log error but don't crash - templates can be initialized later
+        print(f"Warning: Failed to initialize default templates: {e}")
 
 
 def render_template(template_body: str, variables: Dict[str, str]) -> str:
