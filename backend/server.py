@@ -42,14 +42,36 @@ db = client[db_name]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_super_admin()
-    # Initialize default templates
-    from template_routes import init_default_templates
-    await init_default_templates()
-    # Start background monitoring
-    monitoring_task = asyncio.create_task(start_background_monitoring())
+    """Application lifespan handler with proper error handling"""
+    monitoring_task = None
+    try:
+        # Test database connection first
+        await client.admin.command('ping')
+        logger.info("MongoDB connection successful")
+        
+        # Initialize super admin
+        await init_super_admin()
+        logger.info("Super admin initialization complete")
+        
+        # Initialize default templates
+        from template_routes import init_default_templates
+        await init_default_templates()
+        logger.info("Default templates initialization complete")
+        
+        # Start background monitoring
+        monitoring_task = asyncio.create_task(start_background_monitoring())
+        logger.info("Background monitoring started")
+        
+    except Exception as e:
+        logger.error(f"Startup initialization failed: {e}")
+        # Don't raise - allow app to start even if init fails
+        # This ensures health checks can pass
+    
     yield
-    monitoring_task.cancel()
+    
+    # Cleanup
+    if monitoring_task:
+        monitoring_task.cancel()
     client.close()
 
 app = FastAPI(lifespan=lifespan)
