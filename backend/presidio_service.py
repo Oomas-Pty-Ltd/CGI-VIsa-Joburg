@@ -2,12 +2,28 @@ from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-analyzer = AnalyzerEngine()
-anonymizer = AnonymizerEngine()
+# Lazy loading - don't initialize until first use
+_analyzer = None
+_anonymizer = None
+
+def _get_analyzer():
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = AnalyzerEngine()
+    return _analyzer
+
+def _get_anonymizer():
+    global _anonymizer
+    if _anonymizer is None:
+        _anonymizer = AnonymizerEngine()
+    return _anonymizer
 
 def mask_pii(text: str) -> str:
     """Mask PII in text using Microsoft Presidio"""
     try:
+        analyzer = _get_analyzer()
+        anonymizer = _get_anonymizer()
+        
         results = analyzer.analyze(
             text=text,
             language='en',
