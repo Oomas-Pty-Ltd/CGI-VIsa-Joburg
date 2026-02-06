@@ -1,0 +1,178 @@
+[
+  {
+    "_id": "6984dfb42949aa77fd1c32f2",
+    "id": "cabf1936-e845-4754-bed9-4e767fab2ccf",
+    "name": "Welcome Email",
+    "category": "email",
+    "subject": "Welcome to Seva Setu - Your Consular Services Partner",
+    "body": "🙏 Namaste {{user_name}},\n\nWelcome to Seva Setu Bot - your trusted assistant for Indian consular services in South Africa.\n\nYour account has been successfully created. You can now:\n- Apply for passport services\n- Request visa assistance\n- Get document verification\n- Access consular information 24/7\n\nIf you have any questions, simply chat with our bot or contact us.\n\nBest regards,\nConsulate General of India, Johannesburg",
+    "variables": [
+      "user_name"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "welcome",
+      "onboarding"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.932540+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f3",
+    "id": "798243f0-8bb7-4a8f-a3de-97a6ea6fd9ca",
+    "name": "Application Status Update",
+    "category": "email",
+    "subject": "Update: Your {{service_type}} Application - {{application_id}}",
+    "body": "Dear {{user_name}},\n\nThis is to inform you that your {{service_type}} application (ID: {{application_id}}) has been updated.\n\nCurrent Status: {{status}}\nLast Updated: {{update_date}}\n\n{{additional_notes}}\n\nFor any queries, please contact us or use our chatbot.\n\nRegards,\nSeva Setu Bot",
+    "variables": [
+      "user_name",
+      "service_type",
+      "application_id",
+      "status",
+      "update_date",
+      "additional_notes"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "status",
+      "application"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.947333+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f4",
+    "id": "cc6555c3-4bce-4189-a8fb-dba53bfa5a37",
+    "name": "Appointment Reminder",
+    "category": "email",
+    "subject": "Reminder: Your Appointment on {{appointment_date}}",
+    "body": "Dear {{user_name}},\n\nThis is a reminder for your upcoming appointment:\n\n📅 Date: {{appointment_date}}\n🕐 Time: {{appointment_time}}\n📍 Location: {{location}}\n📋 Service: {{service_type}}\n\nDocuments Required:\n{{documents_list}}\n\nPlease arrive 15 minutes early with all required documents.\n\nRegards,\nConsulate General of India, Johannesburg",
+    "variables": [
+      "user_name",
+      "appointment_date",
+      "appointment_time",
+      "location",
+      "service_type",
+      "documents_list"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "appointment",
+      "reminder"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.948093+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f5",
+    "id": "eb767347-18de-48c2-aaf7-4c44772f4093",
+    "name": "WhatsApp Welcome",
+    "category": "whatsapp",
+    "body": "🙏 Namaste {{user_name}}!\n\nWelcome to Seva Setu Bot. I'm here to help you with Indian consular services.\n\nReply with:\n1️⃣ Passport\n2️⃣ Visa\n3️⃣ Documents\n4️⃣ Other\n\nOr simply type your question!",
+    "variables": [
+      "user_name"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "welcome",
+      "whatsapp"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.949217+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f6",
+    "id": "17f04062-73da-4e46-a6b0-c66a583d522a",
+    "name": "WhatsApp Appointment Reminder",
+    "category": "whatsapp",
+    "body": "📅 Appointment Reminder\n\nHi {{user_name}}, your appointment is scheduled:\n\nDate: {{appointment_date}}\nTime: {{appointment_time}}\nService: {{service_type}}\n\nReply YES to confirm or RESCHEDULE to change.",
+    "variables": [
+      "user_name",
+      "appointment_date",
+      "appointment_time",
+      "service_type"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "appointment",
+      "whatsapp"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.950397+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f7",
+    "id": "91552345-47aa-4b2e-9bb7-6d53fb8d20ef",
+    "name": "System Alert - High Load",
+    "category": "alert",
+    "subject": "⚠️ High System Load Detected",
+    "body": "ALERT: System load has exceeded threshold\n\nMetric: {{metric_name}}\nCurrent Value: {{current_value}}\nThreshold: {{threshold}}\nTime: {{timestamp}}\n\nPlease investigate immediately.",
+    "variables": [
+      "metric_name",
+      "current_value",
+      "threshold",
+      "timestamp"
+    ],
+    "language": "en",
+    "is_public": false,
+    "tags": [
+      "system",
+      "alert"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.951737+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f8",
+    "id": "01c150da-2544-4ad5-83bd-b1e80fa249d1",
+    "name": "Fraud Alert",
+    "category": "alert",
+    "subject": "🚨 Fraud Alert - Important Notice",
+    "body": "⚠️ Important Advisory\n\n{{alert_title}}\n\n{{alert_message}}\n\nIf you have any concerns, please contact:\n📞 Emergency: +27 6830 38144\n📧 Email: cons.joburg@mea.gov.in\n\nStay vigilant. Stay safe.",
+    "variables": [
+      "alert_title",
+      "alert_message"
+    ],
+    "language": "en",
+    "is_public": true,
+    "tags": [
+      "fraud",
+      "alert",
+      "advisory"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.953825+00:00"
+  },
+  {
+    "_id": "6984dfb42949aa77fd1c32f9",
+    "id": "29860b62-1a4c-4e00-9523-3adc77d6d207",
+    "name": "स्वागत ईमेल (Hindi Welcome)",
+    "category": "email",
+    "subject": "सेवा सेतु में आपका स्वागत है",
+    "body": "🙏 नमस्ते {{user_name}} जी,\n\nसेवा सेतु बॉट में आपका स्वागत है - दक्षिण अफ्रीका में भारतीय वाणिज्य दूतावास सेवाओं के लिए आपका विश्वसनीय सहायक।\n\nआपका खाता सफलतापूर्वक बना दिया गया है।\n\nकिसी भी प्रश्न के लिए, हमारे बॉट से चैट करें।\n\nसादर,\nभारतीय वाणिज्य दूतावास, जोहान्सबर्ग",
+    "variables": [
+      "user_name"
+    ],
+    "language": "hi",
+    "is_public": true,
+    "tags": [
+      "welcome",
+      "hindi"
+    ],
+    "created_by": "system",
+    "created_by_type": "system",
+    "created_at": "2026-02-05T18:21:40.955620+00:00"
+  }
+]

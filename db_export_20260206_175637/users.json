@@ -1,0 +1,23 @@
+[
+  {
+    "_id": "6974960691985dbd73543cac",
+    "id": "dda1cac3-6945-46cc-aacd-9b9474c4a7be",
+    "email": "testuser095101@example.com",
+    "password": "$2b$12$m16me1Lc2as7OQwi0vlsiOe9eZRudDMP3/grNv5e.jpzOob7KCPMu",
+    "created_at": "2026-01-24T09:51:02.227597+00:00"
+  },
+  {
+    "_id": "6974971646a67dbf89447fd8",
+    "id": "0495d476-f6a3-4874-83dd-5ebdaab1b0e6",
+    "email": "testuser095534@example.com",
+    "password": "$2b$12$Bqe/dvtWlk/EZj0SnWtKE.bENgOhx0bM1ctTPuNuySPKsqjdNYjAO",
+    "created_at": "2026-01-24T09:55:34.287175+00:00"
+  },
+  {
+    "_id": "697f009e4b11d224408566cf",
+    "id": "a41cc6d5-86b4-42dd-8e8f-27c3b477ca00",
+    "email": "testuser072830@example.com",
+    "password": "$2b$12$iSYcTJHy1npxCkrfYeP8dujw8G8P6gaWaw4wtJdWoqROtWH7ZilSW",
+    "created_at": "2026-02-01T07:28:30.853341+00:00"
+  }
+]

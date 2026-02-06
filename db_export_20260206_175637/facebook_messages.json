@@ -1,0 +1,24 @@
+[
+  {
+    "_id": "69850cb6aa51e9fa64507530",
+    "id": "726019b4-ce3a-48a2-97b3-0398f0a866a2",
+    "fb_message_id": "mid123",
+    "user_id": "22fce88a-d207-465f-973c-bd35e20fc559",
+    "fb_sender_id": "FB123",
+    "direction": "inbound",
+    "message": "How to renew passport?",
+    "timestamp": "2026-02-05T21:33:42.170339+00:00"
+  },
+  {
+    "_id": "69850cb9aa51e9fa64507531",
+    "id": "a3621703-b611-4de2-9050-4b59a9a6cd46",
+    "fb_message_id": "mock_bfb010b8e235",
+    "user_id": "22fce88a-d207-465f-973c-bd35e20fc559",
+    "fb_sender_id": "FB123",
+    "direction": "outbound",
+    "message": "To renew your Indian passport through CGI Johannesburg, please apply online and book an appointment at **https://passportindia.gov.in**. Choose the **Passport Renewal/Re-issue** option, complete the form, upload required details, and then attend your appointment at our office with your **current passport, photos, and supporting documents** (as per the checklist on the portal). Fees: **R800 (normal)** or **R1,600 (tatkal)**; processing time is typically **4–6 weeks (normal)** or **1–2 weeks (tatkal)**.  \nIf you need help, contact us at **cons.joburg@mea.gov.in** or **+27 11 783 0202** (website: **https://www.cgijoburg.gov.in**).",
+    "status": "sent",
+    "mock": true,
+    "timestamp": "2026-02-05T21:33:45.362923+00:00"
+  }
+]

@@ -1,0 +1,298 @@
+[
+  {
+    "_id": "6974960a91985dbd73543caf",
+    "id": "0022a1ba-860f-4a89-b0e0-e703c8495f62",
+    "user_id": "59ee4ad3-e5f3-45bf-9f5f-465ad369ef27",
+    "phone_number": "+1234567890",
+    "message": "Hello",
+    "reply": "🙏 Namaste! Welcome to Sarthak-AI Sovereign.\n\nI can help you with:\n1️⃣ Passport applications\n2️⃣ Visa services\n3️⃣ Document verification\n4️⃣ Consular assistance\n\nReply with a number or describe your need.",
+    "timestamp": "2026-01-24T09:51:06.696187+00:00"
+  },
+  {
+    "_id": "6974971a46a67dbf89447fda",
+    "id": "25f100da-66fa-442b-8137-fce47b6a52f6",
+    "user_id": "59ee4ad3-e5f3-45bf-9f5f-465ad369ef27",
+    "phone_number": "+1234567890",
+    "message": "Hello",
+    "reply": "🙏 Namaste! Welcome to Sarthak-AI Sovereign.\n\nI can help you with:\n1️⃣ Passport applications\n2️⃣ Visa services\n3️⃣ Document verification\n4️⃣ Consular assistance\n\nReply with a number or describe your need.",
+    "timestamp": "2026-01-24T09:55:38.623873+00:00"
+  },
+  {
+    "_id": "6974a031923d94c8e4562b3e",
+    "id": "c08cee35-9414-4dc3-8e44-0e98787edcee",
+    "user_id": "a901b968-94d0-482a-84d5-e58b1f19fdcb",
+    "phone_number": "1234567890",
+    "message": "Hello",
+    "reply": "🙏 Namaste! Welcome to Sarthak-AI Sovereign.\n\nI can help you with:\n1️⃣ Passport applications\n2️⃣ Visa services\n3️⃣ Document verification\n4️⃣ Consular assistance\n\nReply with a number or describe your need.",
+    "timestamp": "2026-01-24T10:34:25.927352+00:00"
+  },
+  {
+    "_id": "697f00ab4b11d224408566d1",
+    "id": "2613bf67-4ef1-4cc8-826e-a71f060dc140",
+    "user_id": "59ee4ad3-e5f3-45bf-9f5f-465ad369ef27",
+    "phone_number": "+1234567890",
+    "message": "Hello",
+    "reply": "🙏 Namaste! Welcome to Seva Setu Bot.\n\nI can help you with:\n1️⃣ Passport applications\n2️⃣ Visa services\n3️⃣ Document verification\n4️⃣ Consular assistance\n\nReply with a number or describe your need.",
+    "timestamp": "2026-02-01T07:28:43.963361+00:00"
+  },
+  {
+    "_id": "6984e00322938b818f24ad6f",
+    "id": "9237f423-f33c-4e1e-937b-78c0338d77c3",
+    "twilio_sid": "SM123456",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "What is OCI?",
+    "has_media": false,
+    "timestamp": "2026-02-05T18:22:59.489627+00:00"
+  },
+  {
+    "_id": "6984e00522938b818f24ad70",
+    "id": "c5ed94fd-feaa-4b9f-85a3-e6facf31183c",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "OCI stands for **Overseas Citizen of India**. It is a **long-term visa/status** for eligible foreign citizens of Indian origin, allowing them to live, work, and travel to India without needing a regular visa each time. For full details and eligibility, use: https://consular-genius.preview.emergentagent.com/consular",
+    "timestamp": "2026-02-05T18:23:01.912866+00:00"
+  },
+  {
+    "_id": "69850c0ad2c1e821fb2581d2",
+    "id": "37d84f56-dc29-4ef2-b332-468c23e0c74c",
+    "twilio_sid": "SM001",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "How do I renew my Indian passport in South Africa?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:30:50.091309+00:00"
+  },
+  {
+    "_id": "69850c0cd2c1e821fb2581d3",
+    "id": "1a9ab391-6372-4d0c-8687-4694a34fd535",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "To renew your Indian passport in South Africa, apply online on the Passport Seva portal, fill the form, and book an appointment to submit your documents at the Consulate/outsourced service provider. Carry your current passport, photos, proof of address, and any required supporting documents, and pay the applicable fee.  \n\nFor step-by-step guidance and the exact document checklist, use the full bot here: https://consular-genius.preview.emergentagent.com/consular",
+    "timestamp": "2026-02-05T21:30:52.977954+00:00"
+  },
+  {
+    "_id": "69850c0dd2c1e821fb2581d4",
+    "id": "2c3b9758-8b81-4a0a-8883-471d3c3b7536",
+    "twilio_sid": "SM002",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "What documents do I need for OCI card application?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:30:53.056714+00:00"
+  },
+  {
+    "_id": "69850c0ed2c1e821fb2581d5",
+    "id": "254dac18-a113-4948-9e62-bce36fd8dda0",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "For an OCI card application, you generally need: your current passport (copy), proof of Indian origin (old Indian passport / Indian birth certificate / parents’ Indian documents), your birth certificate, and proof of address. You’ll also need recent photos and a completed online application form. For the exact checklist based on your case (spouse/parents/minor), please use: https://consular-genius.preview.emergentagent.com/consular",
+    "timestamp": "2026-02-05T21:30:54.967002+00:00"
+  },
+  {
+    "_id": "69850c0fd2c1e821fb2581d6",
+    "id": "62a2f542-676f-4b89-88a5-b212f7d5b440",
+    "twilio_sid": "SM003",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "I lost my passport, what should I do? Emergency!",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:30:55.018012+00:00"
+  },
+  {
+    "_id": "69850c12d2c1e821fb2581d7",
+    "id": "0d1c27b4-1502-4050-ba53-4e3619ab9927",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "If you lost your Indian passport, first report it to the nearest police station and get a police report/affidavit (case number). Then apply at the Consulate for an **Emergency Certificate (EC)** to travel back to India or for a **new passport** (bring police report + ID copies + passport copy if available + photos).  \n\nFor step-by-step guidance and document checklist, use the full bot: https://consular-genius.preview.emergentagent.com/consular",
+    "timestamp": "2026-02-05T21:30:58.436041+00:00"
+  },
+  {
+    "_id": "69850c73aa51e9fa6450751d",
+    "id": "7629acf8-dca7-480b-b4e0-94c2f401f0d6",
+    "twilio_sid": "SM101",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "How much does passport renewal cost?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:32:35.217261+00:00"
+  },
+  {
+    "_id": "69850c75aa51e9fa6450751e",
+    "id": "4049bf91-9f3e-438b-a9a3-ed9e484b376b",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "Passport renewal costs **R800 (normal)** or **R1,600 (tatkal/urgent)** at the Consulate General of India, Johannesburg. Normal processing takes **4–6 weeks**, and tatkal takes **1–2 weeks**. You can book an appointment and apply via **https://passportindia.gov.in**. For help, contact **cons.joburg@mea.gov.in** or **+27 11 783 0202**.",
+    "timestamp": "2026-02-05T21:32:37.273726+00:00"
+  },
+  {
+    "_id": "69850c75aa51e9fa6450751f",
+    "id": "0c5e3f20-aa5f-4b66-93e0-56decf9bbcfe",
+    "twilio_sid": "SM102",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "What is the address of Indian consulate in Johannesburg?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:32:37.331444+00:00"
+  },
+  {
+    "_id": "69850c77aa51e9fa64507520",
+    "id": "971fefa0-dcfd-48a6-8049-17504595b12f",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "Consulate General of India, Johannesburg is located at **2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg**.  \nFor any queries, you can call **+27 11 783 0202** or visit **https://www.cgijoburg.gov.in**.",
+    "timestamp": "2026-02-05T21:32:39.089511+00:00"
+  },
+  {
+    "_id": "69850c77aa51e9fa64507521",
+    "id": "13484eb7-ae42-4f41-bbf3-dddb15cae9eb",
+    "twilio_sid": "SM103",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "I lost my passport! Emergency help needed!",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:32:39.148428+00:00"
+  },
+  {
+    "_id": "69850c7aaa51e9fa64507522",
+    "id": "c4d8976c-c2bf-4883-8bda-bfbfba878068",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "If you’ve lost your Indian passport, please **report it to the local South African police immediately** and obtain a **police report (case number)**, and also prepare an **affidavit** stating how/where it was lost. For urgent travel, the Consulate can assist with an **Emergency Certificate**—please contact us **24/7 on +27 6830 38144**. During office hours, you can also call **+27 11 783 0202** or email **cons.joburg@mea.gov.in** for the next steps and appointment guidance. Address: **2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg** (Consular services: Mon–Fri **9:00–12:30**).",
+    "timestamp": "2026-02-05T21:32:42.279778+00:00"
+  },
+  {
+    "_id": "69850c8eaa51e9fa64507523",
+    "id": "e62271e4-44a3-4832-aa70-a7814577c668",
+    "twilio_sid": "SM104",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "How to apply for OCI card?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:02.072160+00:00"
+  },
+  {
+    "_id": "69850c91aa51e9fa64507524",
+    "id": "b4a9eb0a-0a8a-4fdb-9af1-13cfc6bc0532",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "To apply for an OCI (Overseas Citizen of India) card, you must submit the application online and then lodge the required documents at the Consulate General of India, Johannesburg. Apply online via the OCI portal, upload your photo/signature, and print the completed form: https://ociservices.gov.in. You will need your current passport, proof of Indian origin, and photographs (fees: R1,500 adult / R750 minor); processing typically takes about 6–8 weeks. For guidance or queries, contact CGI Johannesburg at cons.joburg@mea.gov.in or +27 11 783 0202 (website: https://www.cgijoburg.gov.in).",
+    "timestamp": "2026-02-05T21:33:05.125331+00:00"
+  },
+  {
+    "_id": "69850c91aa51e9fa64507525",
+    "id": "17a2e0c9-9b94-4493-8acc-c44cffd9a0df",
+    "twilio_sid": "SM105",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "à¤ªà¤¾à¤¸à¤ªà¥à¤°à¥à¤ à¤¬à¤¨à¤µà¤¾à¤¨à¥ à¤à¥ à¤²à¤¿à¤ à¤à¥à¤¯à¤¾ à¤¡à¥à¤à¥à¤¯à¥à¤®à¥à¤à¤ à¤à¤¾à¤¹à¤¿à¤?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:05.189563+00:00"
+  },
+  {
+    "_id": "69850c95aa51e9fa64507526",
+    "id": "0f46709b-424a-4a2c-9517-8a78dd83fcae",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "पासपोर्ट (नया/रिन्यूअल) के लिए सामान्यतः ये डॉक्यूमेंट चाहिए: **ऑनलाइन भरा हुआ आवेदन फॉर्म (passportindia.gov.in)**, **वर्तमान/पुराना पासपोर्ट (रिन्यूअल में)**, **पता प्रमाण** (South Africa में रेसिडेंस प्रूफ), **फोटो** (पासपोर्ट साइज), और **विधिवत हस्ताक्षरित/अपलोड किए गए सपोर्टिंग डॉक्यूमेंट्स**।  \n**लॉस्ट पासपोर्ट** के लिए अतिरिक्त: **पुलिस रिपोर्ट + एफिडेविट** अनिवार्य है।  \nअपॉइंटमेंट **passportindia.gov.in** पर बुक करें; सामान्य प्रोसेसिंग **4–6 हफ्ते** (Tatkal **1–2 हफ्ते**)।  \nअधिक जानकारी के लिए: https://www.cgijoburg.gov.in | ईमेल: cons.joburg@mea.gov.in | फोन: +27 11 783 0202",
+    "timestamp": "2026-02-05T21:33:09.582679+00:00"
+  },
+  {
+    "_id": "69850c95aa51e9fa64507527",
+    "id": "de06505a-34ff-4aa8-bfec-99b19374c6cd",
+    "twilio_sid": "SM106",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "I am South African and want to visit India. What visa do I need?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:09.671036+00:00"
+  },
+  {
+    "_id": "69850c99aa51e9fa64507528",
+    "id": "293aef84-dfa5-42f9-9bd7-7f5e80b0b0d4",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "As a South African passport holder visiting India for a holiday, you typically need a **Tourist Visa**. If your purpose is meetings/trade you need a **Business Visa**, for treatment a **Medical Visa**, and for studies a **Student Visa**. You can apply online at **https://indianvisaonline.gov.in** (usual processing: **3–5 working days**).\n\nIf you share your **purpose of visit**, **intended duration**, and whether you need **single/multiple entry**, I can point you to the exact visa category and requirements. For assistance, contact the Consulate: **cons.joburg@mea.gov.in**, **+27 11 783 0202**, website **https://www.cgijoburg.gov.in**.",
+    "timestamp": "2026-02-05T21:33:13.026294+00:00"
+  },
+  {
+    "_id": "69850ca3aa51e9fa64507529",
+    "id": "210aedf5-7faa-4266-8f80-20f27332b758",
+    "twilio_sid": "SM107",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "Someone called me claiming to be from the consulate asking for money",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:23.109825+00:00"
+  },
+  {
+    "_id": "69850ca5aa51e9fa6450752a",
+    "id": "6e2576c1-4136-443f-9716-48475ec8d6b6",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "The Consulate General of India in Johannesburg **never calls asking for money**—this is almost certainly a scam. **Do not pay**, do not share OTPs/banking details, and end the call. Please **report it to your local police** and, if possible, share the caller number, time, and any message/recording with us at **cons.joburg@mea.gov.in**. For urgent assistance, you can also call our **24/7 emergency line: +27 6830 38144** (main office: **+27 11 783 0202**, website: https://www.cgijoburg.gov.in).",
+    "timestamp": "2026-02-05T21:33:25.762898+00:00"
+  },
+  {
+    "_id": "69850ca5aa51e9fa6450752b",
+    "id": "ea986ff6-e0f0-4824-9232-85a100e78e71",
+    "twilio_sid": "SM108",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "I have PIO card, how to convert to OCI?",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:25.814681+00:00"
+  },
+  {
+    "_id": "69850ca9aa51e9fa6450752c",
+    "id": "63f017de-56c8-46a0-9f18-b8f806277f63",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "PIO-to-OCI conversion is **free** at CGI Johannesburg. Please bring your **original PIO card**, your **current foreign passport**, and supporting documents (proof of Indian origin) with photos, and submit the application at the Consulate. You can also check the latest form/checklist and instructions on our website: https://www.cgijoburg.gov.in.  \n\nFor help, contact **cons.joburg@mea.gov.in** or call **+27 11 783 0202** (Consular hours: **Mon–Fri 9:00–12:30**).",
+    "timestamp": "2026-02-05T21:33:29.135810+00:00"
+  },
+  {
+    "_id": "69850ca9aa51e9fa6450752d",
+    "id": "0e7f00af-040c-462f-ad9d-06678b3d8b77",
+    "twilio_sid": "SM109",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "inbound",
+    "message": "I need to get my degree certificate attested",
+    "has_media": false,
+    "timestamp": "2026-02-05T21:33:29.208119+00:00"
+  },
+  {
+    "_id": "69850cacaa51e9fa6450752e",
+    "id": "80528c1f-acee-43cf-ae18-286d8567a43d",
+    "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
+    "phone_number": " 27123456789",
+    "direction": "outbound",
+    "message": "For degree certificate attestation, you can submit your original degree certificate (and a photocopy) for document attestation at the Consulate General of India, Johannesburg during consular hours (Mon–Fri, 9:00 AM–12:30 PM). Please also bring your passport/ID and any supporting documents the certificate relates to. For requirements/fees and any prior legalization needed, check https://www.cgijoburg.gov.in or email us at **cons.joburg@mea.gov.in**.  \n\n**Address:** 2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg  \n**Phone:** +27 11 783 0202",
+    "timestamp": "2026-02-05T21:33:32.658553+00:00"
+  }
+]

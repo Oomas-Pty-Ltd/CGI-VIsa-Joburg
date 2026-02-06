@@ -1,0 +1,29 @@
+[
+  {
+    "_id": "6974960a91985dbd73543cb0",
+    "id": "1e4789be-6f5f-4742-aecf-26852cac33c6",
+    "company_id": "ade113be-40ac-42fc-b1fd-b9029e7b0fff",
+    "filename": "test_document.txt",
+    "file_path": "/app/uploads/ade113be-40ac-42fc-b1fd-b9029e7b0fff/1e4789be-6f5f-4742-aecf-26852cac33c6.txt",
+    "category": "general",
+    "uploaded_at": "2026-01-24T09:51:06.825772+00:00"
+  },
+  {
+    "_id": "6974971a46a67dbf89447fdb",
+    "id": "3c2545a0-69b6-4a60-b81e-12bfce7edd85",
+    "company_id": "6a15ae20-6f96-4844-8e64-bf5838224e5a",
+    "filename": "test_document.txt",
+    "file_path": "/app/uploads/6a15ae20-6f96-4844-8e64-bf5838224e5a/3c2545a0-69b6-4a60-b81e-12bfce7edd85.txt",
+    "category": "general",
+    "uploaded_at": "2026-01-24T09:55:38.786302+00:00"
+  },
+  {
+    "_id": "697f00ac4b11d224408566d2",
+    "id": "169416c0-851b-4e15-bc77-b2675bdefe65",
+    "company_id": "55edf6c3-107e-4b04-ae59-1aab0096fdfd",
+    "filename": "test_document.txt",
+    "file_path": "/app/uploads/55edf6c3-107e-4b04-ae59-1aab0096fdfd/169416c0-851b-4e15-bc77-b2675bdefe65.txt",
+    "category": "general",
+    "uploaded_at": "2026-02-01T07:28:44.095309+00:00"
+  }
+]

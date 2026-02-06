@@ -1,0 +1,216 @@
+{
+  "companies": {
+    "fields": [
+      "_id",
+      "id",
+      "name",
+      "email",
+      "llm_model",
+      "features",
+      "created_at",
+      "status"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "name": "str",
+      "email": "str",
+      "llm_model": "str",
+      "features": "dict",
+      "created_at": "str",
+      "status": "str"
+    }
+  },
+  "facebook_messages": {
+    "fields": [
+      "_id",
+      "id",
+      "fb_message_id",
+      "user_id",
+      "fb_sender_id",
+      "direction",
+      "message",
+      "timestamp"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "fb_message_id": "str",
+      "user_id": "str",
+      "fb_sender_id": "str",
+      "direction": "str",
+      "message": "str",
+      "timestamp": "str"
+    }
+  },
+  "users": {
+    "fields": [
+      "_id",
+      "id",
+      "email",
+      "password",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "email": "str",
+      "password": "str",
+      "created_at": "str"
+    }
+  },
+  "documents": {
+    "fields": [
+      "_id",
+      "id",
+      "company_id",
+      "filename",
+      "file_path",
+      "category",
+      "uploaded_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "company_id": "str",
+      "filename": "str",
+      "file_path": "str",
+      "category": "str",
+      "uploaded_at": "str"
+    }
+  },
+  "whatsapp_messages": {
+    "fields": [
+      "_id",
+      "id",
+      "user_id",
+      "phone_number",
+      "message",
+      "reply",
+      "timestamp"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "user_id": "str",
+      "phone_number": "str",
+      "message": "str",
+      "reply": "str",
+      "timestamp": "str"
+    }
+  },
+  "chat_sessions": {
+    "fields": [
+      "_id",
+      "id",
+      "user_id",
+      "company_id",
+      "messages",
+      "step",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "user_id": "str",
+      "company_id": "str",
+      "messages": "list",
+      "step": "str",
+      "created_at": "str"
+    }
+  },
+  "super_admins": {
+    "fields": [
+      "_id",
+      "id",
+      "email",
+      "password",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "email": "str",
+      "password": "str",
+      "created_at": "str"
+    }
+  },
+  "facebook_users": {
+    "fields": [
+      "_id",
+      "id",
+      "fb_id",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "fb_id": "str",
+      "created_at": "str"
+    }
+  },
+  "whatsapp_users": {
+    "fields": [
+      "_id",
+      "id",
+      "phone_number",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "phone_number": "str",
+      "created_at": "str"
+    }
+  },
+  "templates": {
+    "fields": [
+      "_id",
+      "id",
+      "name",
+      "category",
+      "subject",
+      "body",
+      "variables",
+      "language",
+      "is_public",
+      "tags",
+      "created_by",
+      "created_by_type",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "name": "str",
+      "category": "str",
+      "subject": "str",
+      "body": "str",
+      "variables": "list",
+      "language": "str",
+      "is_public": "bool",
+      "tags": "list",
+      "created_by": "str",
+      "created_by_type": "str",
+      "created_at": "str"
+    }
+  },
+  "local_admins": {
+    "fields": [
+      "_id",
+      "id",
+      "company_id",
+      "email",
+      "password",
+      "created_at"
+    ],
+    "sample_types": {
+      "_id": "ObjectId",
+      "id": "str",
+      "company_id": "str",
+      "email": "str",
+      "password": "str",
+      "created_at": "str"
+    }
+  }
+}

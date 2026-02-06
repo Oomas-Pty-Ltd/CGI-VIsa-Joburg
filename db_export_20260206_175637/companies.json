@@ -1,0 +1,54 @@
+[
+  {
+    "_id": "6974960591985dbd73543caa",
+    "id": "ade113be-40ac-42fc-b1fd-b9029e7b0fff",
+    "name": "Test Company 095101",
+    "email": "testcompany095101@example.com",
+    "llm_model": "gpt-5.2",
+    "features": {
+      "voice": false,
+      "camera": true
+    },
+    "created_at": "2026-01-24T09:51:01.440386+00:00",
+    "status": "active"
+  },
+  {
+    "_id": "6974962b91985dbd73543cb1",
+    "id": "858481d0-5492-4957-bb21-2148f3f369a1",
+    "name": "Test Company 1769248299",
+    "email": "testcompany1769248299@example.com",
+    "llm_model": "gpt-5.2",
+    "features": {
+      "voice": true,
+      "camera": true
+    },
+    "created_at": "2026-01-24T09:51:39.961991+00:00",
+    "status": "active"
+  },
+  {
+    "_id": "6974971546a67dbf89447fd6",
+    "id": "6a15ae20-6f96-4844-8e64-bf5838224e5a",
+    "name": "Test Company 095533",
+    "email": "testcompany095533@example.com",
+    "llm_model": "gpt-5.2",
+    "features": {
+      "voice": false,
+      "camera": true
+    },
+    "created_at": "2026-01-24T09:55:33.502963+00:00",
+    "status": "active"
+  },
+  {
+    "_id": "697f009e4b11d224408566cd",
+    "id": "55edf6c3-107e-4b04-ae59-1aab0096fdfd",
+    "name": "Test Company 072830",
+    "email": "testcompany072830@example.com",
+    "llm_model": "gpt-5.2",
+    "features": {
+      "voice": false,
+      "camera": true
+    },
+    "created_at": "2026-02-01T07:28:30.087398+00:00",
+    "status": "active"
+  }
+]
