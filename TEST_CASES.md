@@ -1,9 +1,9 @@
 # Seva Setu Bot - Test Cases Document
 
 ## Test Environment
-- **Preview URL:** https://consular-genius.preview.emergentagent.com
+- **Preview URL:** https://consular-bot-1.preview.emergentagent.com
 - **Super Admin:** `superadmin@sarthak.ai` / `Admin@2025`
-- **API Base:** https://consular-genius.preview.emergentagent.com/api
+- **API Base:** https://consular-bot-1.preview.emergentagent.com/api
 
 ---
 

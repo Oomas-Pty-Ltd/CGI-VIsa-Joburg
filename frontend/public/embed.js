@@ -8,7 +8,7 @@
  * INSTALLATION:
  * Add the following code before the </body> tag of your website:
  * 
- * <script src="https://consular-genius.preview.emergentagent.com/embed.js"></script>
+ * <script src="https://consular-bot-1.preview.emergentagent.com/embed.js"></script>
  * <script>
  *   SevaSetu.init({
  *     position: 'bottom-right',  // or 'bottom-left'
@@ -24,7 +24,7 @@
   'use strict';
   
   // Configuration
-  const BOT_URL = 'https://consular-genius.preview.emergentagent.com';
+  const BOT_URL = 'https://consular-bot-1.preview.emergentagent.com';
   const API_URL = BOT_URL + '/api/consular/chat-widget';
   
   // Default settings

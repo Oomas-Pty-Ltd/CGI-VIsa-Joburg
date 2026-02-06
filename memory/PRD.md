@@ -97,17 +97,17 @@ Frontend (React)     Backend (FastAPI)      External Services
 
 | Page | URL |
 |------|-----|
-| Landing | https://consular-genius.preview.emergentagent.com |
-| Full Bot | https://consular-genius.preview.emergentagent.com/consular |
-| Widget Demo | https://consular-genius.preview.emergentagent.com/widget-demo |
-| Super Admin | https://consular-genius.preview.emergentagent.com/super-admin/login |
+| Landing | https://consular-bot-1.preview.emergentagent.com |
+| Full Bot | https://consular-bot-1.preview.emergentagent.com/consular |
+| Widget Demo | https://consular-bot-1.preview.emergentagent.com/widget-demo |
+| Super Admin | https://consular-bot-1.preview.emergentagent.com/super-admin/login |
 
 ---
 
 ## Widget Embed Code
 
 ```html
-<script src="https://consular-genius.preview.emergentagent.com/embed.js"></script>
+<script src="https://consular-bot-1.preview.emergentagent.com/embed.js"></script>
 <script>
   SevaSetu.init({
     position: 'bottom-right',

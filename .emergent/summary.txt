@@ -1,196 +1,228 @@
 <analysis>**original_problem_statement:**
-The user wants to build a sophisticated, multi-tenant consular automation platform named Seva Setu Bot (originally Sarthak-AI Sovereign). The platform is intended for Indian and South African citizens and must comply with GDPR, DPDA, and POPIA.
+The user wants to build a sophisticated, multi-tenant consular automation platform named Seva Setu Bot. The platform is intended for Indian and South African citizens and must comply with GDPR, DPDA, and POPIA.
 
 **PRODUCT REQUIREMENTS:**
--   **Multi-Tenancy:** A Super Admin to manage company accounts, and a Local Admin for company-specific configurations (document uploads, feature toggles).
--   **Consular Workflow UI:** A clean White/Saffron themed interface with a professional Indian avatar and a clear progress stepper (Register → Upload → Verify → Sign).
--   **Multimodal Input:** Support for multi-language voice input (50+ languages), real-time document scanning via camera, and secure file uploads.
--   **AI-Powered Processing:** Use a multimodal LLM (OpenAI GPT-5.2) to extract information from documents (IDs, passports) and auto-populate forms, with a manual user review step.
--   **Knowledge Base (RAG):** An offline-capable Knowledge Vault built by scraping official government websites (, ) in real-time. Changes must be logged and exceptions reported via email.
--   **Interactivity:** A talking avatar that narrates responses with synchronized typing animation in the chat window. It should also solicit user feedback on its performance.
--   **Outputs & Analytics:** Generate secure, downloadable PDF forms, send email notifications, and provide analytics reports (PDF/CSV) for admins.
--   **Social Channels:** Integrate with WhatsApp (using Twilio), with Facebook and Instagram as future possibilities.
--   **Feature Parity:** The bot's functionality should emulate or exceed the features of the chatbots on  (Neural-Stream) and  (Engati).
--   **Deployment:** Initial prototyping on the Emergent cloud, with a final goal of a Dockerized deployment on a private KVM server.
+-   **Multi-Tenancy:** A Super Admin to manage company accounts, and a Local Admin for company-specific configurations.
+-   **Consular Workflow UI:** A clean White/Saffron themed interface with a professional Indian avatar and a clear progress stepper.
+-   **Multimodal Input:** Support for multi-language voice input, real-time document scanning via camera, and secure file uploads.
+-   **AI-Powered Processing:** Use a multimodal LLM (OpenAI GPT-5.2) to extract information from documents and auto-populate forms.
+-   **Knowledge Base (RAG):** An offline-capable Knowledge Vault built by scraping official government websites (, ) in real-time.
+-   **Interactivity:** A talking avatar that narrates responses with synchronized typing animation.
+-   **Outputs & Analytics:** Generate secure, downloadable PDF forms and provide analytics reports for admins.
+-   **Social Channels:** Integrate with WhatsApp (Twilio), Facebook, and Instagram.
+-   **Feature Parity:** The bot's functionality should emulate the features of chatbots on  and .
+-   **Deployment:** Initial prototyping on Emergent, with a final goal of a Dockerized deployment.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack application with a React frontend and FastAPI backend has been developed. Key implemented components include the multi-tenant structure (Super Admin, Local Admin), the Seva Setu Bot chat interface, backend APIs for chat and user management, a web-scraping RAG system, initial support for multi-language prompts, Text-to-Speech (TTS) for the avatar, and a file upload mechanism. The bot has been rebranded to Seva Setu Bot throughout the application.
+A full-stack application with a React frontend and FastAPI backend. Key components include:
+- Multi-tenant structure (Super Admin, Local Admin).
+- Seva Setu Bot chat interface with a web-scraping RAG system, Text-to-Speech, and file uploads.
+- A stable and tested UI, with fixes applied for previous instability issues.
+- A centralized configuration file for bot messages () for easy updates.
+- An embeddable chat widget for easy integration into other websites.
+- A backend monitoring service with API endpoints to track system health, resource usage, and provide uptime alerts.
+- Mock implementations for WhatsApp (Twilio) and Facebook Messenger integrations, ready for live credentials.
+- A backend system for managing message templates (Email, WhatsApp, etc.).
 
 **Last working item**:
--   Last item agent was working: The user expressed a lack of confidence in the bot's current state and requested a comprehensive re-evaluation to ensure all features from the reference chatbots (, ) are included and thoroughly tested before going live. The agent was preparing to provide a status assessment and initiate comprehensive testing to address these concerns.
+-   Last item agent was working: The user requested a comprehensive documentation suite suitable for a GitHub repository, ensuring all project aspects (architecture, requirements, design, test cases) are documented with version history, and that the bot's functionality is aligned with reference bots from  and . The agent analyzed the reference bots and was preparing to create the documentation.
 -   Status: IN PROGRESS
 -   Agent Testing Done: N
--   Which testing method agent to use? both
+-   Which testing method agent to use? NA
 -   User Testing Done: N
 
 **All Pending/In progress Issue list**:
--   Issue 1: User Confidence and Feature Completeness (P0)
--   Issue 2: Frontend Stability in Preview (P1)
+-   Issue 1: Comprehensive Documentation Creation (P0)
+-   Issue 2: Live Social Media Integration (P1)
 -   Issue 3: Incomplete Talking Avatar Implementation (P2)
--   Issue 4: Real-time RAG Functionality Verification (P3)
+-   Issue 4: Real-time RAG Functionality Verification (P2)
+-   Issue 5: Implement User Profile System (P1)
 
 **Issues Detail:**
--   **Issue 1: User Confidence and Feature Completeness**
-    -   **Attempted fixes:** The agent researched the competitor bots to create a plan but has not yet executed it or regained user trust.
+-   **Issue 1: Comprehensive Documentation Creation**
+    -   **Attempted fixes:** The agent analyzed the  and  chatbots to understand feature requirements.
     -   **Next debug checklist:**
-        1.  Create a detailed feature matrix comparing Seva Setu Bot against the Neural-Stream and Engati bots.
-        2.  Use the  tool to present this matrix to the user for validation and confirmation of any feature gaps.
-        3.  Implement any missing features identified from the matrix.
-        4.  Call the testing agent with new test cases that specifically verify the functionality of the newly added features and mimic the reference bots' behavior.
-    -   **Why fix this issue and what will be achieved with the fix?** To align the product with the user's vision, restore their confidence, and get their approval for deployment.
+        1.  Create a new directory: .
+        2.  Inside , create the following markdown files: , , , , , .
+        3.  Populate these documents with the information gathered throughout the project, ensuring they are detailed and ready for a formal review or GitHub commit.
+        4.  Update the existing  and  to be consistent with the new structure.
+    -   **Why fix this issue and what will be achieved with the fix?** To fulfill the user's request for a complete set of project documents for version control and formal handoff.
     -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** both
-    -   **Blocked on other issue:** None
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** N/A
 
--   **Issue 2: Frontend Stability in Preview**
-    -   **Attempted fixes:** The agent has fixed several syntax errors ( redeclaration) and ruled out backend issues. The agent suspects browser cache or a non-critical third-party (PostHog) script error, but the user repeatedly reports a blank or broken interface.
+-   **Issue 2: Live Social Media Integration**
+    -   **Attempted fixes:** Agent implemented and tested mock endpoints for WhatsApp (via Twilio) and Facebook Messenger.
     -   **Next debug checklist:**
-        1.  Thoroughly review  for potential race conditions or unhandled states in  hooks, especially related to the talking avatar and chat logic.
-        2.  Temporarily comment out complex UI components (e.g., the video avatar placeholder, audio elements) to isolate the source of the rendering error.
-        3.  Instruct the user to provide a screenshot of the browser's developer console (F12) to get a clear error message from their environment.
-    -   **Why fix this issue and what will be achieved with the fix?** The user cannot test or use the application, which is a critical blocker for the project's progress.
-    -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** frontend
-    -   **Blocked on other issue:** None
+        1.  Prompt the user to provide API credentials for Twilio (, , ) and Facebook (, ).
+        2.  Guide the user on where to find these in their respective developer consoles.
+        3.  Update the  file with the provided keys.
+        4.  Perform a live end-to-end test from a real WhatsApp and Facebook account to confirm functionality.
+    -   **Why fix this issue and what will be achieved with the fix?** To enable live deployment and testing on the requested social media channels.
+    -   **Status:** BLOCKED
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** backend
+    -   **Blocked on other issue:** User-provided API credentials.
 
 -   **Issue 3: Incomplete Talking Avatar Implementation**
-    -   **Attempted fixes:** The agent integrated ElevenLabs for TTS. An attempt to integrate Akool.com was halted due to a missing API key, and a placeholder video element was used instead.
+    -   **Attempted fixes:** A static illustrated image was used as a placeholder after the  integration was blocked.
     -   **Next debug checklist:**
-        1.  Re-engage the user about the Akool.com integration and clarify the need for an API key.
-        2.  If the user cannot provide a key, search for an open-source or embeddable talking avatar library (e.g., using Three.js, Ready Player Me, or similar tech) that does not require a key for basic use.
-        3.  Integrate the chosen solution into .
-    -   **Why fix this issue and what will be achieved with the fix?** To fulfill a core user experience requirement for a modern, interactive avatar.
+        1.  Re-engage the user about integrating a talking avatar service (like Akool.com) and the need for an API key.
+        2.  Alternatively, research and propose an open-source library (e.g., using Three.js) that can animate an avatar based on text-to-speech audio.
+    -   **Why fix this issue and what will be achieved with the fix?** Fulfills a core user experience requirement for a modern, interactive avatar.
     -   **Status:** BLOCKED
     -   **Is recurring issue?** N
     -   **Should Test frontend/backend/both after fix?** frontend
-    -   **Blocked on other issue:** User decision/API key for Akool.com.
+    -   **Blocked on other issue:** User decision/API key.
 
 -   **Issue 4: Real-time RAG Functionality Verification**
-    -   **Attempted fixes:** The agent created  with logic for real-time scraping, change logging, and exception reporting.
+    -   **Attempted fixes:** The agent created .
     -   **Next debug checklist:**
-        1.  Write a dedicated test script to trigger the scraping function and verify that  is updated correctly.
-        2.  Simulate a scraping failure and confirm that the email exception reporting logic is triggered (this may require mocking the SMTP call).
-        3.  Test the end-to-end flow: ask the bot a question and verify from the logs that the scraper was invoked in real-time.
-    -   **Why fix this issue and what will be achieved with the fix?** To ensure the bot provides the most current information, a key requirement for a consular service bot.
+        1.  Write a dedicated Python test script in  to trigger the scraping function.
+        2.  Verify that  is correctly updated on content changes.
+        3.  Mock an SMTP call to confirm that the email exception reporting logic is triggered on scraping failure.
+    -   **Why fix this issue and what will be achieved with the fix?** To ensure the bot's RAG system is reliable and provides the most current information, a key requirement.
     -   **Status:** TESTING PENDING
     -   **Is recurring issue?** N
     -   **Should Test frontend/backend/both after fix?** backend
-    -   **Blocked on other issue:** None
+
+-   **Issue 5: Implement User Profile System**
+    -   **Attempted fixes:** The agent verified that a basic user registration/login system exists.
+    -   **Next debug checklist:**
+        1.  Clarify with the user the specific fields required for a full profile (e.g., name, address, passport details).
+        2.  Update the  collection schema in MongoDB to include these new fields.
+        3.  Create new backend endpoints in  for creating/updating the user profile.
+        4.  Build a new frontend page for users to view and edit their profile after logging in.
+    -   **Why fix this issue and what will be achieved with the fix?** To enable user-specific services and history, a prerequisite for advanced consular applications.
+    -   **Status:** NOT STARTED
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** both
 
 **In progress Task List**:
--   **Task 1: Comprehensive Feature Implementation & Testing**
-    -   **Where to resume:** Begin by creating the feature comparison matrix and presenting it to the user.
-    -   **What will be achieved with this?** A bot that meets all user-specified requirements and is ready for a go-live decision.
+-   **Task 1: Comprehensive Documentation Generation**
+    -   **Where to resume:** Creating the required files within a new  directory.
+    -   **What will be achieved with this?** A complete documentation suite ready for version control on GitHub.
     -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** both
-    -   **Blocked on something:** User feedback on the feature matrix.
+    -   **Should Test frontend/backend/both after fix?** N/A
+    -   **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) Full Implementation of Mic/Camera Input:** Integrate  for real-time voice and image capture in , connecting it to a speech-to-text service and the backend vision endpoint.
-    -   **(P1) Language Selector UI:** Implement a dropdown menu on the frontend to allow users to explicitly select their preferred language.
+    -   **(P0) Full Implementation of Mic/Camera Input:** Integrate  for real-time voice and image capture in .
+    -   **(P1) Language Selector UI:** Implement a dropdown menu on the frontend to allow users to explicitly select their language.
 -   **Future Tasks:**
-    -   **(P2) Facebook & Instagram Integration:** Implement the deferred social media channel integrations.
+    -   **(P2) Instagram Integration:** Implement the deferred Instagram channel.
     -   **(P3) Refine Analytics & Reporting:** Build out the PDF/CSV report generation feature for admins.
     -   **(P4) KVM Server Deployment Packaging:** Create the final Docker environment for deployment on the user's private server.
 
 **Completed work in this session**
--   **Branding:** Renamed the application to Seva Setu Bot across the entire codebase.
--   **Core Architecture:** Established a multi-tenant structure with Super/Local Admin roles and UIs.
--   **AI Chat:** Integrated OpenAI GPT-5.2 and developed a RAG system that scrapes official websites in real-time ().
--   **User Experience:** Implemented formatted markdown responses (), a user feedback prompt, Text-to-Speech for avatar voice, and a typing indicator.
--   **Document Handling:** Created backend logic for document OCR/translation () and a secure file upload mechanism (, ).
--   **Documentation:** Created high-level  and  files.
+-   **Core Issue Fix:** Resolved the Emergent LLM key budget exceeded blocker, restoring chat functionality.
+-   **UI/UX Overhaul:** Updated the avatar to a user-approved illustration, revised landing page and bot text for a friendlier tone, and moved compliance notices to a less intrusive location.
+-   **Content Management:** Created a centralized config file () to allow easy updates of greetings, titles, and advisory warnings.
+-   **Performance Monitoring:** Implemented a backend monitoring service () to track system health, resource usage (CPU/memory), and API status, with configurable alerts.
+-   **Embeddable Widget:** Created a self-contained chat widget and a new backend endpoint () that provides concise, direct answers suitable for embedding on external sites.
+-   **Social Media & Templates:** Implemented mock endpoints for WhatsApp (Twilio) and Facebook Messenger, along with a backend template management system. Enhanced the intelligence of these channels to match the web bot.
+-   **Comprehensive Testing:** Performed extensive testing of the UI, chat functionality, performance, and social media mock endpoints to ensure stability and correctness.
+-   **Initial Documentation:** Created  and , and updated  and .
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Mic and Camera functionality not implemented**
     -   **Debug checklist:**
-        1.  Implement  in .
+        1.  Integrate  in .
         2.  Add a speech-to-text integration (e.g., OpenAI Whisper) to process microphone input.
-        3.  Implement functionality to capture a photo from the camera stream and send it to the backend for OCR.
-    -   **Why to solve this issue and what will be achieved with this?** This is a core requirement from the original problem statement for providing a truly interactive and accessible user experience.
+        3.  Connect the camera stream to the backend for live document scanning.
+    -   **Why to solve this issue and what will be achieved with this?** This is a core, frequently-requested feature for an interactive and accessible user experience.
     -   **Should Test frontend/backend/both after fix:** both
     -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork**: The application crashed due to exceeding the memory limit. The pod was resized.
+-   **Issue recurrence in previous fork**: Application crashed due to exceeding memory limits.
 -   **Recurrence count**: 1
 -   **Status**: RESOLVED
-    Note: While the specific crash was resolved, the high memory usage might be a symptom of inefficient code (e.g., in the web scraper or file handling). The new agent should be mindful of memory consumption.
+    Note: A monitoring service has been added, but the agent should remain mindful of memory consumption, especially with resource-intensive tasks like web scraping or file processing.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
 -   **Frontend:** React, Tailwind CSS, Shadcn UI
--   **Backend:** FastAPI, Motor (async MongoDB driver)
+-   **Backend:** FastAPI, Motor,  (for monitoring)
 -   **Database:** MongoDB
 -   **AI/ML:** RAG (Web Scraping + LLM), OpenAI GPT-5.2, ElevenLabs (TTS)
--   **Architecture:** Multi-tenant, full-stack application
+-   **Architecture:** Multi-tenant, full-stack application with embeddable widget support.
 
 **key DB schema**
 -   **companies:** 
 -   **users:** 
 -   **chat_sessions:** 
 -   **knowledge_changes:** 
+-   **templates:** 
 
 **All files of reference**
--   : Contains the primary business logic for the chatbot, including the LLM prompt, RAG integration, and document processing flow.
--   : The single most important frontend file, managing the entire UI, state, and user interactions for the bot.
--   : Implements the real-time web scraping, change detection, and logging required for the RAG system.
--   : A comprehensive list of all user-requested features, useful for validation.
+-   : Contains logic for both the full-page bot and the concise widget bot.
+-   : The main UI for the full-page chat experience.
+-   : Central source for all user-facing bot text, greetings, and warnings. Easy to edit.
+-   : Contains the enhanced prompt and logic for the WhatsApp bot.
+-   : Contains the logic for the background monitoring task.
+-   : Provides recommendations for production deployment and scaling.
 
 **Critical Info for New Agent**
--   **User Trust is Paramount:** The user's confidence is low due to recurring frontend issues and perceived feature gaps. Your top priority is to stabilize the application and demonstrably meet their requirements to regain their trust.
--   **Prioritize Stability Over New Features:** Do not add unrequested enhancements. Focus on fixing the frontend preview and completing the features on the existing checklist.
--   **Frontend Instability:** The recurring blank screen in the preview is a major blocker. This needs to be your first point of investigation. It's likely a client-side JavaScript error in .
--   **Branding:** The official name is Seva Setu Bot. Ensure all user-facing text and branding are consistent.
--   **Credentials:** Super Admin login is  / .
+-   **User's Top Priority:** The user's primary concern has shifted to **feature parity and intelligence** compared to reference bots (, ). The bot's behavior (concise vs. verbose) is a key point of feedback.
+-   **Documentation is Next:** Your immediate task is to create a full suite of **project documentation** in a  folder, as requested by the user for a future GitHub repository.
+-   **Mocked Integrations:** Social media integrations (WhatsApp, Facebook) are implemented but **mocked**. They are blocked pending user-provided API credentials. Do not assume they are live.
+-   **Two Chat Modes:** The application now supports two chat experiences: a full-page, detailed conversation () and a concise, embeddable widget ( endpoint).
+-   **Monitoring is Active:** A background monitoring service is running. Alerts for high load or downtime are configured via  but the email sending part needs to be connected to a service.
 
 **documents and test reports created in this job**
 -   /app/FEATURE_CHECKLIST.md
 -   /app/DOCUMENTATION.md
--   /app/test_reports/iteration_1.json
--   /app/test_reports/iteration_2.json
+-   /app/ARCHITECTURE_GUIDE.md
+-   /app/TEST_CASES.md
+-   /app/test_reports/iteration_4.json
+-   /app/memory/PRD.md
 
 **Last 10 User Messages and any pending HUMAN messages**
-10. **Status Request:** User wants to know the current project status and if it's nearing the advanced stage for going live.
-9.  **Feature Parity Request:** User is uncomfortable and wants the bot to have all features from the bots on  and , demanding full testing.
-8.  **Avatar & Deployment Request:** User wants to use  for a realistic avatar and wants to deploy the bot to a live website.
-7.  **Decision:** User agrees to a dummy avatar for now but insists all previously requested features must work.
-6.  **Complaint & Refinement:** User states the bot's responses are not well-formatted and it needs to be more real-time and intelligent.
-5.  **Complaint & New Features:** User complains about incorrect Hindi script and requests advanced multilingual OCR/translation, user feedback prompts, secure file uploads, and a demo of the superadmin login.
-4.  **Complaint & New Features:** User demands real-time site scanning, change logging, exception reports, a specific namaste symbol avatar, and proper testing of all scenarios.
-3.  **Complaint & New Features:** User reports the bot only speaks English and must source answers exclusively from the two specified government websites.
-2.  **Complaint:** User reports message sending is failing and mic/other resources are not working.
-1.  **Complaint:** User can see the preview, but it is not working.
+10. **Request:** Asked to create templates for emails/WhatsApp, save new formats, and require a full user profile for services. Also requested testing on social media. (IN PROGRESS)
+9.  **Clarification:** Confirmed that WhatsApp/Facebook integration should be prioritized, followed by templates and profiles. Mentioned profiles might already exist.
+8.  **Challenge:** Questioned whether the WhatsApp bot was truly tested and as intelligent as the web version. (RESOLVED - Agent enhanced and re-tested successfully)
+7.  **Request:** Asked for the creation of comprehensive documentation (architecture, requirements, design, test cases, etc.) for a GitHub repository and to ensure functionality aligns with  and  bots. (IN PROGRESS - Current Task)
+6.  **Request:** Asked for an embeddable link/widget, and for the bot's behavior to be more focused and less talkative, like a proper chatbot. (RESOLVED - Agent created widget and concise endpoint)
+5.  **Request:** Asked for monitoring and alerts for uptime and high load, plus recommendations for a production server architecture. (RESOLVED - Agent implemented monitoring service and created ARCHITECTURE_GUIDE.md)
+4.  **Question:** Asked for a status report on the bot's performance, response quality, and load handling. (RESOLVED - Agent provided a detailed report)
+3.  **Request:** Provided specific new text for the bot's title, greeting, and advisory warnings. Asked for a way to easily update these messages. (RESOLVED - Agent created  config file and updated UI)
+2.  **Feedback:** Provided an image of a desired avatar style (illustrated, friendly) and requested the removal of GDPR/POPIA text from the main landing page. (RESOLVED - Agent generated and implemented new avatar and text changes)
+1.  **Confirmation:** Replenished the LLM key budget after the agent identified it was exhausted. (RESOLVED)
 
 **Project Health Check:**
--   **Broken:** The frontend preview is intermittently failing for the user, blocking testing and validation. The real-time mic/camera functionality is not implemented.
+-   **Broken:** None.
+-   **Mocked:** WhatsApp (Twilio) and Facebook Messenger integrations are mocked pending user credentials.
 
 **3rd Party Integrations**
 -   **OpenAI GPT-5.2** (Text Generation & Vision) — uses Emergent LLM Key
--   **ElevenLabs** (Text-to-Speech) — requires User API Key (currently using a free/test tier)
--   **Twilio WhatsApp Business API** (Messaging) — requires User API Key (planned, not fully integrated)
--   **Akool.com** (AI Avatar) — requires User API Key (suggested, not integrated)
+-   **ElevenLabs** (Text-to-Speech) — requires User API Key
+-   **Twilio WhatsApp Business API** (Messaging) — **mocked**, requires User API Keys
+-   **Facebook Messenger API** (Messaging) — **mocked**, requires User API Keys
+-   **Akool.com** (AI Avatar) — suggested, not integrated, requires User API Key
 
 **Testing status**
 -   Testing agent used after significant changes: YES
 -   Troubleshoot agent used after agent stuck in loop: NO
--   Test files created: ['/app/test_reports/iteration_1.json', '/app/test_reports/iteration_2.json']
--   Known regressions: The frontend has become unstable in the user's preview environment, which is a regression from a previously working state.
+-   Test files created: ['/app/TEST_CASES.md']
+-   Known regressions: None in this session. Previous frontend instability appears resolved.
 
 **Credentials to test flow:**
 -   **Super Admin Login:**
-    -   **URL:** 
     -   **Email:** 
     -   **Password:** 
+-   **Required from user for live testing:**
+    -   , , 
+    -   , 
+    -   
 
 **What agent forgot to execute**
--   **Implement Mic/Camera Input:** The agent has not implemented the core user request for real-time interaction using the device's microphone (for speech-to-text) and camera (for live document scanning). The user has explicitly pointed this out (mic and other resources not working).
--   **Stabilize the Frontend:** The agent has repeatedly moved on to new features despite the user's persistent complaints about the frontend being broken in the preview. Solving this stability issue should have been the top priority.
--   **Implement UI Language Selector:** The agent suggested this feature to improve usability for the multi-language requirement but never implemented it in .</analysis>
+-   **Implement Mic/Camera Input:** This core feature from the original PRD for real-time voice and document scanning remains unimplemented despite user mentions.
+-   **Build Full User Profile System:** The user assumes this is complete, but only basic authentication exists. A system for users to create and manage a detailed profile (name, address, etc.) is still needed.
+-   **Implement Talking Avatar:** The request for a *talking* avatar was replaced with a static image and has not been revisited.
+-   **Dedicated Scraper Testing:** The real-time  has not been formally tested for its change-logging and error-reporting capabilities.</analysis>

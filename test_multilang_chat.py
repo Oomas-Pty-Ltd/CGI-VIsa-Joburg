@@ -8,7 +8,7 @@ import requests
 import json
 import time
 
-API_URL = "https://consular-genius.preview.emergentagent.com/api"
+API_URL = "https://consular-bot-1.preview.emergentagent.com/api"
 
 def test_multilang_chat():
     """Test multi-language chat functionality"""
