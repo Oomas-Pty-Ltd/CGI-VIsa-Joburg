@@ -84,18 +84,24 @@ async def health_check():
 
 async def init_super_admin():
     """Initialize super admin if not exists"""
-    super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'superadmin@sarthak.ai')
-    super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin@2025')
-    
-    existing = await db.super_admins.find_one({"email": super_admin_email})
-    if not existing:
-        hashed = bcrypt.hashpw(super_admin_password.encode('utf-8'), bcrypt.gensalt())
-        await db.super_admins.insert_one({
-            "id": str(uuid.uuid4()),
-            "email": super_admin_email,
-            "password": hashed.decode('utf-8'),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+    try:
+        super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'superadmin@sarthak.ai')
+        super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin@2025')
+        
+        existing = await db.super_admins.find_one({"email": super_admin_email})
+        if not existing:
+            hashed = bcrypt.hashpw(super_admin_password.encode('utf-8'), bcrypt.gensalt())
+            await db.super_admins.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": super_admin_email,
+                "password": hashed.decode('utf-8'),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            logger.info(f"Super admin created: {super_admin_email}")
+        else:
+            logger.info(f"Super admin already exists: {super_admin_email}")
+    except Exception as e:
+        logger.error(f"Failed to initialize super admin: {e}")
 
 @api_router.get("/")
 async def root():
