@@ -6,6 +6,9 @@
 2. Added root-level `/health` endpoint for Kubernetes health checks
 3. Optimized 4 database queries with field projections
 4. Replaced inefficient message counting with MongoDB aggregation pipeline
+5. Fixed Atlas MongoDB compatibility - changed `client.admin.command('ping')` to `db.command('ping')`
+6. Implemented lazy loading for Presidio/Spacy to avoid heavy startup
+7. Added comprehensive error handling to lifespan startup function
 
 ## Overview
 Multi-tenant consular automation platform for Indian and South African citizens. GDPR, DPDA, and POPIA compliant.
@@ -104,17 +107,17 @@ Frontend (React)     Backend (FastAPI)      External Services
 
 | Page | URL |
 |------|-----|
-| Landing | https://consular-bot-1.preview.emergentagent.com |
-| Full Bot | https://consular-bot-1.preview.emergentagent.com/consular |
-| Widget Demo | https://consular-bot-1.preview.emergentagent.com/widget-demo |
-| Super Admin | https://consular-bot-1.preview.emergentagent.com/super-admin/login |
+| Landing | https://visa-aide.preview.emergentagent.com |
+| Full Bot | https://visa-aide.preview.emergentagent.com/consular |
+| Widget Demo | https://visa-aide.preview.emergentagent.com/widget-demo |
+| Super Admin | https://visa-aide.preview.emergentagent.com/super-admin/login |
 
 ---
 
 ## Widget Embed Code
 
 ```html
-<script src="https://consular-bot-1.preview.emergentagent.com/embed.js"></script>
+<script src="https://visa-aide.preview.emergentagent.com/embed.js"></script>
 <script>
   SevaSetu.init({
     position: 'bottom-right',
