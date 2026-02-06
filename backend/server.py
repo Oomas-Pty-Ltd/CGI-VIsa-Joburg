@@ -47,6 +47,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 
+# Root-level health check endpoint for deployment health checks
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "seva-setu-bot"}
+
 async def init_super_admin():
     """Initialize super admin if not exists"""
     super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'superadmin@sarthak.ai')
