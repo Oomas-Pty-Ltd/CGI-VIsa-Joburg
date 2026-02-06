@@ -284,10 +284,8 @@ def render_template(template_body: str, variables: Dict[str, str]) -> str:
 # ENDPOINTS
 # =====================================================================
 
-@router.on_event("startup")
-async def startup_init_templates():
-    """Initialize default templates on startup"""
-    await init_default_templates()
+# Note: Template initialization is handled by the main server.py lifespan function
+# The @router.on_event("startup") decorator has been removed to avoid duplicate initialization
 
 
 @router.post("/init")
