@@ -50,7 +50,10 @@ async def chat(request: ChatRequest):
     user_id = request.user_id or "guest"
     company_id = request.company_id
     
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+    session = await db.chat_sessions.find_one(
+        {"id": session_id}, 
+        {"_id": 0, "id": 1, "user_id": 1, "company_id": 1, "step": 1, "created_at": 1}
+    )
     
     if not session:
         session = {
@@ -335,8 +338,11 @@ async def chat_widget(request: WidgetChatRequest):
     
     session_id = request.session_id or str(uuid.uuid4())
     
-    # Get or create session
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+    # Get or create session - only fetch required fields
+    session = await db.chat_sessions.find_one(
+        {"id": session_id}, 
+        {"_id": 0, "id": 1, "user_id": 1, "source": 1, "created_at": 1}
+    )
     if not session:
         session = {
             "id": session_id,

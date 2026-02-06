@@ -23,8 +23,8 @@
 (function() {
   'use strict';
   
-  // Configuration
-  const BOT_URL = 'https://consular-bot-1.preview.emergentagent.com';
+  // Configuration - Dynamic URL detection for deployment compatibility
+  const BOT_URL = window.location.origin;
   const API_URL = BOT_URL + '/api/consular/chat-widget';
   
   // Default settings
