@@ -45,8 +45,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler with proper error handling"""
     monitoring_task = None
     try:
-        # Test database connection first
-        await client.admin.command('ping')
+        # Test database connection using the actual database (not admin)
+        # This works with Atlas MongoDB where users may not have admin access
+        await db.command('ping')
         logger.info("MongoDB connection successful")
         
         # Initialize super admin
