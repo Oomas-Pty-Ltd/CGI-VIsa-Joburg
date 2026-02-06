@@ -39,5 +39,5 @@ def mask_pii(text: str) -> str:
         )
         
         return anonymized.text
-    except Exception as e:
+    except Exception:
         return text
