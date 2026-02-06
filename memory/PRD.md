@@ -1,5 +1,12 @@
 # Seva Setu Bot - Product Requirements Document
 
+## Latest Updates (Feb 6, 2026)
+### Deployment Fixes Applied:
+1. Removed `.env` blocking entries from `.gitignore` (lines 84-97)
+2. Added root-level `/health` endpoint for Kubernetes health checks
+3. Optimized 4 database queries with field projections
+4. Replaced inefficient message counting with MongoDB aggregation pipeline
+
 ## Overview
 Multi-tenant consular automation platform for Indian and South African citizens. GDPR, DPDA, and POPIA compliant.
 
