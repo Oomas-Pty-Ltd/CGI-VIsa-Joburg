@@ -92,7 +92,7 @@ async def get_documents(limit: int = 100, payload: dict = Depends(verify_local_a
     
     documents = await db.documents.find(
         {"company_id": company_id}, 
-        {"_id": 0}
+        {"_id": 0, "id": 1, "filename": 1, "category": 1, "uploaded_at": 1}
     ).limit(limit).to_list(limit)
     return documents
 
@@ -106,7 +106,7 @@ async def get_chat_logs(
     
     sessions = await db.chat_sessions.find(
         {"company_id": company_id},
-        {"_id": 0}
+        {"_id": 0, "user_id": 1, "messages": 1, "created_at": 1}
     ).sort("created_at", -1).limit(limit).to_list(limit)
     
     logs = []
@@ -168,13 +168,14 @@ async def get_analytics(
         "created_at": {"$gte": start_date}
     })
     
-    sessions = await db.chat_sessions.find(
-        {"company_id": company_id,
-         "created_at": {"$gte": start_date}},
-        {"_id": 0}
-    ).limit(1000).to_list(1000)
-    
-    total_messages = sum(len(s.get('messages', [])) for s in sessions)
+    # Use aggregation pipeline for efficient message counting
+    pipeline = [
+        {"$match": {"company_id": company_id, "created_at": {"$gte": start_date}}},
+        {"$project": {"message_count": {"$size": {"$ifNull": ["$messages", []]}}}},
+        {"$group": {"_id": None, "total_messages": {"$sum": "$message_count"}}}
+    ]
+    result = await db.chat_sessions.aggregate(pipeline).to_list(1)
+    total_messages = result[0]['total_messages'] if result else 0
     
     total_documents = await db.documents.count_documents({
         "company_id": company_id,

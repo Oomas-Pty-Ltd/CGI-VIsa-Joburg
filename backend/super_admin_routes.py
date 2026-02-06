@@ -72,7 +72,10 @@ async def create_company(company: CompanyCreate, payload: dict = Depends(verify_
 @router.get("/companies", response_model=List[Company])
 async def get_companies(limit: int = 100, payload: dict = Depends(verify_super_admin)):
     db = await get_database()
-    companies = await db.companies.find({}, {"_id": 0}).limit(limit).to_list(limit)
+    companies = await db.companies.find(
+        {}, 
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "llm_model": 1, "features": 1, "created_at": 1, "status": 1}
+    ).limit(limit).to_list(limit)
     return [Company(**company) for company in companies]
 
 @router.get("/companies/{company_id}", response_model=Company)
