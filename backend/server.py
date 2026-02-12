@@ -77,6 +77,10 @@ async def lifespan(app: FastAPI):
         monitoring_task = asyncio.create_task(start_background_monitoring())
         logger.info("Background monitoring started")
         
+        # Initialize knowledge base
+        await knowledge_service.initialize()
+        logger.info("Knowledge base initialized")
+        
         # Start session cleanup task (runs every hour)
         async def periodic_session_cleanup():
             while True:
