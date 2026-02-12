@@ -179,6 +179,8 @@ async def test_alert() -> Dict[str, str]:
     
     return {
         "status": "sent",
+        "message": "Test alert has been dispatched. Check your configured alert channels."
+    }
 
 
 @router.get("/security")
