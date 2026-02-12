@@ -4,10 +4,11 @@ SEVA SETU BOT - WHATSAPP INTEGRATION (Twilio)
 ====================================================================
 Full WhatsApp Business API integration for consular bot services.
 Supports: Incoming messages, Outgoing messages, Templates, Media
+With: Webhook signature validation, session management, guardrails
 ====================================================================
 """
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Form
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Form, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -16,6 +17,12 @@ import os
 import logging
 from datetime import datetime, timezone
 from database import get_database
+
+# Security imports
+from security.webhook_validator import verify_twilio_webhook, log_webhook_attempt
+from security.session_manager import session_manager
+from security.input_sanitizer import sanitize_user_input, create_safe_system_prompt
+from security.guardrail import guardrail_service, sanitize_logs
 
 # Twilio imports
 try:
@@ -44,7 +51,8 @@ TWILIO_WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', '')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Bot system prompt for WhatsApp (concise but knowledgeable)
-WHATSAPP_SYSTEM_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
+# NOTE: This is wrapped with security hardening at runtime
+_WHATSAPP_BASE_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
 
 KNOWLEDGE BASE - CGI JOHANNESBURG:
 
@@ -98,6 +106,9 @@ RESPONSE RULES:
 5. Be helpful and professional
 
 RESPOND TO USER:"""
+
+# Create hardened system prompt
+WHATSAPP_SYSTEM_PROMPT = create_safe_system_prompt(_WHATSAPP_BASE_PROMPT)
 
 
 # =====================================================================
@@ -225,8 +236,20 @@ async def whatsapp_webhook(
     """
     Webhook endpoint for incoming WhatsApp messages from Twilio.
     Twilio sends form-encoded data.
+    With: Signature validation, input sanitization, PII protection
     """
+    source_ip = request.client.host if request.client else "unknown"
+    
     try:
+        # Validate Twilio webhook signature (skip in dev mode)
+        if os.environ.get('WEBHOOK_VALIDATION_DISABLED', '').lower() != 'true':
+            try:
+                await verify_twilio_webhook(request)
+                log_webhook_attempt("whatsapp", source_ip, True, "Signature valid")
+            except HTTPException:
+                log_webhook_attempt("whatsapp", source_ip, False, "Invalid signature")
+                raise
+        
         form_data = await request.form()
         
         # Extract message details
@@ -237,49 +260,84 @@ async def whatsapp_webhook(
         profile_name = form_data.get("ProfileName", "")
         num_media = int(form_data.get("NumMedia", 0))
         
-        logger.info(f"WhatsApp message from {from_number}: {message_body[:50]}...")
+        # Sanitize and validate input
+        sanitization_result = sanitize_user_input(message_body, context="whatsapp")
         
-        db = await get_database()
-        
-        # Get or create user
-        user = await db.whatsapp_users.find_one({"phone_number": from_number}, {"_id": 0})
-        if not user:
-            user_id = str(uuid.uuid4())
-            user = {
-                "id": user_id,
-                "phone_number": from_number,
-                "profile_name": profile_name,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            await db.whatsapp_users.insert_one(user)
+        if not sanitization_result.is_safe:
+            logger.warning(f"[SECURITY] Blocked unsafe input from {sanitize_logs(from_number)}: {sanitization_result.detected_patterns}")
+            ai_response = sanitization_result.warnings[0] if sanitization_result.warnings else "I cannot process that request. Please ask about consular services."
         else:
-            user_id = user['id']
-        
-        # Store incoming message
-        await db.whatsapp_messages.insert_one({
-            "id": str(uuid.uuid4()),
-            "twilio_sid": message_sid,
-            "user_id": user_id,
-            "phone_number": from_number,
-            "direction": "inbound",
-            "message": message_body,
-            "has_media": num_media > 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
-        
-        # Generate AI response
-        session_id = f"whatsapp_{user_id}"
-        ai_response = await generate_ai_response(message_body, session_id)
-        
-        # Store outgoing message
-        await db.whatsapp_messages.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "phone_number": from_number,
-            "direction": "outbound",
-            "message": ai_response,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+            # Mask PII in input before processing
+            input_result = guardrail_service.validate_input(message_body)
+            sanitized_message = input_result.sanitized_text
+            
+            logger.info(f"WhatsApp message from {sanitize_logs(from_number)}: {sanitize_logs(message_body[:50])}...")
+            
+            db = await get_database()
+            
+            # Get or create user
+            user = await db.whatsapp_users.find_one({"phone_number": from_number}, {"_id": 0})
+            if not user:
+                user_id = str(uuid.uuid4())
+                user = {
+                    "id": user_id,
+                    "phone_number": from_number,
+                    "profile_name": profile_name,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_interaction": datetime.now(timezone.utc).isoformat()
+                }
+                await db.whatsapp_users.insert_one(user)
+            else:
+                user_id = user['id']
+                # Update last interaction for WhatsApp 24-hour window tracking
+                await db.whatsapp_users.update_one(
+                    {"phone_number": from_number},
+                    {"$set": {"last_interaction": datetime.now(timezone.utc).isoformat()}}
+                )
+            
+            # Get or create secure session
+            session = await session_manager.get_or_create_session(
+                channel="whatsapp",
+                user_identifier=from_number,
+                metadata={"profile_name": profile_name, "twilio_sid": message_sid}
+            )
+            session_id = session['id']
+            
+            # Store incoming message (with PII masked in logs)
+            await db.whatsapp_messages.insert_one({
+                "id": str(uuid.uuid4()),
+                "twilio_sid": message_sid,
+                "user_id": user_id,
+                "phone_number": from_number,
+                "direction": "inbound",
+                "message": message_body,  # Store original for user reference
+                "message_sanitized": sanitized_message,  # Store sanitized for processing
+                "has_media": num_media > 0,
+                "session_id": session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Generate AI response using sanitized input
+            ai_response = await generate_ai_response(sanitized_message, session_id)
+            
+            # Validate and sanitize output
+            output_result = guardrail_service.validate_output(ai_response)
+            ai_response = output_result.sanitized_text
+            
+            if output_result.pii_detected:
+                logger.warning(f"[GUARDRAIL] PII detected in output, masked: {output_result.pii_detected}")
+            
+            # Store outgoing message
+            await db.whatsapp_messages.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "phone_number": from_number,
+                "direction": "outbound",
+                "message": ai_response,
+                "session_id": session_id,
+                "guardrail_flags": output_result.unsafe_patterns,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
         
         # Return TwiML response
         if TWILIO_AVAILABLE:
@@ -288,8 +346,10 @@ async def whatsapp_webhook(
         else:
             return {"reply": ai_response}
         
+    except HTTPException:
+        raise  # Re-raise authentication errors
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"Webhook error: {sanitize_logs(str(e))}")
         return Response(status_code=200)  # Always return 200 to Twilio
 
 
