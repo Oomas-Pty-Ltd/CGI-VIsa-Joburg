@@ -361,28 +361,35 @@ async def chat_widget(request: WidgetChatRequest):
     """
     Widget-specific chat endpoint with concise, focused responses.
     Designed for embedded chat widgets on external websites.
+    With: Input sanitization, PII protection, session isolation
     """
     db = await get_database()
     
-    session_id = request.session_id or str(uuid.uuid4())
+    # Sanitize and validate user input
+    sanitization_result = sanitize_user_input(request.message, context="widget")
     
-    # Get or create session - only fetch required fields
-    session = await db.chat_sessions.find_one(
-        {"id": session_id}, 
-        {"_id": 0, "id": 1, "user_id": 1, "source": 1, "created_at": 1}
+    if not sanitization_result.is_safe:
+        logger.warning(f"[SECURITY] Blocked unsafe widget input: {sanitization_result.detected_patterns}")
+        return WidgetChatResponse(
+            session_id=request.session_id or str(uuid.uuid4()),
+            response="I cannot process that request. Please ask about consular services."
+        )
+    
+    # Mask PII in input
+    input_result = guardrail_service.validate_input(request.message)
+    sanitized_message = input_result.sanitized_text
+    
+    # Use secure session management for widgets
+    session = await session_manager.get_or_create_session(
+        channel="widget",
+        user_identifier="widget_guest",
+        session_id=request.session_id,
+        metadata={"mode": request.mode, "source": "widget"}
     )
-    if not session:
-        session = {
-            "id": session_id,
-            "user_id": "widget_guest",
-            "messages": [],
-            "source": "widget",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.chat_sessions.insert_one(session)
+    session_id = session['id']
     
-    # Concise system prompt - KEY TO BETTER BEHAVIOR
-    system_message = """You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.
+    # Concise system prompt - KEY TO BETTER BEHAVIOR (BASE)
+    _base_system_message = """You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.
 
 CRITICAL RULES:
 1. WAIT for user's question. DO NOT volunteer information they didn't ask for.
@@ -421,6 +428,9 @@ Closed on Indian & SA public holidays"
 
 NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
     
+    # Apply security hardening
+    system_message = create_safe_system_prompt(_base_system_message)
+    
     api_key = os.environ.get('EMERGENT_LLM_KEY')
     chat_instance = LlmChat(
         api_key=api_key,
@@ -428,26 +438,25 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
         system_message=system_message
     ).with_model("openai", "gpt-5.2")
     
-    user_message = UserMessage(text=request.message)
+    user_message = UserMessage(text=sanitized_message)
     
     try:
         bot_response = await chat_instance.send_message(user_message)
     except Exception as e:
+        logger.error(f"Widget service error: {sanitize_logs(str(e))}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Service error: {str(e)}"
         )
     
-    # Store messages
-    await db.chat_sessions.update_one(
-        {"id": session_id},
-        {"$push": {"messages": {
-            "$each": [
-                {"role": "user", "content": request.message, "timestamp": datetime.now(timezone.utc).isoformat()},
-                {"role": "assistant", "content": bot_response, "timestamp": datetime.now(timezone.utc).isoformat()}
-            ]
-        }}}
-    )
+    # Validate and sanitize output
+    output_result = guardrail_service.validate_output(bot_response)
+    bot_response = output_result.sanitized_text
+    
+    # Store messages using session manager
+    await session_manager.add_message(session_id, "user", request.message)
+    await session_manager.add_message(session_id, "assistant", bot_response, 
+                                       metadata={"guardrail_flags": output_result.unsafe_patterns})
     
     return WidgetChatResponse(
         session_id=session_id,
