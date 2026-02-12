@@ -20,6 +20,20 @@ from security.guardrail import guardrail_service, sanitize_logs
 from security.rate_limiter import rate_limiter, check_rate_limit
 from security.cost_monitor import cost_monitor, record_llm_usage
 
+# Services imports
+from services.intent_classifier import (
+    intent_classifier, 
+    classify_intent, 
+    get_deterministic_response,
+    IntentCategory
+)
+from services.escalation_service import (
+    escalation_service,
+    EscalationReason,
+    EscalationPriority
+)
+from services.knowledge_service import knowledge_service
+
 load_dotenv()
 
 router = APIRouter(prefix="/consular", tags=["consular"])
