@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 from security.session_manager import session_manager
 from security.input_sanitizer import sanitize_user_input, create_safe_system_prompt
 from security.guardrail import guardrail_service, sanitize_logs
+from security.rate_limiter import rate_limiter, check_rate_limit
+from security.cost_monitor import cost_monitor, record_llm_usage
 
 load_dotenv()
 
