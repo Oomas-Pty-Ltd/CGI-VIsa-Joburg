@@ -10,7 +10,8 @@ Admin dashboard API for:
 ====================================================================
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi import status as http_status
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -39,14 +40,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # =====================================================================
 
 class UpdateEscalationRequest(BaseModel):
-    status: Optional[str] = None
+    esc_status: Optional[str] = None
     assigned_to: Optional[str] = None
     resolution_notes: Optional[str] = None
 
 
 @router.get("/escalations")
 async def get_escalations(
-    status: Optional[str] = None,
+    esc_status: Optional[str] = None,
     limit: int = 50,
     payload: dict = Depends(verify_super_admin)
 ):
