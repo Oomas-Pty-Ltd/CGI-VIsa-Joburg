@@ -1,6 +1,46 @@
 # Seva Setu Bot - Product Requirements Document
 
-## Latest Updates (Feb 6, 2026)
+## Latest Updates (Feb 12, 2026)
+
+### 🔒 Phase 1 Critical Security Fixes Implemented:
+
+#### 1. Channel Module - Webhook Security
+- ✅ Twilio signature validation (`X-Twilio-Signature` header)
+- ✅ Facebook signature validation (`X-Hub-Signature-256` header)
+- ✅ Webhook attempt logging for security audit
+- ✅ HTTPS enforcement via signature validation
+
+#### 2. Session & Authentication Module
+- ✅ Unique session IDs per channel: `{channel}_{user_hash}_{uuid}_{timestamp}`
+- ✅ Session TTL (24 hours default, configurable)
+- ✅ Channel isolation (web, whatsapp, facebook, widget sessions are separate)
+- ✅ Automatic session cleanup (old/expired sessions)
+- ✅ Max sessions per user limit (10 default)
+
+#### 3. LLM Module - Prompt Injection Protection
+- ✅ Server-side hardened system prompts (immutable identity)
+- ✅ Input sanitizer with 20+ injection pattern detection
+- ✅ Blocks: instruction override, role manipulation, system extraction, jailbreak attempts
+- ✅ Code injection prevention
+- ✅ SQL injection detection
+
+#### 4. Guardrail Module - PII & Output Protection
+- ✅ Enhanced PII masking: Email, Phone, SA ID, Aadhaar, PAN, Passport, Credit Card
+- ✅ Unsafe output detection (guarantees, legal/medical/financial advice)
+- ✅ Auto-disclaimers for risky content
+- ✅ Sanitized logging (PII redacted in logs)
+- ✅ Security metrics endpoint: `/api/monitoring/security`
+
+### Security Testing Results (31/31 tests passed):
+- Prompt injection protection: ✅
+- PII masking in input/output: ✅
+- Session isolation: ✅
+- Webhook endpoints: ✅
+- Security metrics: ✅
+
+---
+
+## Previous Updates (Feb 6, 2026)
 ### Deployment Fixes Applied:
 1. Removed `.env` blocking entries from `.gitignore` (lines 84-97)
 2. Added root-level `/health` endpoint for Kubernetes health checks
