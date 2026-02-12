@@ -89,6 +89,73 @@ async def chat(request: ChatRequest, http_request: Request):
     if input_result.pii_detected:
         logger.info(f"[GUARDRAIL] PII detected in input and masked: {input_result.pii_detected}")
     
+    # Intent classification - try rule-based first
+    intent_result = classify_intent(sanitized_message)
+    logger.info(f"[INTENT] Category: {intent_result.category.value}, Confidence: {intent_result.confidence:.2f}, Requires LLM: {intent_result.requires_llm}")
+    
+    # Check for escalation trigger
+    if intent_result.escalation_needed:
+        user_id = request.user_id or "guest"
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # Get session for conversation history
+        session = await session_manager.get_or_create_session(
+            channel="web",
+            user_identifier=user_id,
+            session_id=session_id
+        )
+        
+        # Create escalation
+        escalation = await escalation_service.create_escalation(
+            session_id=session['id'],
+            user_identifier=user_id,
+            channel="web",
+            reason=EscalationReason.EMERGENCY if intent_result.category == IntentCategory.EMERGENCY else EscalationReason.USER_REQUEST,
+            priority=EscalationPriority.URGENT if intent_result.category == IntentCategory.EMERGENCY else EscalationPriority.MEDIUM,
+            description=sanitized_message,
+            conversation_history=session.get('messages', [])
+        )
+        
+        response = escalation_service.get_escalation_response(
+            EscalationPriority.URGENT if intent_result.category == IntentCategory.EMERGENCY else EscalationPriority.MEDIUM
+        )
+        response += f"\n\n**Reference ID:** {escalation.id[:8].upper()}"
+        
+        return ChatResponse(
+            session_id=session['id'],
+            response=response,
+            step="escalated"
+        )
+    
+    # Try deterministic response first (no LLM cost)
+    deterministic_response = get_deterministic_response(intent_result)
+    if deterministic_response and not request.image_base64:
+        user_id = request.user_id or "guest"
+        session = await session_manager.get_or_create_session(
+            channel="web",
+            user_identifier=user_id,
+            session_id=request.session_id
+        )
+        
+        # Add source tag
+        response_data = intent_classifier.get_structured_response(intent_result.suggested_response_key)
+        source_tag = f"\n\n---\n*Source: {response_data.get('source', 'CGI Johannesburg')}*"
+        final_response = deterministic_response + source_tag
+        
+        # Store messages
+        await session_manager.add_message(session['id'], "user", request.message)
+        await session_manager.add_message(session['id'], "assistant", final_response, 
+                                          metadata={"intent": intent_result.category.value, "llm_used": False})
+        
+        logger.info(f"[INTENT] Served deterministic response for: {intent_result.category.value}")
+        
+        return ChatResponse(
+            session_id=session['id'],
+            response=final_response,
+            step="complete"
+        )
+    
+    # Fall through to LLM for complex queries
     # Allow guest access without token verification for consular bot
     user_id = request.user_id or "guest"
     company_id = request.company_id
