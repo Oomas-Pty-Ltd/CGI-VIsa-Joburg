@@ -452,13 +452,13 @@ ALERT_EMAILS=""
 ## Deployment
 
 ### Preview Environment
-- **URL**: https://visa-aide.preview.emergentagent.com
+- **URL**: https://consulai.preview.emergentagent.com
 - **Backend Port**: 8001 (internal)
 - **Frontend Port**: 3000 (internal)
 
 ### Health Check
 ```bash
-curl https://visa-aide.preview.emergentagent.com/health
+curl https://consulai.preview.emergentagent.com/health
 # {"status": "healthy", "service": "seva-setu-bot"}
 ```
 

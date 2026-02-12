@@ -8,7 +8,7 @@ import requests
 import json
 import time
 
-API_URL = "https://visa-aide.preview.emergentagent.com/api"
+API_URL = "https://consulai.preview.emergentagent.com/api"
 
 def test_multilang_chat():
     """Test multi-language chat functionality"""

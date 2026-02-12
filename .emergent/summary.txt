@@ -1,112 +1,112 @@
 <analysis>**original_problem_statement:**
 The user wants to build a sophisticated, multi-tenant consular automation platform named Seva Setu Bot. The platform is intended for Indian and South African citizens and must comply with GDPR, DPDA, and POPIA.
 
+Following a user-provided security and compliance audit, the project has pivoted to a multi-phase implementation of critical security features, operational hardening, and user-facing enhancements.
+
 **PRODUCT REQUIREMENTS:**
 -   **Multi-Tenancy:** A Super Admin to manage company accounts, and a Local Admin for company-specific configurations.
+-   **Security & Compliance (User Mandated):**
+    -   **Phase 1 (Complete):** Webhook signature validation, session isolation, prompt injection protection, PII masking.
+    -   **Phase 2 (Complete):** Rate limiting, cost monitoring, WhatsApp 24-hour policy handling.
+    -   **Phase 3 (Complete):** Rule-based intent classification, human escalation system, knowledge base versioning, and an AI observability dashboard.
 -   **Consular Workflow UI:** A clean White/Saffron themed interface with a professional Indian avatar and a clear progress stepper.
--   **Multimodal Input:** Support for multi-language voice input, real-time document scanning via camera, and secure file uploads.
+-   **Multimodal Input:** Support for multi-language voice input (mic), real-time document scanning (camera), and secure file uploads.
 -   **AI-Powered Processing:** Use a multimodal LLM (OpenAI GPT-5.2) to extract information from documents and auto-populate forms.
--   **Knowledge Base (RAG):** An offline-capable Knowledge Vault built by scraping official government websites (, ) in real-time.
--   **Interactivity:** A talking avatar that narrates responses with synchronized typing animation.
+-   **Knowledge Base (RAG):** An offline-capable Knowledge Vault built by scraping official government websites.
 -   **Outputs & Analytics:** Generate secure, downloadable PDF forms and provide analytics reports for admins.
 -   **Social Channels:** Integrate with WhatsApp (Twilio), Facebook, and Instagram.
--   **Feature Parity:** The bot's functionality should emulate the features of chatbots on  and .
--   **Deployment:** Initial prototyping on Emergent, with a final goal of a Dockerized deployment.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack application (React frontend, FastAPI backend) with a multi-tenant structure, a Seva Setu Bot chat interface featuring RAG and TTS, and admin dashboards. The application has undergone significant refactoring to resolve deployment blockers, including database query optimization, lazy loading of ML models, and making the backend startup process more resilient. Mock integrations for social media and a monitoring service are also in place.
+A full-stack application (React/FastAPI) with a multi-tenant structure. The agent has completed a major, three-phase security and compliance overhaul, implementing modules for webhook validation, session management, rate limiting, cost monitoring, intent classification, PII guardrails, and human escalation. The backend includes new admin routes and services to support these features. On the frontend, the  page has been updated with UI elements for mic/camera input and a language selector. A new, but currently broken,  has been created to manage escalations and the knowledge base.
 
 **Last working item**:
--   Last item agent was working: Resolving a persistent deployment failure. The application was failing health checks in the production environment with 5xx errors, and the deployment logs indicated the backend was crashing silently on startup. The agent's last action was to fix the database connection check in the startup lifecycle, as the previous command () required admin privileges that might be unavailable on the production Atlas DB.
--   Status: USER VERIFICATION PENDING
--   Agent Testing Done: Y
--   Which testing method agent to use? The user needs to re-attempt deployment. The agent will then analyze the new deployment logs to verify the fix.
+-   Last item agent was working: Fixing a blank page issue on the newly created Admin Dashboard (). The agent diagnosed that the page was attempting to retrieve an auth token using the wrong key from . The  page saves the token as , but the dashboard page was likely trying to read . The agent was in the process of correcting this.
+-   Status: IN PROGRESS
+-   Agent Testing Done: N
+-   Which testing method agent to use? manual testing by curl
 -   User Testing Done: N
 
 **All Pending/In progress Issue list**:
--   Issue 1: Deployment Failures (P0)
--   Issue 2: Comprehensive Documentation Creation (P1)
--   Issue 3: Implement User Profile System (P1)
--   Issue 4: Live Social Media Integration (P2)
--   Issue 5: Incomplete Talking Avatar Implementation (P2)
--   Issue 6: Real-time RAG Functionality Verification (P2)
+-   Issue 1: Blank Admin Dashboard Page (P0)
+-   Issue 2: Live Social Media Integration (P1)
+-   Issue 3: Incomplete Talking Avatar Implementation (P2)
+-   Issue 4: Real-time RAG Functionality Verification (P2)
+-   Issue 5: Initial Deployment Failure (P2)
 
 **Issues Detail:**
--   **Issue 1: Deployment Failures**
-    -   **Attempted fixes:** A series of fixes were implemented over multiple attempts:
-        1.  **.gitignore:** Removed entries that blocked  files from being included in the deployment.
-        2.  **DB Query Optimization:** Added projections () and used aggregation pipelines to optimize ~7 queries across , , and  to reduce memory load.
-        3.  **Health Endpoint:** Added a root-level  endpoint in  as required by the production health checker.
-        4.  **Startup Resilience:** Replaced unsafe  calls with  and added comprehensive  blocks with logging in the application's  function () to prevent silent crashes.
-        5.  **Lazy Loading:** Implemented lazy loading for the heavy Presidio/Spacy ML model in  to prevent startup timeouts.
-        6.  **DB Connection Check:** Replaced the privileged  with  in  to ensure the connection test works in a restricted production database environment.
+-   **Issue 1: Blank Admin Dashboard Page**
+    -   **Attempted fixes:** The agent identified that the  was showing a blank screen after login. The root cause was suspected to be a mismatch in the  key used to store and retrieve the admin authentication token.
     -   **Next debug checklist:**
-        1.  Await user to re-run the deployment.
-        2.  Analyze the new deployment logs. Focus on the  and  sections.
-        3.  If it fails again with a silent crash, temporarily comment out all initialization calls (, ) within the  function in  to isolate the problem.
-    -   **Why fix this issue and what will be achieved with the fix?** The application cannot be deployed or used by the user until this is resolved.
+        1.  View .
+        2.  Find the line that reads the token from  (likely ).
+        3.  Change the key to  to match what is set in .
+        4.  Restart the frontend service and test navigation to the  page after logging in as the super admin.
+    -   **Why fix this issue and what will be achieved with the fix?** This will make the newly created admin dashboard for knowledge management and escalations functional.
     -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** both
-    -   **Blocked on other issue:** Awaiting new deployment logs from the user.
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** frontend
+    -   **Blocked on other issue:** None
 
--   **Issue 2: Comprehensive Documentation Creation**
-    -   **Next debug checklist:** Create a  directory and populate it with markdown files as detailed in the initial handoff summary.
-    -   **Status:** NOT STARTED (Superseded by P0 deployment issue).
-
--   **Issue 3: Implement User Profile System**
-    -   **Next debug checklist:** Clarify required fields with the user, update the DB schema, and build the corresponding backend endpoints and frontend UI.
-    -   **Status:** NOT STARTED
-
--   **Issue 4: Live Social Media Integration**
+-   **Issue 2: Live Social Media Integration**
     -   **Next debug checklist:** Prompt the user for live API credentials for Twilio and Facebook and update .
     -   **Status:** BLOCKED (Awaiting user credentials).
 
--   **Issue 5: Incomplete Talking Avatar Implementation**
+-   **Issue 3: Incomplete Talking Avatar Implementation**
     -   **Next debug checklist:** Re-engage the user about integrating a service like Akool.com or research an open-source alternative.
     -   **Status:** BLOCKED (Awaiting user decision/API key).
 
--   **Issue 6: Real-time RAG Functionality Verification**
+-   **Issue 4: Real-time RAG Functionality Verification**
     -   **Next debug checklist:** Write a Python test in  to trigger and verify the scraping and logging functionality in .
     -   **Status:** TESTING PENDING
 
+-   **Issue 5: Initial Deployment Failure**
+    -   **Next debug checklist:** Although many fixes have been applied, the application has not been re-deployed by the user since the original failure. After all current high-priority tasks are complete, the user should be prompted to attempt deployment again.
+    -   **Status:** USER VERIFICATION PENDING
+    -   **Is recurring issue?** Y
+
 **In progress Task List**:
--   **Task 1: Resolve Deployment Failures**
-    -   **Where to resume:** Awaiting new deployment logs from the user after the latest fix was applied.
-    -   **What will be achieved with this?** A successfully deployed and running application in the production environment.
+-   **Task 1: Complete Frontend Features from Last User Request**
+    -   **Where to resume:** Resume by fixing the  token issue.
+    -   **What will be achieved with this?** A functional UI for Mic/Camera input, language selection, and admin management of escalations/knowledge base.
     -   **Status:** IN PROGRESS
-    -   **Blocked on something:** User action (re-running deployment).
+    -   **Should Test frontend/backend/both after fix?** both
+    -   **Blocked on something:** Blocked on fixing Issue 1: Blank Admin Dashboard Page.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) Full Implementation of Mic/Camera Input:** Integrate  in .
-    -   **(P1) Language Selector UI:** Implement a dropdown menu on the frontend to allow users to explicitly select their language.
+    -   **(P1) Admin Dashboard UI:** Create the frontend UI for the new admin features (escalations, knowledge management). (Partially started with )
+    -   **(P1) Full Implementation of Mic/Camera Input:** Connect the new frontend UI buttons to backend APIs for speech-to-text and document processing.
+    -   **(P2) Implement User Profile System:** Clarify required fields with the user, update the DB schema, and build the corresponding backend endpoints and frontend UI.
 -   **Future Tasks:**
     -   **(P2) Instagram Integration:** Implement the deferred Instagram channel.
     -   **(P3) Refine Analytics & Reporting:** Build out the PDF/CSV report generation feature for admins.
     -   **(P4) KVM Server Deployment Packaging:** Create the final Docker environment for deployment.
 
 **Completed work in this session**
--   **Deployment Readiness Overhaul:**
-    -   Fixed  to correctly include  files for deployment.
-    -   Optimized multiple database queries with field projections and aggregation pipelines to reduce memory usage.
-    -   Added a root-level  endpoint in  to comply with deployment health checks.
-    -   Refactored  to use dynamic URLs () instead of hardcoded ones.
-    -   Hardened the application startup lifecycle in  by using safe environment variable access () and adding comprehensive  logging.
-    -   Implemented lazy loading for the resource-intensive Presidio/Spacy ML model in  to prevent startup timeouts.
-    -   Replaced a deprecated FastAPI startup event () in .
-    -   Replaced a privileged database  command with a less privileged  command to ensure compatibility with managed Atlas MongoDB.
+-   **User Support**: Exported the entire MongoDB database to JSON files, created a downloadable ZIP archive, and provided a comprehensive list of all user credentials.
+-   **Phase 1: Critical Security Hardening (DONE & TESTED)**
+    -   Created and integrated modules for Webhook Signature Validation (), Input Sanitization (), and PII Guardrails ().
+    -   Integrated security checks into , , and .
+-   **Phase 2: Compliance & Cost Control (DONE & TESTED)**
+    -   Created and integrated modules for Rate Limiting (), Cost Monitoring (), and WhatsApp 24-hour policy ().
+    -   Integrated features into the chat endpoints and added new monitoring routes.
+-   **Phase 3: Operational Hardening (DONE & TESTED)**
+    -   Created backend services for Intent Classification (), Human Escalation (), and Knowledge Base Management ().
+    -   Created new  routes for observability, escalations, and knowledge management.
+    -   Integrated the intent classifier into the main chat logic.
+-   **Frontend Feature Implementation (IN PROGRESS)**
+    -   Updated  to include UI for Mic/Camera input and a language selection dropdown.
+    -   Created a new  for admin functions.
+    -   Added the  route to .
+-   **Documentation**: Created and updated  with details of all new security and operational modules.
 
 **Earlier issues found/mentioned but not fixed**
--   **Issue 1: Mic and Camera functionality not implemented**
-    -   **Debug checklist:**
-        1.  Integrate  in .
-        2.  Add a speech-to-text integration (e.g., OpenAI Whisper).
-        3.  Connect the camera stream to the backend for live document scanning.
-    -   **Why to solve this issue and what will be achieved with this?** This is a core, frequently-requested feature.
-    -   **Should Test frontend/backend/both after fix:** both
+-   **Issue 1: CORS is too permissive**
+    -   **Debug checklist:** The CORS configuration in  is still set to allow . This should be restricted to the frontend's domain for production.
+    -   **Why to solve this issue and what will be achieved with this?** Security best practice to prevent unauthorized websites from making requests to the API.
+    -   **Should Test frontend/backend/both after fix:** backend
     -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
@@ -119,53 +119,62 @@ A full-stack application (React frontend, FastAPI backend) with a multi-tenant s
 
 **Key Technical Concepts**
 -   **Frontend:** React, Tailwind CSS, Shadcn UI
--   **Backend:** FastAPI, Motor, 
+-   **Backend:** FastAPI, Motor, Pydantic
 -   **Database:** MongoDB
--   **AI/ML:** RAG, OpenAI GPT-5.2, ElevenLabs (TTS), Presidio (PII detection)
--   **Architecture:** Multi-tenant, full-stack application with a resilient startup lifecycle.
+-   **AI/ML:** RAG, OpenAI GPT-5.2, Presidio (PII detection)
+-   **Architecture:** Multi-tenant, full-stack application with a new layered security architecture (Guardrails, Rate Limiting, Cost Monitoring).
 
 **key DB schema**
--   **companies:** 
--   **users:** 
--   **chat_sessions:** 
--   **knowledge_changes:** 
--   **templates:** 
+-   **escalations:**  (New implicit schema)
+-   **knowledge_base:**  (New implicit schema)
 
 **All files of reference**
--   : Contains the application lifecycle () function, which was the focus of debugging.
--   : Modified to lazy-load the Spacy model.
--   : Modified for safe environment variable access.
--   : Modified for query optimization.
--   : Modified for query optimization.
--   : Modified for query optimization.
--   : Modified to remove deprecated startup events.
--   : Modified to use dynamic URLs.
--   : Modified to allow  files.
+-   **/app/frontend/src/pages/AdminDashboardPage.jsx**: The new, broken admin dashboard UI.
+-   **/app/frontend/src/pages/SuperAdminLogin.jsx**: The login page that correctly sets the  in localStorage.
+-   **/app/frontend/src/pages/ConsularBot.jsx**: Updated with mic/camera/language UI.
+-   **/app/frontend/src/App.js**: Updated with the new  route.
+-   **/app/backend/admin_routes.py**: New backend routes for admin functions.
+-   **/app/backend/security/**: Directory containing all new Phase 1 & 2 security modules.
+-   **/app/backend/services/**: Directory containing all new Phase 3 service modules.
+-   **/app/docs/TECHNICAL_DOCS.md**: New documentation file explaining the architecture.
 
 **Areas that need refactoring**:
--   The deployment agent noted warnings about missing pagination in  and inefficient message querying in  that could be further optimized.
--   CORS is set to , which should be restricted to known domains in production.
+-   CORS is set to  in  and should be restricted.
+-   The frontend  component is very large (over 500 lines) and could be broken down into smaller, more manageable components.
 
 **key api endpoints**
--   : Root-level health check for deployment verification.
--   : Main API root.
--   : User login.
--   : Example of an optimized endpoint.
--   : Example of an endpoint using aggregation.
+-   : Super admin login endpoint.
+-   : New endpoint for AI/cost metrics.
+-   : New endpoint to list human handoff requests.
+-   : New endpoints to manage knowledge base entries.
+-   : Main chat endpoint, now with intent classification.
+-   : Widget chat endpoint.
 
 **Critical Info for New Agent**
--   **The absolute top priority is resolving the deployment failure.** Do not start any other feature work or documentation until the application successfully deploys and passes health checks in the production environment.
--   The core problem has been a silent backend crash on startup in the deployment environment. You have a history of all attempted fixes. The last fix (changing the DB connection check) is the most promising.
--   Your first action should be to ask the user to re-attempt deployment and provide the new logs. If it still fails, analyze the logs carefully. The problem is almost certainly in the backend startup sequence defined in .
+-   Your immediate priority is to fix the blank **Admin Dashboard**. The issue is almost certainly a mismatch in the  key for the auth token between  (which uses ) and .
+-   After fixing the dashboard, you should proceed with testing the other new frontend features (mic, camera, language selector UI) and connecting them to the backend if necessary.
+-   The user previously requested a git branching/merging operation which failed and was superseded by the security overhaul. Do not attempt this unless the user re-requests it. The focus has shifted to implementing the feature list from the security audit.
 
 **documents and test reports created in this job**
--   The agent modified  but did not create any new formal reports. The primary output was modified code.
+-   
+-   
+-    (and the corresponding zip file)
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-The user's last several messages have been a repeating cycle of being asked to deploy the application, providing the resulting failure logs, and asking the agent to fix the issues. This indicates a focus on getting the application deployed and working.
+1.  **User:** Asks for Phase 3 implementation.
+2.  **Agent:** Implements Phase 3 backend services and admin routes.
+3.  **Agent:** Fixes linting issues in new admin routes.
+4.  **Agent:** Tests Phase 3 backend features (intent classifier, escalation, admin endpoints).
+5.  **Agent:** Updates documentation and PRD for Phase 3.
+6.  **User:** Asks for next action items: Mic/Camera Input, Language Selector UI, Admin Dashboard UI.
+7.  **Agent:** Implements frontend UI for Mic/Camera, Language Selector, and a new Admin Dashboard page.
+8.  **Agent:** Adds the new route to .
+9.  **Agent:** Screenshots the Consular Bot page, confirming new UI elements are visible.
+10. **Agent:** Screenshots the Admin Dashboard page, which is blank, and correctly identifies the likely cause is a token mismatch.
 
 **Project Health Check:**
--   **Broken:** The deployment to the production environment is currently broken, failing backend health checks.
+-   **Broken:**  frontend page is not loading correctly.
 -   **Mocked:** WhatsApp (Twilio) and Facebook Messenger integrations are mocked pending user credentials.
 
 **3rd Party Integrations**
@@ -176,8 +185,8 @@ The user's last several messages have been a repeating cycle of being asked to d
 -   **Akool.com** (AI Avatar) — suggested, not integrated, requires User API Key
 
 **Testing status**
--   Testing agent used after significant changes: NO
--   Troubleshoot agent used after agent stuck in loop: NO (Main agent handled troubleshooting).
+-   Testing agent used after significant changes: YES (For Phase 1 Security features, generating ).
+-   Troubleshoot agent used after agent stuck in loop: NO
 -   Test files created: []
 -   Known regressions: None.
 
@@ -185,15 +194,6 @@ The user's last several messages have been a repeating cycle of being asked to d
 -   **Super Admin Login:**
     -   **Email:** 
     -   **Password:** 
--   **Required from user for live testing:**
-    -   , , 
-    -   , 
-    -   
 
 **What agent forgot to execute**
-Due to the critical, session-consuming nature of the deployment failures, all other planned work was postponed. This includes:
--   Starting the **Comprehensive Documentation** task.
--   Implementing the **Full User Profile System**.
--   Implementing **Mic/Camera Input**.
--   Revisiting the **Talking Avatar** feature.
--   Formally testing the **Knowledge Scraper**.</analysis>
+-   The user's request to create and merge git branches was not completed due to a git remote error. The agent then pivoted to the user's subsequent, more detailed request for a security overhaul. This was a reasonable pivot, but the initial request remains unfulfilled.</analysis>

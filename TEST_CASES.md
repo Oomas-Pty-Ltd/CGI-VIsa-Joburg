@@ -1,9 +1,9 @@
 # Seva Setu Bot - Test Cases Document
 
 ## Test Environment
-- **Preview URL:** https://visa-aide.preview.emergentagent.com
+- **Preview URL:** https://consulai.preview.emergentagent.com
 - **Super Admin:** `superadmin@sarthak.ai` / `Admin@2025`
-- **API Base:** https://visa-aide.preview.emergentagent.com/api
+- **API Base:** https://consulai.preview.emergentagent.com/api
 
 ---
 

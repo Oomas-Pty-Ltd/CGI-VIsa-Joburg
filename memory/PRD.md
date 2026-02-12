@@ -212,8 +212,8 @@ Frontend (React)     Backend (FastAPI)      External Services
 ---
 
 ## Documentation Downloads
-- **Technical Docs:** https://visa-aide.preview.emergentagent.com/TECHNICAL_DOCS.md
-- **Database Export:** https://visa-aide.preview.emergentagent.com/db_export.zip
+- **Technical Docs:** https://consulai.preview.emergentagent.com/TECHNICAL_DOCS.md
+- **Database Export:** https://consulai.preview.emergentagent.com/db_export.zip
 
 ---
 
@@ -250,17 +250,17 @@ Frontend (React)     Backend (FastAPI)      External Services
 
 | Page | URL |
 |------|-----|
-| Landing | https://visa-aide.preview.emergentagent.com |
-| Full Bot | https://visa-aide.preview.emergentagent.com/consular |
-| Widget Demo | https://visa-aide.preview.emergentagent.com/widget-demo |
-| Super Admin | https://visa-aide.preview.emergentagent.com/super-admin/login |
+| Landing | https://consulai.preview.emergentagent.com |
+| Full Bot | https://consulai.preview.emergentagent.com/consular |
+| Widget Demo | https://consulai.preview.emergentagent.com/widget-demo |
+| Super Admin | https://consulai.preview.emergentagent.com/super-admin/login |
 
 ---
 
 ## Widget Embed Code
 
 ```html
-<script src="https://visa-aide.preview.emergentagent.com/embed.js"></script>
+<script src="https://consulai.preview.emergentagent.com/embed.js"></script>
 <script>
   SevaSetu.init({
     position: 'bottom-right',

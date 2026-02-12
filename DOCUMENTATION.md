@@ -278,28 +278,28 @@ Templates support variable substitution using `{{variable_name}}` syntax:
 
 ### Test Credentials
 - **Super Admin:** `superadmin@sarthak.ai` / `Admin@2025`
-- **Bot URL:** https://visa-aide.preview.emergentagent.com/consular
-- **Widget Demo:** https://visa-aide.preview.emergentagent.com/widget-demo
+- **Bot URL:** https://consulai.preview.emergentagent.com/consular
+- **Widget Demo:** https://consulai.preview.emergentagent.com/widget-demo
 
 ### Test Commands
 
 #### WhatsApp (Mock Mode)
 ```bash
-curl -X POST "https://visa-aide.preview.emergentagent.com/api/whatsapp/webhook" \
+curl -X POST "https://consulai.preview.emergentagent.com/api/whatsapp/webhook" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "From=whatsapp:+27123456789&To=whatsapp:+14155238886&Body=Hello&MessageSid=SM123"
 ```
 
 #### Facebook (Mock Mode)
 ```bash
-curl -X POST "https://visa-aide.preview.emergentagent.com/api/facebook/webhook" \
+curl -X POST "https://consulai.preview.emergentagent.com/api/facebook/webhook" \
   -H "Content-Type: application/json" \
   -d '{"object":"page","entry":[{"messaging":[{"sender":{"id":"123"},"message":{"text":"Hello"}}]}]}'
 ```
 
 #### Templates
 ```bash
-curl "https://visa-aide.preview.emergentagent.com/api/templates/"
+curl "https://consulai.preview.emergentagent.com/api/templates/"
 ```
 
 ---
@@ -347,7 +347,7 @@ ALERT_EMAILS=
 Add this code to your website before `</body>`:
 
 ```html
-<script src="https://visa-aide.preview.emergentagent.com/embed.js"></script>
+<script src="https://consulai.preview.emergentagent.com/embed.js"></script>
 <script>
   SevaSetu.init({
     position: 'bottom-right',

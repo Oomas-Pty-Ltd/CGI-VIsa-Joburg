@@ -52,7 +52,7 @@
     "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
     "phone_number": " 27123456789",
     "direction": "outbound",
-    "message": "OCI stands for **Overseas Citizen of India**. It is a **long-term visa/status** for eligible foreign citizens of Indian origin, allowing them to live, work, and travel to India without needing a regular visa each time. For full details and eligibility, use: https://consular-genius.preview.emergentagent.com/consular",
+    "message": "OCI stands for **Overseas Citizen of India**. It is a **long-term visa/status** for eligible foreign citizens of Indian origin, allowing them to live, work, and travel to India without needing a regular visa each time. For full details and eligibility, use: https://consulai.preview.emergentagent.com/consular",
     "timestamp": "2026-02-05T18:23:01.912866+00:00"
   },
   {
@@ -72,7 +72,7 @@
     "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
     "phone_number": " 27123456789",
     "direction": "outbound",
-    "message": "To renew your Indian passport in South Africa, apply online on the Passport Seva portal, fill the form, and book an appointment to submit your documents at the Consulate/outsourced service provider. Carry your current passport, photos, proof of address, and any required supporting documents, and pay the applicable fee.  \n\nFor step-by-step guidance and the exact document checklist, use the full bot here: https://consular-genius.preview.emergentagent.com/consular",
+    "message": "To renew your Indian passport in South Africa, apply online on the Passport Seva portal, fill the form, and book an appointment to submit your documents at the Consulate/outsourced service provider. Carry your current passport, photos, proof of address, and any required supporting documents, and pay the applicable fee.  \n\nFor step-by-step guidance and the exact document checklist, use the full bot here: https://consulai.preview.emergentagent.com/consular",
     "timestamp": "2026-02-05T21:30:52.977954+00:00"
   },
   {
@@ -92,7 +92,7 @@
     "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
     "phone_number": " 27123456789",
     "direction": "outbound",
-    "message": "For an OCI card application, you generally need: your current passport (copy), proof of Indian origin (old Indian passport / Indian birth certificate / parents’ Indian documents), your birth certificate, and proof of address. You’ll also need recent photos and a completed online application form. For the exact checklist based on your case (spouse/parents/minor), please use: https://consular-genius.preview.emergentagent.com/consular",
+    "message": "For an OCI card application, you generally need: your current passport (copy), proof of Indian origin (old Indian passport / Indian birth certificate / parents’ Indian documents), your birth certificate, and proof of address. You’ll also need recent photos and a completed online application form. For the exact checklist based on your case (spouse/parents/minor), please use: https://consulai.preview.emergentagent.com/consular",
     "timestamp": "2026-02-05T21:30:54.967002+00:00"
   },
   {
@@ -112,7 +112,7 @@
     "user_id": "0d60deb8-1d5d-4357-b739-b8292be992b1",
     "phone_number": " 27123456789",
     "direction": "outbound",
-    "message": "If you lost your Indian passport, first report it to the nearest police station and get a police report/affidavit (case number). Then apply at the Consulate for an **Emergency Certificate (EC)** to travel back to India or for a **new passport** (bring police report + ID copies + passport copy if available + photos).  \n\nFor step-by-step guidance and document checklist, use the full bot: https://consular-genius.preview.emergentagent.com/consular",
+    "message": "If you lost your Indian passport, first report it to the nearest police station and get a police report/affidavit (case number). Then apply at the Consulate for an **Emergency Certificate (EC)** to travel back to India or for a **new passport** (bring police report + ID copies + passport copy if available + photos).  \n\nFor step-by-step guidance and document checklist, use the full bot: https://consulai.preview.emergentagent.com/consular",
     "timestamp": "2026-02-05T21:30:58.436041+00:00"
   },
   {

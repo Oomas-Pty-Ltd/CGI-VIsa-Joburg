@@ -8,7 +8,7 @@
  * INSTALLATION:
  * Add the following code before the </body> tag of your website:
  * 
- * <script src="https://visa-aide.preview.emergentagent.com/embed.js"></script>
+ * <script src="https://consulai.preview.emergentagent.com/embed.js"></script>
  * <script>
  *   SevaSetu.init({
  *     position: 'bottom-right',  // or 'bottom-left'
