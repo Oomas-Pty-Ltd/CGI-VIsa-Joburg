@@ -243,16 +243,27 @@ Frontend (React)     Backend (FastAPI)      External Services
 
 ## Pending Tasks (Priority Order)
 
+### P2 - In Progress
+- [ ] Connect Mic/Camera buttons to auto-send transcribed text (currently fills input field)
+- [ ] Real-time document scan preview with extracted fields
+
 ### P3 - Feature Work
-- [ ] Full mic/camera input implementation
-- [ ] Language selector UI dropdown
 - [ ] User profile system
 - [ ] Talking avatar feature
-- [ ] Admin dashboard UI (frontend)
+- [ ] Instagram integration
 
 ### P4 - Deployment & Documentation
-- [ ] Instagram integration
 - [ ] Docker packaging for KVM deployment
+- [ ] Restrict CORS from `*` to specific frontend domain
+
+---
+
+## Recently Completed ✅
+- [x] Admin Dashboard UI (Feb 12, 2026)
+- [x] Mic/Camera backend integration (Feb 12, 2026)
+- [x] Speech-to-text using OpenAI Whisper (Feb 12, 2026)
+- [x] Language selector UI dropdown (Feb 12, 2026)
+- [x] Phase 1-3 Security Hardening (Feb 6-12, 2026)
 
 ---
 
