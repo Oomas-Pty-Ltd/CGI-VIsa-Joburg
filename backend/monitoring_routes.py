@@ -15,6 +15,8 @@ import time
 from monitoring_service import monitoring_service, MONITORING_CONFIG
 from security.guardrail import guardrail_service
 from security.session_manager import session_manager
+from security.rate_limiter import rate_limiter
+from security.cost_monitor import cost_monitor
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
