@@ -4,10 +4,11 @@ SEVA SETU BOT - FACEBOOK MESSENGER INTEGRATION
 ====================================================================
 Facebook Messenger API integration for consular bot services.
 Supports: Incoming messages, Outgoing messages, Quick Replies
+With: Webhook signature validation, session management, guardrails
 ====================================================================
 """
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
 from fastapi.responses import Response, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -17,6 +18,12 @@ import logging
 import httpx
 from datetime import datetime, timezone
 from database import get_database
+
+# Security imports
+from security.webhook_validator import verify_facebook_webhook, log_webhook_attempt
+from security.session_manager import session_manager
+from security.input_sanitizer import sanitize_user_input, create_safe_system_prompt
+from security.guardrail import guardrail_service, sanitize_logs
 
 # LLM imports for AI responses
 try:
@@ -40,7 +47,8 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 FB_GRAPH_API = "https://graph.facebook.com/v18.0"
 
 # Bot system prompt for Facebook (concise but knowledgeable)
-FB_SYSTEM_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
+# NOTE: This is wrapped with security hardening at runtime
+_FB_BASE_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
 
 KNOWLEDGE BASE - CGI JOHANNESBURG:
 
@@ -94,6 +102,9 @@ RESPONSE RULES:
 5. Be friendly and professional
 
 RESPOND TO USER:"""
+
+# Create hardened system prompt
+FB_SYSTEM_PROMPT = create_safe_system_prompt(_FB_BASE_PROMPT)
 
 
 # =====================================================================
