@@ -169,6 +169,78 @@ chat_instance = LlmChat(
 
 ---
 
+## Phase 3 Features
+
+### Intent Classification (Rule-Based)
+
+Reduces LLM calls by handling common queries deterministically.
+
+**Location:** `/app/backend/services/intent_classifier.py`
+
+**Categories:**
+- PASSPORT, VISA, OCI, PIO, CONSULAR
+- APPOINTMENT, FEES, DOCUMENTS, STATUS
+- EMERGENCY, OFFICE_INFO, ESCALATION, GREETING
+
+**How it works:**
+1. User query is analyzed using keywords and regex patterns
+2. If confidence > 50%, deterministic response is returned (no LLM cost)
+3. If confidence < 50%, query falls through to GPT-5.2
+
+**Stats Endpoint:** `GET /api/admin/observability`
+
+### Human Escalation System
+
+**Location:** `/app/backend/services/escalation_service.py`
+
+**Triggers:**
+- User requests: "speak to human", "talk to agent"
+- Complaints: "frustrated", "not working", "complaint"
+- Emergencies: "help", "arrested", "emergency"
+
+**Priority Levels:**
+- URGENT: Emergency situations
+- HIGH: Complaints, legal matters
+- MEDIUM: User requests
+- LOW: Complex queries
+
+**Admin Endpoints:**
+- `GET /api/admin/escalations` - List all escalations
+- `PUT /api/admin/escalations/{id}` - Update status
+- `GET /api/admin/escalations/stats` - Statistics
+
+### Knowledge Base (Versioned)
+
+**Location:** `/app/backend/services/knowledge_service.py`
+
+**Features:**
+- Structured FAQ collection
+- Version history for each entry
+- Source transparency (verified vs unverified)
+- Category-based organization
+
+**Categories:** passport, visa, oci, consular, fees, emergency, office, general
+
+**Admin Endpoints:**
+- `GET /api/admin/knowledge` - List entries
+- `POST /api/admin/knowledge` - Create entry
+- `PUT /api/admin/knowledge/{id}` - Update (creates new version)
+- `GET /api/admin/knowledge/{id}/history` - Version history
+
+### AI Observability Dashboard
+
+**Endpoint:** `GET /api/admin/observability`
+
+**Metrics:**
+- Intent classification stats (rule-based vs LLM)
+- Rate limiting stats
+- Cost tracking (daily/budget)
+- Guardrail detections
+- Escalation counts
+- Knowledge base stats
+
+---
+
 ## API Reference
 
 ### Chat Endpoints
