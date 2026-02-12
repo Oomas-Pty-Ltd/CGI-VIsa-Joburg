@@ -288,7 +288,9 @@ Frontend (React)     Backend (FastAPI)      External Services
 | Landing | https://consulai.preview.emergentagent.com |
 | Full Bot | https://consulai.preview.emergentagent.com/consular |
 | Widget Demo | https://consulai.preview.emergentagent.com/widget-demo |
-| Super Admin | https://consulai.preview.emergentagent.com/super-admin/login |
+| Super Admin Login | https://consulai.preview.emergentagent.com/super-admin/login |
+| Super Admin Dashboard | https://consulai.preview.emergentagent.com/super-admin/dashboard |
+| Admin Panel (NEW) | https://consulai.preview.emergentagent.com/super-admin/admin-panel |
 
 ---
 
