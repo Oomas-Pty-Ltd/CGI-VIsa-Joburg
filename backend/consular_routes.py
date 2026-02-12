@@ -52,26 +52,36 @@ class FormData(BaseModel):
 async def chat(request: ChatRequest):
     db = await get_database()
     
+    # Sanitize and validate user input
+    sanitization_result = sanitize_user_input(request.message, context="web_chat")
+    
+    if not sanitization_result.is_safe:
+        logger.warning(f"[SECURITY] Blocked unsafe input: {sanitization_result.detected_patterns}")
+        return ChatResponse(
+            session_id=request.session_id or str(uuid.uuid4()),
+            response="I cannot process that request. Please ask a question about consular services.",
+            step="error"
+        )
+    
+    # Mask PII in input
+    input_result = guardrail_service.validate_input(request.message)
+    sanitized_message = input_result.sanitized_text
+    
+    if input_result.pii_detected:
+        logger.info(f"[GUARDRAIL] PII detected in input and masked: {input_result.pii_detected}")
+    
     # Allow guest access without token verification for consular bot
-    session_id = request.session_id or str(uuid.uuid4())
     user_id = request.user_id or "guest"
     company_id = request.company_id
     
-    session = await db.chat_sessions.find_one(
-        {"id": session_id}, 
-        {"_id": 0, "id": 1, "user_id": 1, "company_id": 1, "step": 1, "created_at": 1}
+    # Use secure session management
+    session = await session_manager.get_or_create_session(
+        channel="web",
+        user_identifier=user_id,
+        session_id=request.session_id,
+        metadata={"company_id": company_id, "language": request.language}
     )
-    
-    if not session:
-        session = {
-            "id": session_id,
-            "user_id": user_id,
-            "company_id": company_id,
-            "messages": [],
-            "step": "register",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.chat_sessions.insert_one(session)
+    session_id = session['id']
     
     llm_model = "gpt-5.2"
     if company_id:
@@ -81,10 +91,10 @@ async def chat(request: ChatRequest):
     
     # Get real-time knowledge base from official sources
     knowledge_base = await get_realtime_knowledge()
-    context_info = search_knowledge(request.message, knowledge_base)
+    context_info = search_knowledge(sanitized_message, knowledge_base)
     
-    # Build enhanced prompt with official source context
-    system_message = f"""You are Seva Setu Bot, an ADVANCED AI-powered consular assistant with learning and analytical capabilities.
+    # Build enhanced prompt with official source context (BASE PROMPT)
+    _base_system_message = f"""You are Seva Setu Bot, an ADVANCED AI-powered consular assistant with learning and analytical capabilities.
 
 CORE CAPABILITIES:
 1. **Real-time Learning**: Analyze user patterns and adapt responses
@@ -146,6 +156,9 @@ LEARNING & ANALYSIS:
 
 Always cite sources, use proper formatting, and ask for feedback."""
     
+    # Apply security hardening to system prompt
+    system_message = create_safe_system_prompt(_base_system_message)
+    
     api_key = os.environ.get('EMERGENT_LLM_KEY')
     chat_instance = LlmChat(
         api_key=api_key,
@@ -159,17 +172,27 @@ Always cite sources, use proper formatting, and ask for feedback."""
         user_msg_content.append(image_content)
     
     user_message = UserMessage(
-        text=request.message,
+        text=sanitized_message,  # Use sanitized message
         file_contents=user_msg_content if user_msg_content else None
     )
     
     try:
         bot_response = await chat_instance.send_message(user_message)
     except Exception as e:
+        logger.error(f"AI service error: {sanitize_logs(str(e))}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"AI service error: {str(e)}"
         )
+    
+    # Validate and sanitize output
+    output_result = guardrail_service.validate_output(bot_response)
+    bot_response = output_result.sanitized_text
+    
+    if output_result.pii_detected:
+        logger.warning(f"[GUARDRAIL] PII detected in output, masked: {output_result.pii_detected}")
+    if output_result.unsafe_patterns:
+        logger.warning(f"[GUARDRAIL] Unsafe patterns detected, disclaimers added: {output_result.unsafe_patterns}")
     
     # Generate voice response if requested
     audio_base64 = None
@@ -179,26 +202,24 @@ Always cite sources, use proper formatting, and ask for feedback."""
             lang_code = request.language or "en"
             audio_base64 = await voice_service.text_to_speech(bot_response, lang_code)
         except Exception as e:
-            print(f"Voice generation failed: {e}")
+            logger.warning(f"Voice generation failed: {sanitize_logs(str(e))}")
     
-    message_entry = {
-        "id": str(uuid.uuid4()),
-        "role": "user",
-        "content": request.message,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    # Store messages using session manager
+    await session_manager.add_message(
+        session_id=session_id,
+        role="user",
+        content=request.message,  # Store original for user reference
+        metadata={"sanitized": sanitized_message != request.message}
+    )
     
-    bot_message_entry = {
-        "id": str(uuid.uuid4()),
-        "role": "assistant",
-        "content": bot_response,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "has_audio": audio_base64 is not None
-    }
-    
-    await db.chat_sessions.update_one(
-        {"id": session_id},
-        {"$push": {"messages": {"$each": [message_entry, bot_message_entry]}}}
+    await session_manager.add_message(
+        session_id=session_id,
+        role="assistant", 
+        content=bot_response,
+        metadata={
+            "has_audio": audio_base64 is not None,
+            "guardrail_flags": output_result.unsafe_patterns
+        }
     )
     
     current_step = session.get('step', 'register')
