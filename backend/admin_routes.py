@@ -52,12 +52,12 @@ async def get_escalations(
     payload: dict = Depends(verify_super_admin)
 ):
     """Get all escalations (Super Admin only)"""
-    if status:
+    if esc_status:
         try:
-            status_enum = EscalationStatus(status)
+            status_enum = EscalationStatus(esc_status)
             escalations = await escalation_service.get_escalations_by_status(status_enum, limit)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise HTTPException(status_code=400, detail=f"Invalid status: {esc_status}")
     else:
         escalations = await escalation_service.get_open_escalations(limit)
     
