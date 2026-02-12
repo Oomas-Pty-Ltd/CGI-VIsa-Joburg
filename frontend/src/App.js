@@ -10,6 +10,7 @@ import LocalAdminDashboard from "@/pages/LocalAdminDashboard";
 import ConsularBot from "@/pages/ConsularBot";
 import FormReview from "@/pages/FormReview";
 import ChatWidget from "@/components/ChatWidget";
+import AdminDashboardPage from "@/pages/AdminDashboardPage";
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/super-admin/login" element={<SuperAdminLogin />} />
           <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+          <Route path="/super-admin/admin-panel" element={<AdminDashboardPage />} />
           <Route path="/admin/login" element={<LocalAdminLogin />} />
           <Route path="/admin/dashboard" element={<LocalAdminDashboard />} />
           <Route path="/consular" element={<ConsularBot />} />
