@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Mic, Camera, Send, FileText, Check, AlertTriangle, Info } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import axios from "axios";
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
-import Webcam from "react-webcam";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,6 +23,15 @@ const STEPS = [
   { id: 4, label: "Sign", value: "sign" }
 ];
 
+// Language configuration with codes
+const LANGUAGES = [
+  { code: "en", name: "English", flag: "🇬🇧" },
+  { code: "hi", name: "हिंदी (Hindi)", flag: "🇮🇳" },
+  { code: "ta", name: "தமிழ் (Tamil)", flag: "🇮🇳" },
+  { code: "zu", name: "isiZulu", flag: "🇿🇦" },
+  { code: "af", name: "Afrikaans", flag: "🇿🇦" }
+];
+
 export default function ConsularBot() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -35,11 +42,27 @@ export default function ConsularBot() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [enableVoice, setEnableVoice] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
-  const webcamRef = React.useRef(null);
-  const fileInputRef = useRef(null);
-  const audioRef = React.useRef(null);
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [showLanguageMenu, setShowLanguageMenu] = useState(false);
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraError, setCameraError] = useState(null);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
   
-  const { transcript, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const audioRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  // Auto-scroll to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -69,11 +92,14 @@ export default function ConsularBot() {
     setMessages(initialMessages);
   }, []);
 
+  // Cleanup camera stream on unmount
   useEffect(() => {
-    if (transcript) {
-      setInput(transcript);
-    }
-  }, [transcript]);
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -82,17 +108,11 @@ export default function ConsularBot() {
     setMessages((prev) => [...prev, userMessage]);
     const messageText = input;
     setInput("");
-    resetTranscript();
     
     // Show typing indicator
     setIsTyping(true);
 
     try {
-      // Detect language from input
-      const isHindi = /[\u0900-\u097F]/.test(messageText);
-      const isTamil = /[\u0B80-\u0BFF]/.test(messageText);
-      const langCode = isHindi ? "hi" : isTamil ? "ta" : "en";
-
       const response = await axios.post(
         `${API}/consular/chat`,
         {
@@ -100,7 +120,7 @@ export default function ConsularBot() {
           session_id: sessionId,
           user_id: "guest",
           enable_voice: enableVoice,
-          language: langCode
+          language: selectedLanguage
         }
       );
 
@@ -131,9 +151,8 @@ export default function ConsularBot() {
     return new Promise((resolve) => {
       let currentText = "";
       let index = 0;
-      const typingSpeed = 20; // milliseconds per character
+      const typingSpeed = 15;
       
-      // Add empty message that will be updated
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
       
       const typeInterval = setInterval(() => {
@@ -178,28 +197,200 @@ export default function ConsularBot() {
     }
   };
 
+  // =====================================================================
+  // ENHANCED MICROPHONE INPUT - Using MediaDevices API
+  // =====================================================================
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        } 
+      });
+      
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm'
+      });
+      
+      const chunks = [];
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+      
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Send to backend for transcription
+        try {
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'recording.webm');
+          formData.append('language', selectedLanguage);
+          
+          toast.info("Processing voice input...");
+          
+          // For now, use Web Speech API as fallback
+          // In production, send to Whisper API
+          const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+          recognition.lang = selectedLanguage === 'hi' ? 'hi-IN' : 
+                            selectedLanguage === 'ta' ? 'ta-IN' :
+                            selectedLanguage === 'zu' ? 'zu-ZA' :
+                            selectedLanguage === 'af' ? 'af-ZA' : 'en-US';
+          recognition.interimResults = false;
+          
+          recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            setInput(transcript);
+            toast.success("Voice captured!");
+          };
+          
+          recognition.onerror = () => {
+            toast.error("Voice recognition failed. Please type your message.");
+          };
+          
+          recognition.start();
+        } catch (err) {
+          console.error("Voice processing error:", err);
+          toast.error("Failed to process voice. Please try typing.");
+        }
+      };
+      
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      toast.info("🎤 Recording... Click again to stop");
+      
+    } catch (error) {
+      console.error("Microphone access error:", error);
+      if (error.name === 'NotAllowedError') {
+        toast.error("Microphone access denied. Please allow microphone access in your browser settings.");
+      } else if (error.name === 'NotFoundError') {
+        toast.error("No microphone found. Please connect a microphone.");
+      } else {
+        toast.error("Failed to access microphone. Please try again.");
+      }
+    }
+  }, [selectedLanguage]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  }, [mediaRecorder]);
+
   const handleVoice = () => {
     if (isRecording) {
-      SpeechRecognition.stopListening();
-      setIsRecording(false);
+      stopRecording();
     } else {
-      SpeechRecognition.startListening({ continuous: true });
-      setIsRecording(true);
+      startRecording();
     }
   };
+
+  // =====================================================================
+  // ENHANCED CAMERA INPUT - Using MediaDevices API
+  // =====================================================================
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // Use back camera on mobile
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+      
+      setCameraStream(stream);
+      setShowCamera(true);
+      
+      // Wait for dialog to open, then attach stream
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+      
+    } catch (error) {
+      console.error("Camera access error:", error);
+      if (error.name === 'NotAllowedError') {
+        setCameraError("Camera access denied. Please allow camera access in your browser settings.");
+        toast.error("Camera access denied. Please check browser permissions.");
+      } else if (error.name === 'NotFoundError') {
+        setCameraError("No camera found. Please connect a camera.");
+        toast.error("No camera found.");
+      } else {
+        setCameraError("Failed to access camera. Please try again.");
+        toast.error("Failed to access camera.");
+      }
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setShowCamera(false);
+    setCameraError(null);
+  }, [cameraStream]);
+
+  const captureImage = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+    
+    // Set canvas size to video size
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    // Draw video frame to canvas
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Get image as base64
+    const imageBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+    
+    toast.success("Document captured! Processing...");
+    stopCamera();
+    
+    // Send to backend for processing
+    try {
+      const response = await axios.post(`${API}/consular/document-scan`, {
+        image_base64: imageBase64,
+        document_type: 'passport',
+        session_id: sessionId
+      });
+      
+      if (response.data.success) {
+        toast.success('Document processed! Data extracted.');
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `📄 **Document Scanned Successfully!**\n\n${response.data.extracted_data}` }
+        ]);
+      }
+    } catch (error) {
+      console.error("Document scan error:", error);
+      toast.error('Document processing failed. Please try again.');
+    }
+  }, [sessionId, stopCamera]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file type
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
     if (!allowedTypes.includes(file.type)) {
       toast.error('Invalid file format. Please upload JPG, PNG, or PDF only.');
       return;
     }
 
-    // Validate file size (10MB max)
     if (file.size > 10 * 1024 * 1024) {
       toast.error('File size exceeds 10MB limit.');
       return;
@@ -207,7 +398,6 @@ export default function ConsularBot() {
 
     toast.success(`Document "${file.name}" uploaded successfully!`);
     
-    // Convert to base64 and process
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result.split(',')[1];
@@ -223,7 +413,7 @@ export default function ConsularBot() {
           toast.success('Document processed! Data extracted and translated.');
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: `Document scanned successfully! \\n\\n${response.data.extracted_data}` }
+            { role: "assistant", content: `📄 **Document Scanned!**\n\n${response.data.extracted_data}` }
           ]);
         }
       } catch (error) {
@@ -231,24 +421,62 @@ export default function ConsularBot() {
       }
     };
     reader.readAsDataURL(file);
-    
-    // Reset input
     e.target.value = '';
   };
 
-  const handleCapture = () => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    if (imageSrc) {
-      toast.success("Document captured! Processing...");
-      setShowCamera(false);
-    }
-  };
-
   const currentStepIndex = STEPS.findIndex((s) => s.value === currentStep);
+  const currentLang = LANGUAGES.find(l => l.code === selectedLanguage) || LANGUAGES[0];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 p-6">
       <div className="max-w-5xl mx-auto">
+        {/* Language Selector - Top Right */}
+        <div className="flex justify-end mb-4">
+          <div className="relative">
+            <Button
+              variant="outline"
+              onClick={() => setShowLanguageMenu(!showLanguageMenu)}
+              className="flex items-center gap-2 bg-white shadow-sm hover:shadow-md transition-all"
+              data-testid="language-selector"
+            >
+              <Globe className="w-4 h-4 text-[#E06F2C]" />
+              <span className="text-lg">{currentLang.flag}</span>
+              <span className="font-medium">{currentLang.name}</span>
+            </Button>
+            
+            {showLanguageMenu && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border z-50" data-testid="language-menu">
+                <div className="p-2">
+                  <p className="text-xs text-gray-500 px-3 py-1 font-semibold uppercase">Select Language</p>
+                  {LANGUAGES.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => {
+                        setSelectedLanguage(lang.code);
+                        setShowLanguageMenu(false);
+                        toast.success(`Language set to ${lang.name}`);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                        selectedLanguage === lang.code 
+                          ? 'bg-orange-50 text-[#E06F2C]' 
+                          : 'hover:bg-gray-50'
+                      }`}
+                      data-testid={`lang-option-${lang.code}`}
+                    >
+                      <span className="text-xl">{lang.flag}</span>
+                      <span className="font-medium">{lang.name}</span>
+                      {selectedLanguage === lang.code && (
+                        <Check className="w-4 h-4 ml-auto text-[#E06F2C]" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Progress Stepper */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center w-full max-w-2xl" data-testid="progress-stepper">
             {STEPS.map((step, index) => (
@@ -268,7 +496,7 @@ export default function ConsularBot() {
                 </div>
                 {index < STEPS.length - 1 && (
                   <div
-                    className={`h-1 flex-1 mx-4 ${index < currentStepIndex ? "step-line-active" : "bg-slate-200"}`}
+                    className={`h-1 flex-1 mx-4 ${index < currentStepIndex ? "bg-[#E06F2C]" : "bg-slate-200"}`}
                   />
                 )}
               </React.Fragment>
@@ -277,21 +505,19 @@ export default function ConsularBot() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Avatar Section */}
           <div className="lg:col-span-4">
             <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              {/* Video Avatar Container */}
               <div className={`relative w-full aspect-square max-w-xs mx-auto mb-4 rounded-full overflow-hidden transition-all duration-500 ${
                 isSpeaking ? 'ring-4 ring-[#2E8B57] ring-offset-4 ring-offset-white shadow-2xl shadow-green-400/50 scale-105' : 'ring-4 ring-[#E06F2C] ring-offset-4 ring-offset-white shadow-xl'
               }`}>
-                {/* Avatar Image/Video */}
                 <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
                   <img
                     src="https://static.prod-images.emergentagent.com/jobs/41ee56b6-38da-4112-8da3-b4cf6bfcfd91/images/1fc401012f88731c201ca30b4be56212c44bad84c995e7ed04da381c8740f43b.png"
-                    alt="Seva Setu Bot - Your Friendly Consular Assistant"
+                    alt="Seva Setu Bot"
                     className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
                   />
                   
-                  {/* Overlay when speaking - simulates mouth movement */}
                   {isSpeaking && (
                     <div className="absolute inset-0 bg-gradient-to-t from-green-500/20 to-transparent pointer-events-none">
                       <div className="absolute bottom-1/3 left-1/2 transform -translate-x-1/2">
@@ -305,7 +531,6 @@ export default function ConsularBot() {
                   )}
                 </div>
                 
-                {/* Speaking indicator badge */}
                 {isSpeaking && (
                   <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 z-10">
                     <div className="flex gap-1 bg-white px-4 py-2 rounded-full shadow-lg border-2 border-[#2E8B57]">
@@ -320,13 +545,11 @@ export default function ConsularBot() {
                 )}
               </div>
               
-              {/* Bot Info */}
               <div className="space-y-3">
                 <h2 className="text-xl font-bold text-[#1A2E40] leading-tight">{BOT_CONFIG.title}</h2>
                 <p className="text-lg font-semibold text-[#E06F2C]">{BOT_CONFIG.subtitle}</p>
                 <p className="text-sm text-gray-600 italic">{BOT_CONFIG.tagline}</p>
                 
-                {/* Status Indicator */}
                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 ${
                   isSpeaking ? 'bg-gradient-to-r from-green-100 to-green-50' : 'bg-gradient-to-r from-orange-100 to-orange-50'
                 }`}>
@@ -337,7 +560,7 @@ export default function ConsularBot() {
                 </div>
               </div>
               
-              {/* Voice Toggle - Premium Design */}
+              {/* Voice Toggle */}
               <div className="mt-6 pt-6 border-t-2 border-gray-100">
                 <label className="flex items-center justify-center gap-3 cursor-pointer group">
                   <div className="relative">
@@ -351,7 +574,7 @@ export default function ConsularBot() {
                     <div className="w-14 h-7 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-7 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-[#2E8B57]"></div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl">{enableVoice ? "🔊" : "🔇"}</span>
+                    {enableVoice ? <Volume2 className="w-6 h-6 text-[#2E8B57]" /> : <VolumeX className="w-6 h-6 text-gray-400" />}
                     <div className="text-left">
                       <p className="text-sm font-bold text-[#1A2E40] group-hover:text-[#E06F2C] transition-colors">
                         {enableVoice ? "Voice Enabled" : "Voice Disabled"}
@@ -360,13 +583,6 @@ export default function ConsularBot() {
                     </div>
                   </div>
                 </label>
-                
-                {/* Note about video avatar */}
-                <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-xs text-blue-800">
-                    💡 <strong>Demo Mode:</strong> Full video avatar with lip-sync available with Akool upgrade
-                  </p>
-                </div>
               </div>
 
               {/* Organization Info */}
@@ -377,7 +593,6 @@ export default function ConsularBot() {
                   <p className="text-sm text-gray-600">{BOT_CONFIG.location}</p>
                 </div>
                 
-                {/* Language Badges */}
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Supported Languages</p>
                   <div className="flex flex-wrap justify-center gap-2">
@@ -390,6 +605,7 @@ export default function ConsularBot() {
             </div>
           </div>
 
+          {/* Chat Section */}
           <div className="lg:col-span-8">
             <div className="glass-card rounded-xl shadow-lg flex flex-col" style={{ height: "600px" }}>
               <div className="flex-1 overflow-y-auto p-6 space-y-4" data-testid="chat-messages">
@@ -399,7 +615,6 @@ export default function ConsularBot() {
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                     data-testid={`message-${index}`}
                   >
-                    {/* Advisory Messages - Special styling */}
                     {msg.role === "advisory" ? (
                       <div className={`max-w-lg px-4 py-3 rounded-lg border-l-4 ${
                         msg.type === "alert" 
@@ -415,10 +630,7 @@ export default function ConsularBot() {
                           }`} />
                           <h4 className="font-bold text-sm">{msg.title}</h4>
                         </div>
-                        <div className="prose prose-sm max-w-none ml-7
-                            prose-p:my-1 prose-p:text-current
-                            prose-ul:my-1 prose-li:text-current
-                            prose-strong:font-bold">
+                        <div className="prose prose-sm max-w-none ml-7 prose-p:my-1 prose-p:text-current prose-ul:my-1 prose-li:text-current prose-strong:font-bold">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
                           </ReactMarkdown>
@@ -433,13 +645,7 @@ export default function ConsularBot() {
                         }`}
                       >
                         {msg.role === "assistant" ? (
-                          <div className="prose prose-sm max-w-none
-                              prose-headings:text-[#1A2E40] prose-headings:font-bold
-                              prose-p:text-[#1A2E40] prose-p:my-2
-                              prose-ul:my-2 prose-ol:my-2
-                              prose-li:text-[#1A2E40]
-                              prose-strong:text-[#E06F2C] prose-strong:font-semibold
-                              prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
+                          <div className="prose prose-sm max-w-none prose-headings:text-[#1A2E40] prose-headings:font-bold prose-p:text-[#1A2E40] prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:text-[#1A2E40] prose-strong:text-[#E06F2C] prose-strong:font-semibold prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {msg.content}
                             </ReactMarkdown>
@@ -452,7 +658,6 @@ export default function ConsularBot() {
                   </div>
                 ))}
                 
-                {/* Typing Indicator */}
                 {isTyping && (
                   <div className="flex justify-start" data-testid="typing-indicator">
                     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-2">
@@ -465,15 +670,17 @@ export default function ConsularBot() {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
+              {/* Input Area */}
               <div className="border-t border-gray-200 p-4">
                 <div className="flex gap-2">
                   <Textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
-                    placeholder="Type your message..."
+                    placeholder={`Type your message in ${currentLang.name}...`}
                     className="flex-1 min-h-[60px]"
                     data-testid="chat-input"
                   />
@@ -486,20 +693,18 @@ export default function ConsularBot() {
                     data-testid="file-input"
                   />
                   <div className="flex flex-col gap-2">
-                    {browserSupportsSpeechRecognition && (
-                      <Button
-                        onClick={handleVoice}
-                        className={`${
-                          isRecording ? "bg-red-500 hover:bg-red-600 mic-active" : "bg-[#2E8B57] hover:bg-[#256B47]"
-                        } text-white`}
-                        data-testid="voice-btn"
-                        title="Voice Input"
-                      >
-                        <Mic className="w-5 h-5" />
-                      </Button>
-                    )}
                     <Button
-                      onClick={() => setShowCamera(true)}
+                      onClick={handleVoice}
+                      className={`${
+                        isRecording ? "bg-red-500 hover:bg-red-600 animate-pulse" : "bg-[#2E8B57] hover:bg-[#256B47]"
+                      } text-white`}
+                      data-testid="voice-btn"
+                      title={isRecording ? "Stop Recording" : "Start Voice Input"}
+                    >
+                      <Mic className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      onClick={startCamera}
                       className="bg-[#1A2E40] hover:bg-[#132230] text-white"
                       data-testid="camera-btn"
                       title="Scan Document with Camera"
@@ -535,23 +740,62 @@ export default function ConsularBot() {
         </div>
       </div>
 
-      <Dialog open={showCamera} onOpenChange={setShowCamera}>
+      {/* Camera Dialog */}
+      <Dialog open={showCamera} onOpenChange={(open) => !open && stopCamera()}>
         <DialogContent className="max-w-2xl" data-testid="camera-dialog">
-          <h2 className="text-2xl font-bold text-[#1A2E40] mb-4">Capture Document</h2>
-          <Webcam
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            className="w-full rounded-lg"
-          />
-          <div className="flex gap-4 mt-4">
-            <Button onClick={handleCapture} className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20]" data-testid="capture-btn">
-              <Camera className="w-5 h-5 mr-2" />
-              Capture
-            </Button>
-            <Button onClick={() => setShowCamera(false)} variant="outline" className="flex-1" data-testid="cancel-capture-btn">
-              Cancel
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold text-[#1A2E40]">Capture Document</h2>
+            <Button variant="ghost" size="sm" onClick={stopCamera}>
+              <X className="w-5 h-5" />
             </Button>
           </div>
+          
+          {cameraError ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+              <p className="font-semibold">Camera Error</p>
+              <p className="text-sm mt-1">{cameraError}</p>
+            </div>
+          ) : (
+            <>
+              <div className="relative bg-black rounded-lg overflow-hidden">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full rounded-lg"
+                />
+                <canvas ref={canvasRef} className="hidden" />
+                
+                {/* Guide overlay */}
+                <div className="absolute inset-0 pointer-events-none">
+                  <div className="absolute inset-8 border-2 border-dashed border-white/50 rounded-lg"></div>
+                  <p className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-sm bg-black/50 px-3 py-1 rounded">
+                    Position document within frame
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex gap-4 mt-4">
+                <Button 
+                  onClick={captureImage} 
+                  className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20]" 
+                  data-testid="capture-btn"
+                >
+                  <Camera className="w-5 h-5 mr-2" />
+                  Capture Document
+                </Button>
+                <Button 
+                  onClick={stopCamera} 
+                  variant="outline" 
+                  className="flex-1" 
+                  data-testid="cancel-capture-btn"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>
