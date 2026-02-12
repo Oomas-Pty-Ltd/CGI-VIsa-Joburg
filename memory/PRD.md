@@ -2,6 +2,46 @@
 
 ## Latest Updates (Feb 12, 2026)
 
+### 🔒 Phase 3 Operational Hardening Implemented:
+
+#### 8. Intent Classification Module
+- ✅ Rule-based visa intent classifier with 10+ categories
+- ✅ Keyword and regex pattern matching
+- ✅ Confidence scoring (>50% = deterministic, <50% = LLM)
+- ✅ Reduces LLM costs for common queries
+- ✅ Visa type detection (tourist, business, student, medical, e-visa)
+
+#### 9. Escalation Module  
+- ✅ Human handoff triggers (user request, emergency, complaint)
+- ✅ Priority levels: URGENT, HIGH, MEDIUM, LOW
+- ✅ Ticket creation with reference IDs
+- ✅ Conversation summary generation
+- ✅ Admin notification system
+- ✅ Escalation status tracking (open, in_progress, resolved, closed)
+
+#### 10. Knowledge Base Module
+- ✅ Structured FAQ collection (7 default entries)
+- ✅ Version control for updates
+- ✅ Source transparency tagging
+- ✅ Category organization (passport, visa, oci, fees, etc.)
+- ✅ Admin CRUD interface
+
+#### 11. AI Observability Dashboard
+- ✅ Intent classification stats
+- ✅ Cost tracking breakdown
+- ✅ Rate limiting metrics
+- ✅ Escalation summary
+- ✅ Knowledge base stats
+- ✅ Consolidated admin dashboard endpoint
+
+### New Admin API Endpoints:
+- `/api/admin/dashboard` - Admin overview
+- `/api/admin/observability` - AI metrics
+- `/api/admin/escalations` - Escalation management
+- `/api/admin/knowledge` - Knowledge base CRUD
+
+---
+
 ### 🔒 Phase 2 Compliance & Cost Control Implemented:
 
 #### 5. Rate Limiting Module
