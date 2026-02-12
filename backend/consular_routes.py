@@ -432,10 +432,60 @@ async def get_session(session_id: str):
 
 @router.post("/voice-input")
 async def voice_input(
-    audio_file: UploadFile = File(...),
-    session_id: str = None
+    audio: UploadFile = File(...),
+    language: str = "en",
+    session_id: Optional[str] = None
 ):
-    return {"success": True, "message": "Voice processing (placeholder for now)"}
+    """
+    Transcribe voice input using OpenAI Whisper.
+    Accepts audio files (webm, mp3, wav, m4a) up to 25MB.
+    """
+    from speech_service import speech_service
+    
+    # Validate file type
+    allowed_types = ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a', 'audio/ogg']
+    content_type = audio.content_type or ''
+    
+    # Also check by extension as content_type can be unreliable
+    filename = audio.filename or 'recording.webm'
+    valid_extensions = ['.webm', '.mp3', '.wav', '.m4a', '.ogg', '.mpeg', '.mpga']
+    has_valid_ext = any(filename.lower().endswith(ext) for ext in valid_extensions)
+    
+    if not has_valid_ext and content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid audio format. Supported: webm, mp3, wav, m4a, ogg. Got: {content_type}"
+        )
+    
+    # Read audio bytes
+    audio_bytes = await audio.read()
+    
+    # Check file size (25MB limit for Whisper)
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audio file too large. Maximum size is 25MB."
+        )
+    
+    # Transcribe using Whisper
+    result = await speech_service.transcribe_audio(
+        audio_bytes=audio_bytes,
+        language=language,
+        filename=filename
+    )
+    
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transcription failed: {result.get('error', 'Unknown error')}"
+        )
+    
+    return {
+        "success": True,
+        "transcription": result["transcription"],
+        "language": result["language"],
+        "message": "Voice transcribed successfully"
+    }
 
 
 # =====================================================================
