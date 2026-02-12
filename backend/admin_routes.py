@@ -132,13 +132,13 @@ class UpdateKnowledgeRequest(BaseModel):
     keywords: Optional[List[str]] = None
     source: Optional[str] = None
     source_verified: Optional[bool] = None
-    status: Optional[str] = None
+    entry_status: Optional[str] = None
 
 
 @router.get("/knowledge")
 async def get_knowledge_entries(
     category: Optional[str] = None,
-    status: Optional[str] = None,
+    entry_status: Optional[str] = None,
     limit: int = 100,
     payload: dict = Depends(verify_super_admin)
 ):
@@ -152,7 +152,7 @@ async def get_knowledge_entries(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
     
-    if status:
+    if entry_status:
         try:
             status_enum = KnowledgeStatus(status)
         except ValueError:
