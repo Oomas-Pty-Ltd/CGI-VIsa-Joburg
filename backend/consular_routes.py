@@ -183,6 +183,15 @@ Always cite sources, use proper formatting, and ask for feedback."""
     
     try:
         bot_response = await chat_instance.send_message(user_message)
+        
+        # Track token usage and costs
+        await record_llm_usage(
+            session_id=session_id,
+            input_text=sanitized_message,
+            output_text=bot_response,
+            model=llm_model
+        )
+        
     except Exception as e:
         logger.error(f"AI service error: {sanitize_logs(str(e))}")
         raise HTTPException(
