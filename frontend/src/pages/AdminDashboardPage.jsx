@@ -98,8 +98,10 @@ export default function AdminDashboardPage() {
     } catch (error) {
       console.error("Failed to load data:", error);
       if (error.response?.status === 401) {
-        localStorage.removeItem("superAdminToken");
-        navigate("/super-admin-login");
+        localStorage.removeItem("token");
+        localStorage.removeItem("user_type");
+        localStorage.removeItem("user_id");
+        navigate("/super-admin/login");
       } else {
         toast.error("Failed to load dashboard data");
       }
@@ -109,8 +111,10 @@ export default function AdminDashboardPage() {
   }, [headers, navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem("superAdminToken");
-    navigate("/super-admin-login");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user_type");
+    localStorage.removeItem("user_id");
+    navigate("/super-admin/login");
   };
 
   const updateEscalation = async (id, updates) => {
