@@ -154,9 +154,9 @@ async def get_knowledge_entries(
     
     if entry_status:
         try:
-            status_enum = KnowledgeStatus(status)
+            status_enum = KnowledgeStatus(entry_status)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            raise HTTPException(status_code=400, detail=f"Invalid status: {entry_status}")
     
     entries = await knowledge_service.get_all_entries(category_enum, status_enum, limit)
     
