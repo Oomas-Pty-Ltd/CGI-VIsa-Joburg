@@ -65,7 +65,7 @@ export default function AdminDashboardPage() {
   const [knowledgeHistory, setKnowledgeHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  const token = localStorage.getItem("superAdminToken");
+  const token = localStorage.getItem("token");
 
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -73,8 +73,9 @@ export default function AdminDashboardPage() {
   };
 
   useEffect(() => {
-    if (!token) {
-      navigate("/super-admin-login");
+    const userType = localStorage.getItem("user_type");
+    if (!token || userType !== "super_admin") {
+      navigate("/super-admin/login");
       return;
     }
     loadData();
