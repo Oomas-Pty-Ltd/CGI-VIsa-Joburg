@@ -215,6 +215,3 @@ async def get_security_metrics() -> Dict[str, Any]:
             "auto_disclaimers": True
         }
     }
-
-        "message": "Test alert has been dispatched. Check your configured alert channels."
-    }
