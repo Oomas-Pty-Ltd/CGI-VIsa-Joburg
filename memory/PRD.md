@@ -134,10 +134,40 @@ Frontend (React)     Backend (FastAPI)      External Services
 ---
 
 ## Test Status (February 2026)
-- **Total Tests:** 33
-- **Passed:** 33
-- **Failed:** 0
-- **Coverage:** Web, Widget, WhatsApp, Facebook, Templates, Monitoring, Auth
+- **Security Tests (Phase 1):** 31 passed, 0 failed
+- **Previous Tests:** 33 passed, 0 failed
+- **Total Coverage:** Web, Widget, WhatsApp, Facebook, Templates, Monitoring, Auth, Security
+
+---
+
+## Pending Tasks (Priority Order)
+
+### P1 - Phase 2 Security (Compliance & Cost Control)
+- [ ] Rate limiting (IP/user/phone caps)
+- [ ] Cost monitoring (token tracking + budget alerts)
+- [ ] WhatsApp 24-hour policy (timestamp tracking + auto-template)
+- [ ] Structured FAQ collection (Knowledge Module)
+- [ ] Unsafe output validation enhancements
+
+### P2 - Phase 3 Security (Operational Hardening)
+- [ ] Rule-based visa intent classifier
+- [ ] Knowledge versioning + admin interface
+- [ ] Source transparency tagging
+- [ ] Human handoff escalation
+- [ ] Complaint logging + dashboard
+- [ ] AI observability dashboard
+- [ ] Messaging delivery monitoring
+
+### P3 - Feature Work
+- [ ] Full mic/camera input implementation
+- [ ] Language selector UI dropdown
+- [ ] User profile system
+- [ ] Talking avatar feature
+
+### P4 - Deployment & Documentation
+- [ ] Comprehensive documentation
+- [ ] Instagram integration
+- [ ] Docker packaging for KVM deployment
 
 ---
 
