@@ -163,20 +163,20 @@ Frontend (React)     Backend (FastAPI)      External Services
 ---
 
 ## Test Status (February 2026)
-- **Security Tests (Phase 1):** 31 passed, 0 failed
+- **Phase 1 Security Tests:** 31 passed, 0 failed
+- **Phase 2 Security Tests:** All endpoints working ✅
 - **Previous Tests:** 33 passed, 0 failed
-- **Total Coverage:** Web, Widget, WhatsApp, Facebook, Templates, Monitoring, Auth, Security
+- **Total Coverage:** Web, Widget, WhatsApp, Facebook, Templates, Monitoring, Auth, Security, Rate Limiting, Cost Monitoring
+
+---
+
+## Documentation Downloads
+- **Technical Docs:** https://visa-aide.preview.emergentagent.com/TECHNICAL_DOCS.md
+- **Database Export:** https://visa-aide.preview.emergentagent.com/db_export.zip
 
 ---
 
 ## Pending Tasks (Priority Order)
-
-### P1 - Phase 2 Security (Compliance & Cost Control)
-- [ ] Rate limiting (IP/user/phone caps)
-- [ ] Cost monitoring (token tracking + budget alerts)
-- [ ] WhatsApp 24-hour policy (timestamp tracking + auto-template)
-- [ ] Structured FAQ collection (Knowledge Module)
-- [ ] Unsafe output validation enhancements
 
 ### P2 - Phase 3 Security (Operational Hardening)
 - [ ] Rule-based visa intent classifier
@@ -186,6 +186,7 @@ Frontend (React)     Backend (FastAPI)      External Services
 - [ ] Complaint logging + dashboard
 - [ ] AI observability dashboard
 - [ ] Messaging delivery monitoring
+- [ ] Structured FAQ collection (Knowledge Module)
 
 ### P3 - Feature Work
 - [ ] Full mic/camera input implementation
@@ -194,7 +195,6 @@ Frontend (React)     Backend (FastAPI)      External Services
 - [ ] Talking avatar feature
 
 ### P4 - Deployment & Documentation
-- [ ] Comprehensive documentation
 - [ ] Instagram integration
 - [ ] Docker packaging for KVM deployment
 
