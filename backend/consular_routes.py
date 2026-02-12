@@ -363,8 +363,6 @@ async def chat_widget(request: WidgetChatRequest):
     Designed for embedded chat widgets on external websites.
     With: Input sanitization, PII protection, session isolation
     """
-    db = await get_database()
-    
     # Sanitize and validate user input
     sanitization_result = sanitize_user_input(request.message, context="widget")
     

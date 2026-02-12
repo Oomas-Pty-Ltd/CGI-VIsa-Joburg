@@ -254,7 +254,6 @@ async def whatsapp_webhook(
         
         # Extract message details
         from_number = form_data.get("From", "").replace("whatsapp:", "")
-        to_number = form_data.get("To", "").replace("whatsapp:", "")
         message_body = form_data.get("Body", "").strip()
         message_sid = form_data.get("MessageSid", "")
         profile_name = form_data.get("ProfileName", "")

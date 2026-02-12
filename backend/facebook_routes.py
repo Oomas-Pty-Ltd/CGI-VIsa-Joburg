@@ -298,8 +298,6 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
         for entry in body.get("entry", []):
             for messaging_event in entry.get("messaging", []):
                 sender_id = messaging_event.get("sender", {}).get("id")
-                recipient_id = messaging_event.get("recipient", {}).get("id")
-                timestamp = messaging_event.get("timestamp")
                 
                 # Handle message
                 if "message" in messaging_event:
