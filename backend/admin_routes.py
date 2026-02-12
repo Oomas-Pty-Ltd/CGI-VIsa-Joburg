@@ -93,11 +93,11 @@ async def update_escalation(
 ):
     """Update escalation status"""
     status_enum = None
-    if request.status:
+    if request.esc_status:
         try:
-            status_enum = EscalationStatus(request.status)
+            status_enum = EscalationStatus(request.esc_status)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+            raise HTTPException(status_code=400, detail=f"Invalid status: {request.esc_status}")
     
     success = await escalation_service.update_escalation(
         escalation_id=escalation_id,
