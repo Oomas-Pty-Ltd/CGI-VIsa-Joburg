@@ -247,12 +247,12 @@ async def update_knowledge_entry(
         updates["source"] = request.source
     if request.source_verified is not None:
         updates["source_verified"] = request.source_verified
-    if request.status:
+    if request.entry_status:
         try:
-            KnowledgeStatus(request.status)
-            updates["status"] = request.status
+            KnowledgeStatus(request.entry_status)
+            updates["status"] = request.entry_status
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+            raise HTTPException(status_code=400, detail=f"Invalid status: {request.entry_status}")
     
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
