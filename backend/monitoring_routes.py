@@ -3,6 +3,7 @@
 MONITORING API ROUTES
 ====================================================================
 Provides REST endpoints for health checks and status monitoring.
+Includes security metrics and guardrail statistics.
 ====================================================================
 """
 
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 import time
 
 from monitoring_service import monitoring_service, MONITORING_CONFIG
+from security.guardrail import guardrail_service
+from security.session_manager import session_manager
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -176,5 +179,40 @@ async def test_alert() -> Dict[str, str]:
     
     return {
         "status": "sent",
+
+
+@router.get("/security")
+async def get_security_metrics() -> Dict[str, Any]:
+    """
+    Get security metrics including guardrail statistics.
+    """
+    guardrail_stats = guardrail_service.get_stats()
+    
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "guardrails": {
+            "pii_detections": guardrail_stats['pii_detections'],
+            "unsafe_output_detections": guardrail_stats['unsafe_output_detections'],
+            "status": "active"
+        },
+        "session_security": {
+            "ttl_hours": session_manager.ttl_hours,
+            "max_sessions_per_user": session_manager.max_sessions,
+            "channel_isolation": True
+        },
+        "webhook_security": {
+            "twilio_validation": "enabled",
+            "facebook_validation": "enabled"
+        },
+        "input_sanitization": {
+            "prompt_injection_protection": True,
+            "pii_masking": True
+        },
+        "output_validation": {
+            "unsafe_content_filtering": True,
+            "auto_disclaimers": True
+        }
+    }
+
         "message": "Test alert has been dispatched. Check your configured alert channels."
     }
