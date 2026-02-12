@@ -25,6 +25,10 @@ from template_routes import router as template_router
 from monitoring_routes import router as monitoring_router
 from monitoring_service import start_background_monitoring
 
+# Security imports
+from security.session_manager import session_manager
+from security.guardrail import setup_sanitized_logging
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
