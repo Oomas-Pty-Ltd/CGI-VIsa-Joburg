@@ -263,9 +263,30 @@ async def facebook_webhook_verify(request: Request):
 async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Webhook endpoint for incoming Facebook messages.
+    With: Signature validation, input sanitization, PII protection
     """
+    source_ip = request.client.host if request.client else "unknown"
+    
     try:
-        body = await request.json()
+        # Validate Facebook webhook signature (skip in dev mode)
+        if os.environ.get('WEBHOOK_VALIDATION_DISABLED', '').lower() != 'true':
+            # Get raw body for signature validation
+            body_bytes = await request.body()
+            
+            from security.webhook_validator import facebook_validator
+            signature = request.headers.get('X-Hub-Signature-256', '')
+            
+            if not facebook_validator.validate_signature(body_bytes, signature):
+                log_webhook_attempt("facebook", source_ip, False, "Invalid signature")
+                raise HTTPException(status_code=403, detail="Invalid webhook signature")
+            
+            log_webhook_attempt("facebook", source_ip, True, "Signature valid")
+            
+            # Parse JSON from cached body
+            import json
+            body = json.loads(body_bytes)
+        else:
+            body = await request.json()
         
         # Verify this is a page subscription
         if body.get("object") != "page":
@@ -289,7 +310,20 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     if not message_text:
                         continue
                     
-                    logger.info(f"FB message from {sender_id}: {message_text[:50]}...")
+                    # Sanitize and validate input
+                    sanitization_result = sanitize_user_input(message_text, context="facebook")
+                    
+                    if not sanitization_result.is_safe:
+                        logger.warning(f"[SECURITY] Blocked unsafe FB input from {sanitize_logs(sender_id)}: {sanitization_result.detected_patterns}")
+                        ai_response = "I cannot process that request. Please ask about consular services."
+                        await fb_service.send_message(sender_id, ai_response)
+                        continue
+                    
+                    # Mask PII in input
+                    input_result = guardrail_service.validate_input(message_text)
+                    sanitized_message = input_result.sanitized_text
+                    
+                    logger.info(f"FB message from {sanitize_logs(sender_id)}: {sanitize_logs(message_text[:50])}...")
                     
                     # Get or create user
                     user = await db.facebook_users.find_one(
@@ -300,11 +334,24 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                         user = {
                             "id": user_id,
                             "fb_id": sender_id,
-                            "created_at": datetime.now(timezone.utc).isoformat()
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            "last_interaction": datetime.now(timezone.utc).isoformat()
                         }
                         await db.facebook_users.insert_one(user)
                     else:
                         user_id = user['id']
+                        await db.facebook_users.update_one(
+                            {"fb_id": sender_id},
+                            {"$set": {"last_interaction": datetime.now(timezone.utc).isoformat()}}
+                        )
+                    
+                    # Get or create secure session
+                    session = await session_manager.get_or_create_session(
+                        channel="facebook",
+                        user_identifier=sender_id,
+                        metadata={"fb_message_id": message_id}
+                    )
+                    session_id = session['id']
                     
                     # Store incoming message
                     await db.facebook_messages.insert_one({
@@ -314,12 +361,20 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                         "fb_sender_id": sender_id,
                         "direction": "inbound",
                         "message": message_text,
+                        "message_sanitized": sanitized_message,
+                        "session_id": session_id,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     
                     # Generate and send AI response
-                    session_id = f"facebook_{user_id}"
-                    ai_response = await generate_fb_ai_response(message_text, session_id)
+                    ai_response = await generate_fb_ai_response(sanitized_message, session_id)
+                    
+                    # Validate and sanitize output
+                    output_result = guardrail_service.validate_output(ai_response)
+                    ai_response = output_result.sanitized_text
+                    
+                    if output_result.pii_detected:
+                        logger.warning(f"[GUARDRAIL] PII detected in FB output, masked: {output_result.pii_detected}")
                     
                     # Send response
                     result = await fb_service.send_message(sender_id, ai_response)
@@ -332,8 +387,10 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                         "fb_sender_id": sender_id,
                         "direction": "outbound",
                         "message": ai_response,
+                        "session_id": session_id,
                         "status": "sent" if result["success"] else "failed",
                         "mock": result.get("mock", False),
+                        "guardrail_flags": output_result.unsafe_patterns,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                 
@@ -349,8 +406,10 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
         
         return Response(status_code=200)
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"FB webhook error: {e}")
+        logger.error(f"FB webhook error: {sanitize_logs(str(e))}")
         return Response(status_code=200)  # Always return 200 to Facebook
 
 
