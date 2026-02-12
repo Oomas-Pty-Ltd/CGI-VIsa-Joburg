@@ -48,7 +48,13 @@ db = client[db_name]
 async def lifespan(app: FastAPI):
     """Application lifespan handler with proper error handling"""
     monitoring_task = None
+    session_cleanup_task = None
+    
     try:
+        # Setup sanitized logging (PII protection in logs)
+        setup_sanitized_logging()
+        logger.info("Sanitized logging enabled")
+        
         # Test database connection using the actual database (not admin)
         # This works with Atlas MongoDB where users may not have admin access
         await db.command('ping')
@@ -67,6 +73,20 @@ async def lifespan(app: FastAPI):
         monitoring_task = asyncio.create_task(start_background_monitoring())
         logger.info("Background monitoring started")
         
+        # Start session cleanup task (runs every hour)
+        async def periodic_session_cleanup():
+            while True:
+                try:
+                    await asyncio.sleep(3600)  # Run every hour
+                    await session_manager.cleanup_expired_sessions()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Session cleanup error: {e}")
+        
+        session_cleanup_task = asyncio.create_task(periodic_session_cleanup())
+        logger.info("Session cleanup task started")
+        
     except Exception as e:
         logger.error(f"Startup initialization failed: {e}")
         # Don't raise - allow app to start even if init fails
@@ -77,6 +97,8 @@ async def lifespan(app: FastAPI):
     # Cleanup
     if monitoring_task:
         monitoring_task.cancel()
+    if session_cleanup_task:
+        session_cleanup_task.cancel()
     client.close()
 
 app = FastAPI(lifespan=lifespan)
