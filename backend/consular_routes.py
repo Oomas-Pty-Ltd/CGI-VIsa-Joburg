@@ -13,9 +13,16 @@ from knowledge_scraper import get_realtime_knowledge, search_knowledge
 from voice_service import voice_service
 from dotenv import load_dotenv
 
+# Security imports
+from security.session_manager import session_manager
+from security.input_sanitizer import sanitize_user_input, create_safe_system_prompt
+from security.guardrail import guardrail_service, sanitize_logs
+
 load_dotenv()
 
 router = APIRouter(prefix="/consular", tags=["consular"])
+import logging
+logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     message: str
