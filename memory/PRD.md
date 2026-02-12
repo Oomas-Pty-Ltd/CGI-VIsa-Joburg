@@ -118,6 +118,18 @@ Frontend (React)     Backend (FastAPI)      External Services
 | `/api/templates/render` | POST | Render with variables |
 | `/api/monitoring/health` | GET | Health check |
 | `/api/monitoring/metrics` | GET | Performance metrics |
+| `/api/monitoring/security` | GET | **NEW** Security metrics & guardrail stats |
+
+---
+
+## Security Module Files
+
+| File | Purpose |
+|------|---------|
+| `/app/backend/security/webhook_validator.py` | Twilio/Facebook signature validation |
+| `/app/backend/security/session_manager.py` | Secure session management with TTL |
+| `/app/backend/security/input_sanitizer.py` | Prompt injection protection |
+| `/app/backend/security/guardrail.py` | PII masking & output validation |
 
 ---
 
