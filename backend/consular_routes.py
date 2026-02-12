@@ -50,15 +50,18 @@ class FormData(BaseModel):
     session_id: str
     form_data: Dict[str, Any]
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(check_rate_limit)])
+async def chat(request: ChatRequest, http_request: Request):
     db = await get_database()
+    
+    # Get client IP for rate limiting logging
+    client_ip = http_request.client.host if http_request.client else "unknown"
     
     # Sanitize and validate user input
     sanitization_result = sanitize_user_input(request.message, context="web_chat")
     
     if not sanitization_result.is_safe:
-        logger.warning(f"[SECURITY] Blocked unsafe input: {sanitization_result.detected_patterns}")
+        logger.warning(f"[SECURITY] Blocked unsafe input from {client_ip}: {sanitization_result.detected_patterns}")
         return ChatResponse(
             session_id=request.session_id or str(uuid.uuid4()),
             response="I cannot process that request. Please ask a question about consular services.",
