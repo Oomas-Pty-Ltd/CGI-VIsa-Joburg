@@ -5,10 +5,11 @@
 2. [LLM Configuration](#llm-configuration)
 3. [Architecture](#architecture)
 4. [Security Features](#security-features)
-5. [API Reference](#api-reference)
-6. [Database Schema](#database-schema)
-7. [Configuration](#configuration)
-8. [Deployment](#deployment)
+5. [Phase 3 Features](#phase-3-features)
+6. [API Reference](#api-reference)
+7. [Database Schema](#database-schema)
+8. [Configuration](#configuration)
+9. [Deployment](#deployment)
 
 ---
 
@@ -22,6 +23,9 @@
 - Multi-language support (Hindi, English, Zulu, Afrikaans, Tamil)
 - Real-time document scanning and form auto-fill
 - Enterprise-grade security and compliance (GDPR, DPDA, POPIA)
+- Rule-based intent classification (reduces LLM costs)
+- Human escalation system
+- Versioned knowledge base
 
 ---
 
