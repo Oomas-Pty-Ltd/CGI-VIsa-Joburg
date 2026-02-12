@@ -191,6 +191,8 @@ async def get_security_metrics() -> Dict[str, Any]:
     Get security metrics including guardrail statistics.
     """
     guardrail_stats = guardrail_service.get_stats()
+    rate_limit_stats = rate_limiter.get_stats()
+    cost_stats = cost_monitor.get_daily_stats()
     
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -215,5 +217,47 @@ async def get_security_metrics() -> Dict[str, Any]:
         "output_validation": {
             "unsafe_content_filtering": True,
             "auto_disclaimers": True
+        },
+        "rate_limiting": rate_limit_stats,
+        "cost_monitoring": cost_stats
+    }
+
+
+@router.get("/rate-limits")
+async def get_rate_limit_stats() -> Dict[str, Any]:
+    """
+    Get detailed rate limiting statistics.
+    """
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "stats": rate_limiter.get_stats()
+    }
+
+
+@router.get("/costs")
+async def get_cost_stats() -> Dict[str, Any]:
+    """
+    Get AI cost monitoring statistics.
+    """
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "daily_stats": cost_monitor.get_daily_stats(),
+        "config": {
+            "daily_budget": cost_monitor.config['daily_budget'],
+            "monthly_budget": cost_monitor.config['monthly_budget'],
+            "session_limit": cost_monitor.config['per_session_limit'],
+            "model": cost_monitor.config['default_model'],
+            "provider": cost_monitor.config['provider']
         }
+    }
+
+
+@router.get("/costs/session/{session_id}")
+async def get_session_cost_stats(session_id: str) -> Dict[str, Any]:
+    """
+    Get cost statistics for a specific session.
+    """
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session_stats": cost_monitor.get_session_stats(session_id)
     }
