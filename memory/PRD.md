@@ -2,6 +2,35 @@
 
 ## Latest Updates (Feb 12, 2026)
 
+### 🔒 Phase 2 Compliance & Cost Control Implemented:
+
+#### 5. Rate Limiting Module
+- ✅ IP-based limits: 30/min, 500/hour
+- ✅ User-based limits: 20/min, 500/day
+- ✅ Phone-based limits: 10/min, 100/day (WhatsApp/SMS)
+- ✅ Global limit: 1000 requests/min
+- ✅ Burst allowance for short spikes
+- ✅ Automatic cleanup of stale rate limit buckets
+- ✅ Stats endpoint: `/api/monitoring/rate-limits`
+
+#### 6. Cost Monitoring Module
+- ✅ Per-session token tracking
+- ✅ Daily budget: $50 (configurable)
+- ✅ Monthly budget: $1000 (configurable)
+- ✅ Per-session limit: $1 (configurable)
+- ✅ Alert thresholds: 70% warning, 90% critical
+- ✅ Token cost calculation: $0.01/1K input, $0.03/1K output
+- ✅ Stats endpoint: `/api/monitoring/costs`
+
+#### 7. WhatsApp 24-Hour Policy Manager
+- ✅ Conversation window tracking (24h from last user message)
+- ✅ Auto-detection of window expiry
+- ✅ Template message switching when window closes
+- ✅ Expiry reminder support
+- ✅ Batch status checking for campaigns
+
+---
+
 ### 🔒 Phase 1 Critical Security Fixes Implemented:
 
 #### 1. Channel Module - Webhook Security
