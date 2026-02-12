@@ -23,11 +23,15 @@ from whatsapp_routes import router as whatsapp_router
 from facebook_routes import router as facebook_router
 from template_routes import router as template_router
 from monitoring_routes import router as monitoring_router
+from admin_routes import router as admin_router
 from monitoring_service import start_background_monitoring
 
 # Security imports
 from security.session_manager import session_manager
 from security.guardrail import setup_sanitized_logging
+
+# Services imports
+from services.knowledge_service import knowledge_service
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
