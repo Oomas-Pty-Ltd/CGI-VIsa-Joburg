@@ -150,6 +150,7 @@ api_router.include_router(whatsapp_router)
 api_router.include_router(facebook_router)
 api_router.include_router(template_router)
 api_router.include_router(monitoring_router)
+api_router.include_router(admin_router)
 
 app.include_router(api_router)
 
