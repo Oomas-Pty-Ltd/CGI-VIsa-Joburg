@@ -198,7 +198,7 @@ export default function ConsularBot() {
   };
 
   // =====================================================================
-  // ENHANCED MICROPHONE INPUT - Using MediaDevices API
+  // ENHANCED MICROPHONE INPUT - Using OpenAI Whisper via Backend
   // =====================================================================
   const startRecording = useCallback(async () => {
     try {
@@ -226,37 +226,53 @@ export default function ConsularBot() {
         const audioBlob = new Blob(chunks, { type: 'audio/webm' });
         stream.getTracks().forEach(track => track.stop());
         
-        // Send to backend for transcription
+        // Send to backend for Whisper transcription
         try {
+          toast.info("🎤 Processing voice input...");
+          
           const formData = new FormData();
           formData.append('audio', audioBlob, 'recording.webm');
           formData.append('language', selectedLanguage);
           
-          toast.info("Processing voice input...");
+          const response = await axios.post(`${API}/consular/voice-input`, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            }
+          });
           
-          // For now, use Web Speech API as fallback
-          // In production, send to Whisper API
-          const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-          recognition.lang = selectedLanguage === 'hi' ? 'hi-IN' : 
-                            selectedLanguage === 'ta' ? 'ta-IN' :
-                            selectedLanguage === 'zu' ? 'zu-ZA' :
-                            selectedLanguage === 'af' ? 'af-ZA' : 'en-US';
-          recognition.interimResults = false;
-          
-          recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            setInput(transcript);
-            toast.success("Voice captured!");
-          };
-          
-          recognition.onerror = () => {
-            toast.error("Voice recognition failed. Please type your message.");
-          };
-          
-          recognition.start();
+          if (response.data.success && response.data.transcription) {
+            setInput(response.data.transcription);
+            toast.success("✅ Voice captured successfully!");
+          } else {
+            toast.error("Voice recognition failed. Please try again or type your message.");
+          }
         } catch (err) {
           console.error("Voice processing error:", err);
-          toast.error("Failed to process voice. Please try typing.");
+          
+          // Fallback to Web Speech API if backend fails
+          if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+            toast.info("Trying browser speech recognition...");
+            const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = selectedLanguage === 'hi' ? 'hi-IN' : 
+                              selectedLanguage === 'ta' ? 'ta-IN' :
+                              selectedLanguage === 'zu' ? 'zu-ZA' :
+                              selectedLanguage === 'af' ? 'af-ZA' : 'en-US';
+            recognition.interimResults = false;
+            
+            recognition.onresult = (event) => {
+              const transcript = event.results[0][0].transcript;
+              setInput(transcript);
+              toast.success("Voice captured (browser)!");
+            };
+            
+            recognition.onerror = () => {
+              toast.error("Voice recognition failed. Please type your message.");
+            };
+            
+            recognition.start();
+          } else {
+            toast.error("Voice recognition unavailable. Please type your message.");
+          }
         }
       };
       
