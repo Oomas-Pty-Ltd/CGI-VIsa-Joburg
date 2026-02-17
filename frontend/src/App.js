@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "@/App.css";
+import "@/styles/google-design.css";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/context/ThemeContext";
+import { ErrorBoundary, ErrorProvider } from "@/components/ErrorSystem";
 
 import Landing from "@/pages/Landing";
 import SuperAdminLogin from "@/pages/SuperAdminLogin";
@@ -14,23 +17,29 @@ import AdminDashboardPage from "@/pages/AdminDashboardPage";
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/super-admin/login" element={<SuperAdminLogin />} />
-          <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
-          <Route path="/super-admin/admin-panel" element={<AdminDashboardPage />} />
-          <Route path="/admin/login" element={<LocalAdminLogin />} />
-          <Route path="/admin/dashboard" element={<LocalAdminDashboard />} />
-          <Route path="/consular" element={<ConsularBot />} />
-          <Route path="/consular/review" element={<FormReview />} />
-          <Route path="/widget" element={<ChatWidget />} />
-          <Route path="/widget-demo" element={<WidgetDemo />} />
-        </Routes>
-      </BrowserRouter>
-      <Toaster position="top-right" />
-    </div>
+    <ErrorBoundary>
+      <ErrorProvider>
+        <ThemeProvider>
+          <div className="App">
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+                <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+                <Route path="/super-admin/admin-panel" element={<AdminDashboardPage />} />
+                <Route path="/admin/login" element={<LocalAdminLogin />} />
+                <Route path="/admin/dashboard" element={<LocalAdminDashboard />} />
+                <Route path="/consular" element={<ConsularBot />} />
+                <Route path="/consular/review" element={<FormReview />} />
+                <Route path="/widget" element={<ChatWidget />} />
+                <Route path="/widget-demo" element={<WidgetDemo />} />
+              </Routes>
+            </BrowserRouter>
+            <Toaster position="top-right" />
+          </div>
+        </ThemeProvider>
+      </ErrorProvider>
+    </ErrorBoundary>
   );
 }
 
