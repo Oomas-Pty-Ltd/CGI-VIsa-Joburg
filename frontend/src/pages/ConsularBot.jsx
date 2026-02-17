@@ -445,6 +445,27 @@ export default function ConsularBot() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 p-6">
+      {/* Skip Link for Keyboard Navigation */}
+      <a 
+        href="#chat-input" 
+        className="skip-link"
+        tabIndex={0}
+      >
+        Skip to chat input
+      </a>
+      
+      {/* Live Region for Screen Reader Announcements */}
+      <div 
+        role="status" 
+        aria-live="polite" 
+        aria-atomic="true"
+        className="sr-only"
+        id="status-announcer"
+      >
+        {isTyping && "Seva Setu is typing a response..."}
+        {isSpeaking && "Playing voice response..."}
+      </div>
+
       <div className="max-w-5xl mx-auto">
         {/* Language Selector - Top Right */}
         <div className="flex justify-end mb-4">
@@ -452,18 +473,26 @@ export default function ConsularBot() {
             <Button
               variant="outline"
               onClick={() => setShowLanguageMenu(!showLanguageMenu)}
-              className="flex items-center gap-2 bg-white shadow-sm hover:shadow-md transition-all"
+              className="flex items-center gap-2 bg-white shadow-sm hover:shadow-md transition-all min-h-[44px]"
               data-testid="language-selector"
+              aria-haspopup="listbox"
+              aria-expanded={showLanguageMenu}
+              aria-label={`Current language: ${currentLang.name}. Click to change language`}
             >
-              <Globe className="w-4 h-4 text-[#E06F2C]" />
-              <span className="text-lg">{currentLang.flag}</span>
+              <Globe className="w-4 h-4 text-[#E06F2C]" aria-hidden="true" />
+              <span className="text-lg" aria-hidden="true">{currentLang.flag}</span>
               <span className="font-medium">{currentLang.name}</span>
             </Button>
             
             {showLanguageMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border z-50" data-testid="language-menu">
+              <div 
+                className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border z-50" 
+                data-testid="language-menu"
+                role="listbox"
+                aria-label="Select language"
+              >
                 <div className="p-2">
-                  <p className="text-xs text-gray-500 px-3 py-1 font-semibold uppercase">Select Language</p>
+                  <p className="text-xs text-gray-500 px-3 py-1 font-semibold uppercase" id="lang-label">Select Language</p>
                   {LANGUAGES.map((lang) => (
                     <button
                       key={lang.code}
@@ -472,17 +501,19 @@ export default function ConsularBot() {
                         setShowLanguageMenu(false);
                         toast.success(`Language set to ${lang.name}`);
                       }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors min-h-[44px] ${
                         selectedLanguage === lang.code 
                           ? 'bg-orange-50 text-[#E06F2C]' 
                           : 'hover:bg-gray-50'
                       }`}
                       data-testid={`lang-option-${lang.code}`}
+                      role="option"
+                      aria-selected={selectedLanguage === lang.code}
                     >
-                      <span className="text-xl">{lang.flag}</span>
+                      <span className="text-xl" aria-hidden="true">{lang.flag}</span>
                       <span className="font-medium">{lang.name}</span>
                       {selectedLanguage === lang.code && (
-                        <Check className="w-4 h-4 ml-auto text-[#E06F2C]" />
+                        <Check className="w-4 h-4 ml-auto text-[#E06F2C]" aria-hidden="true" />
                       )}
                     </button>
                   ))}
@@ -493,11 +524,11 @@ export default function ConsularBot() {
         </div>
 
         {/* Progress Stepper */}
-        <div className="flex justify-center mb-8">
-          <div className="flex items-center w-full max-w-2xl" data-testid="progress-stepper">
+        <nav aria-label="Application progress" className="flex justify-center mb-8">
+          <ol className="flex items-center w-full max-w-2xl" data-testid="progress-stepper">
             {STEPS.map((step, index) => (
               <React.Fragment key={step.id}>
-                <div className="flex flex-col items-center">
+                <li className="flex flex-col items-center">
                   <div
                     className={`${
                       index <= currentStepIndex
@@ -505,20 +536,25 @@ export default function ConsularBot() {
                         : "bg-slate-200 text-slate-500"
                     } w-12 h-12 rounded-full flex items-center justify-center font-bold transition-all`}
                     data-testid={`step-${step.value}`}
+                    aria-current={index === currentStepIndex ? "step" : undefined}
+                    role="img"
+                    aria-label={`Step ${step.id}: ${step.label}${index < currentStepIndex ? ', completed' : index === currentStepIndex ? ', current step' : ''}`}
                   >
-                    {index < currentStepIndex ? <Check className="w-6 h-6" /> : step.id}
+                    {index < currentStepIndex ? <Check className="w-6 h-6" aria-hidden="true" /> : <span aria-hidden="true">{step.id}</span>}
                   </div>
                   <span className="text-sm mt-2 font-medium text-[#1A2E40]">{step.label}</span>
-                </div>
+                </li>
                 {index < STEPS.length - 1 && (
-                  <div
+                  <li
                     className={`h-1 flex-1 mx-4 ${index < currentStepIndex ? "bg-[#E06F2C]" : "bg-slate-200"}`}
+                    aria-hidden="true"
+                    role="presentation"
                   />
                 )}
               </React.Fragment>
             ))}
-          </div>
-        </div>
+          </ol>
+        </nav>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Avatar Section */}
