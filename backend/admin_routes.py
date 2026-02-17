@@ -7,6 +7,7 @@ Admin dashboard API for:
 - Knowledge base management
 - AI observability
 - System metrics
+- Error reporting
 ====================================================================
 """
 
@@ -15,7 +16,10 @@ from fastapi import status as http_status
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
+import uuid
+import logging
 
+from database import get_database
 from auth_utils import verify_super_admin, verify_local_admin
 from services.escalation_service import (
     escalation_service, 
@@ -28,6 +32,8 @@ from services.knowledge_service import (
     KnowledgeStatus
 )
 from services.intent_classifier import intent_classifier
+
+logger = logging.getLogger(__name__)
 from security.rate_limiter import rate_limiter
 from security.cost_monitor import cost_monitor
 from security.guardrail import guardrail_service
