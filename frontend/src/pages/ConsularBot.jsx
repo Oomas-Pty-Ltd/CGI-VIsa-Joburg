@@ -659,27 +659,44 @@ export default function ConsularBot() {
 
           {/* Chat Section */}
           <div className="lg:col-span-8">
-            <div className="glass-card rounded-xl shadow-lg flex flex-col" style={{ height: "600px" }}>
-              <div className="flex-1 overflow-y-auto p-6 space-y-4" data-testid="chat-messages">
+            <div 
+              className="glass-card rounded-xl shadow-lg flex flex-col" 
+              style={{ height: "600px" }}
+              role="region"
+              aria-label="Chat conversation"
+            >
+              <div 
+                className="flex-1 overflow-y-auto p-6 space-y-4" 
+                data-testid="chat-messages"
+                role="log"
+                aria-live="polite"
+                aria-label="Message history"
+                tabIndex={0}
+              >
                 {messages.map((msg, index) => (
                   <div
                     key={index}
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                     data-testid={`message-${index}`}
+                    role="article"
+                    aria-label={`${msg.role === "user" ? "Your message" : "Seva Setu response"}`}
                   >
                     {msg.role === "advisory" ? (
-                      <div className={`max-w-lg px-4 py-3 rounded-lg border-l-4 ${
-                        msg.type === "alert" 
-                          ? "bg-red-50 border-red-500 text-red-900" 
-                          : msg.type === "warning"
-                          ? "bg-amber-50 border-amber-500 text-amber-900"
-                          : "bg-blue-50 border-blue-500 text-blue-900"
-                      }`}>
+                      <div 
+                        className={`max-w-lg px-4 py-3 rounded-lg border-l-4 ${
+                          msg.type === "alert" 
+                            ? "bg-red-50 border-red-500 text-red-900" 
+                            : msg.type === "warning"
+                            ? "bg-amber-50 border-amber-500 text-amber-900"
+                            : "bg-blue-50 border-blue-500 text-blue-900"
+                        }`}
+                        role={msg.type === "alert" ? "alert" : "note"}
+                      >
                         <div className="flex items-start gap-2 mb-2">
                           <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
                             msg.type === "alert" ? "text-red-600" : 
                             msg.type === "warning" ? "text-amber-600" : "text-blue-600"
-                          }`} />
+                          }`} aria-hidden="true" />
                           <h4 className="font-bold text-sm">{msg.title}</h4>
                         </div>
                         <div className="prose prose-sm max-w-none ml-7 prose-p:my-1 prose-p:text-current prose-ul:my-1 prose-li:text-current prose-strong:font-bold">
@@ -711,9 +728,14 @@ export default function ConsularBot() {
                 ))}
                 
                 {isTyping && (
-                  <div className="flex justify-start" data-testid="typing-indicator">
+                  <div 
+                    className="flex justify-start" 
+                    data-testid="typing-indicator"
+                    role="status"
+                    aria-label="Seva Setu is typing"
+                  >
                     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-2">
-                      <div className="flex gap-1">
+                      <div className="flex gap-1" aria-hidden="true">
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
@@ -726,16 +748,24 @@ export default function ConsularBot() {
               </div>
 
               {/* Input Area */}
-              <div className="border-t border-gray-200 p-4">
+              <div className="border-t border-gray-200 p-4" role="form" aria-label="Message input form">
                 <div className="flex gap-2">
+                  <label htmlFor="chat-input-field" className="sr-only">
+                    Type your message
+                  </label>
                   <Textarea
+                    id="chat-input-field"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
                     placeholder={`Type your message in ${currentLang.name}...`}
                     className="flex-1 min-h-[60px]"
                     data-testid="chat-input"
+                    aria-describedby="input-instructions"
                   />
+                  <span id="input-instructions" className="sr-only">
+                    Press Enter to send, Shift+Enter for new line
+                  </span>
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -743,41 +773,43 @@ export default function ConsularBot() {
                     accept=".jpg,.jpeg,.png,.pdf"
                     style={{ display: 'none' }}
                     data-testid="file-input"
+                    aria-label="Upload document"
                   />
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2" role="toolbar" aria-label="Message actions">
                     <Button
                       onClick={handleVoice}
                       className={`${
                         isRecording ? "bg-red-500 hover:bg-red-600 animate-pulse" : "bg-[#2E8B57] hover:bg-[#256B47]"
-                      } text-white`}
+                      } text-white min-h-[44px] min-w-[44px]`}
                       data-testid="voice-btn"
-                      title={isRecording ? "Stop Recording" : "Start Voice Input"}
+                      aria-label={isRecording ? "Stop recording" : "Start voice input"}
+                      aria-pressed={isRecording}
                     >
-                      <Mic className="w-5 h-5" />
+                      <Mic className="w-5 h-5" aria-hidden="true" />
                     </Button>
                     <Button
                       onClick={startCamera}
-                      className="bg-[#1A2E40] hover:bg-[#132230] text-white"
+                      className="bg-[#1A2E40] hover:bg-[#132230] text-white min-h-[44px] min-w-[44px]"
                       data-testid="camera-btn"
-                      title="Scan Document with Camera"
+                      aria-label="Scan document with camera"
                     >
-                      <Camera className="w-5 h-5" />
+                      <Camera className="w-5 h-5" aria-hidden="true" />
                     </Button>
                     <Button
                       onClick={() => fileInputRef.current?.click()}
-                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
                       data-testid="upload-btn"
-                      title="Upload Document (JPG, PNG, PDF)"
+                      aria-label="Upload document file (JPG, PNG, or PDF)"
                     >
-                      <FileText className="w-5 h-5" />
+                      <FileText className="w-5 h-5" aria-hidden="true" />
                     </Button>
                     <Button
                       onClick={handleSend}
-                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
                       data-testid="send-btn"
-                      title="Send Message"
+                      aria-label="Send message"
                     >
-                      <Send className="w-5 h-5" />
+                      <Send className="w-5 h-5" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -787,25 +819,45 @@ export default function ConsularBot() {
         </div>
         
         {/* Compliance Footer */}
-        <div className="text-center mt-6 text-xs text-gray-500">
+        <footer className="text-center mt-6 text-xs text-gray-500" role="contentinfo">
           <p>GDPR, DPDA & POPIA Compliant • Your data is secure and private</p>
-        </div>
+        </footer>
       </div>
 
       {/* Camera Dialog */}
       <Dialog open={showCamera} onOpenChange={(open) => !open && stopCamera()}>
-        <DialogContent className="max-w-2xl" data-testid="camera-dialog">
+        <DialogContent 
+          className="max-w-2xl" 
+          data-testid="camera-dialog"
+          aria-labelledby="camera-dialog-title"
+          aria-describedby="camera-dialog-desc"
+        >
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold text-[#1A2E40]">Capture Document</h2>
-            <Button variant="ghost" size="sm" onClick={stopCamera}>
-              <X className="w-5 h-5" />
+            <h2 id="camera-dialog-title" className="text-2xl font-bold text-[#1A2E40]">Capture Document</h2>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={stopCamera}
+              aria-label="Close camera"
+            >
+              <X className="w-5 h-5" aria-hidden="true" />
             </Button>
           </div>
           
+          <p id="camera-dialog-desc" className="sr-only">
+            Use your device camera to capture a document image for processing
+          </p>
+          
           {cameraError ? (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+            <div 
+              className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700"
+              role="alert"
+            >
               <p className="font-semibold">Camera Error</p>
               <p className="text-sm mt-1">{cameraError}</p>
+              <p className="text-sm mt-2">
+                <strong>How to fix:</strong> Please ensure camera permissions are enabled in your browser settings.
+              </p>
             </div>
           ) : (
             <>
@@ -816,11 +868,12 @@ export default function ConsularBot() {
                   playsInline
                   muted
                   className="w-full rounded-lg"
+                  aria-label="Camera preview"
                 />
-                <canvas ref={canvasRef} className="hidden" />
+                <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
                 
                 {/* Guide overlay */}
-                <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
                   <div className="absolute inset-8 border-2 border-dashed border-white/50 rounded-lg"></div>
                   <p className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white text-sm bg-black/50 px-3 py-1 rounded">
                     Position document within frame
@@ -831,17 +884,19 @@ export default function ConsularBot() {
               <div className="flex gap-4 mt-4">
                 <Button 
                   onClick={captureImage} 
-                  className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20]" 
+                  className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20] min-h-[44px]" 
                   data-testid="capture-btn"
+                  aria-label="Capture document photo"
                 >
-                  <Camera className="w-5 h-5 mr-2" />
+                  <Camera className="w-5 h-5 mr-2" aria-hidden="true" />
                   Capture Document
                 </Button>
                 <Button 
                   onClick={stopCamera} 
                   variant="outline" 
-                  className="flex-1" 
+                  className="flex-1 min-h-[44px]" 
                   data-testid="cancel-capture-btn"
+                  aria-label="Cancel and close camera"
                 >
                   Cancel
                 </Button>
