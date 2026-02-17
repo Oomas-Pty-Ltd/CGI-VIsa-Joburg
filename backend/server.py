@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI):
         await db.command('ping')
         logger.info("MongoDB connection successful")
         
+        # Create database indexes for performance
+        from database import create_indexes
+        await create_indexes()
+        
         # Initialize super admin
         await init_super_admin()
         logger.info("Super admin initialization complete")
