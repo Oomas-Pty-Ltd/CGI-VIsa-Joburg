@@ -157,6 +157,23 @@ api_router.include_router(user_router)
 
 app.include_router(api_router)
 
+# HSTS Middleware for security
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class HSTSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        # Add HSTS header for HTTPS enforcement
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+        # Additional security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+app.add_middleware(HSTSMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
