@@ -4,6 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import accessibility styles */
+@import './styles/accessibility.css';
+
 body {
     margin: 0;
     font-family: 'Inter', sans-serif;
