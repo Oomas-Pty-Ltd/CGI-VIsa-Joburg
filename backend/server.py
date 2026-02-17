@@ -142,6 +142,8 @@ async def init_super_admin():
 async def root():
     return {"message": "Seva Setu Bot API", "status": "running"}
 
+from user_routes import router as user_router
+
 api_router.include_router(auth_router)
 api_router.include_router(super_admin_router)
 api_router.include_router(local_admin_router)
@@ -151,6 +153,7 @@ api_router.include_router(facebook_router)
 api_router.include_router(template_router)
 api_router.include_router(monitoring_router)
 api_router.include_router(admin_router)
+api_router.include_router(user_router)
 
 app.include_router(api_router)
 
