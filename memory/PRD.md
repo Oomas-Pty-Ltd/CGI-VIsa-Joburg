@@ -1,10 +1,67 @@
 # Seva Setu Bot - Product Requirements Document
 
-## Latest Updates (Feb 12, 2026)
+## Latest Updates (Feb 17, 2026)
 
-### ✅ Admin Dashboard & Mic/Camera Integration Complete:
+### ✅ Major Security & Functional Enhancement Complete:
 
-#### Admin Dashboard Fixes:
+#### 1. FUNCTIONAL ENHANCEMENTS:
+- ✅ File upload validation (MIME type + <10MB size check)
+- ✅ Document expiry logic with 3-month recheck schedule
+- ✅ Document encryption at rest (AES-256 via Fernet)
+- ✅ Notification service for status changes
+- ✅ Feedback storage with session ID in MongoDB
+- ✅ Knowledge base text search indexes
+- ✅ MongoDB indexes for all searchable fields
+
+#### 2. SECURITY HARDENING:
+- ✅ HSTS header (Strict-Transport-Security)
+- ✅ X-Content-Type-Options, X-Frame-Options, X-XSS-Protection headers
+- ✅ Comprehensive audit trail (user, action, timestamp, IP)
+- ✅ GDPR/POPIA/DPDA compliance endpoints (export/delete)
+- ✅ PII masking in audit logs
+- ✅ MongoDB connection pooling (50 max, 10 min)
+
+#### 3. WHATSAPP ENHANCEMENTS:
+- ✅ Emergency keyword rule engine (multi-language)
+- ✅ Session context storage (last 20 messages)
+- ✅ Conversation history attached to GPT prompt (last 5)
+- ✅ Media message handling preparation
+
+#### 4. VOICE SYSTEM UPGRADES:
+- ✅ Extended language support (22 Indian + 11 South African languages)
+- ✅ Audio chunking for files >60 seconds
+- ✅ Confidence scoring (<0.7 triggers confirmation)
+- ✅ Number/currency to spoken format conversion
+- ✅ Dynamic TTS voice selection by language
+- ✅ Audio normalization before transcription
+
+#### New Service Files Created:
+- `/app/backend/services/document_service.py` - Document management & encryption
+- `/app/backend/services/notification_service.py` - Multi-channel notifications
+- `/app/backend/services/audit_service.py` - Comprehensive audit logging
+- `/app/backend/services/feedback_service.py` - Feedback collection & analysis
+- `/app/backend/services/compliance_service.py` - GDPR export/delete
+- `/app/backend/services/whatsapp_rule_engine.py` - Emergency detection & routing
+- `/app/backend/user_routes.py` - User-facing API endpoints
+
+#### New API Endpoints:
+- `POST /api/user/feedback` - Submit feedback (no auth)
+- `GET /api/user/feedback/stats` - Feedback analytics (admin)
+- `GET /api/user/notifications` - User notifications
+- `GET/PUT /api/user/profile` - Profile management
+- `GET /api/user/data-summary` - GDPR data summary
+- `POST /api/user/data-export` - Request data export
+- `POST /api/user/data-delete` - Request data deletion
+- `GET /api/user/documents` - User's documents
+
+#### Pre-Production Checklist:
+- 📄 Created `/app/docs/PRE_PRODUCTION_CHECKLIST.md` with all open items
+
+---
+
+### Previous Updates (Feb 12, 2026)
+
+#### Admin Dashboard & Mic/Camera Integration:
 - ✅ Fixed blank Admin Dashboard page (localStorage key mismatch)
 - ✅ Corrected logout navigation to `/super-admin/login`
 - ✅ All 4 tabs working: Dashboard, Escalations, Knowledge Base, AI Observability
