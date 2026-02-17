@@ -1,6 +1,7 @@
 aiofiles==25.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.3
+aiohttp-retry==2.9.1
 aiosignal==1.4.0
 annotated-types==0.7.0
 anyio==4.12.1
@@ -86,12 +87,14 @@ presidio_anonymizer==2.2.360
 propcache==0.4.1
 proto-plus==1.27.0
 protobuf==5.29.5
+psutil==7.2.2
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycodestyle==2.14.0
 pycparser==2.23
 pydantic==2.12.5
 pydantic_core==2.41.5
+pydub==0.25.1
 pyflakes==3.4.0
 Pygments==2.19.2
 PyJWT==2.10.1
@@ -133,6 +136,7 @@ tiktoken==0.12.0
 tldextract==5.3.1
 tokenizers==0.22.2
 tqdm==4.67.1
+twilio==9.10.1
 typer==0.21.1
 typer-slim==0.21.1
 typing-inspection==0.4.2
@@ -148,6 +152,3 @@ websockets==15.0.1
 wrapt==2.0.1
 yarl==1.22.0
 zipp==3.23.0
-httpx==0.28.1
-psutil==7.2.2
-twilio==9.10.1
