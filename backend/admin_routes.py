@@ -398,3 +398,158 @@ async def get_admin_dashboard(payload: dict = Depends(verify_super_admin)):
             "db_connected": True
         }
     }
+
+
+
+# =====================================================================
+# ERROR REPORTING ENDPOINT
+# =====================================================================
+
+class ErrorReport(BaseModel):
+    error_type: str
+    error_message: str
+    stack_trace: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    severity: str = "medium"
+
+
+@router.post("/error-report")
+async def receive_error_report(report: ErrorReport):
+    """
+    Receive error reports from frontend for monitoring and alerting.
+    No auth required to ensure errors are always reported.
+    """
+    db = await get_database()
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Store error report
+    error_doc = {
+        "id": str(uuid.uuid4()),
+        "error_type": report.error_type,
+        "error_message": report.error_message,
+        "stack_trace": report.stack_trace,
+        "context": report.context or {},
+        "severity": report.severity,
+        "status": "new",
+        "created_at": now,
+        "acknowledged_at": None,
+        "resolved_at": None
+    }
+    
+    await db.error_reports.insert_one(error_doc)
+    
+    # For critical/high severity, notify admin via notification service
+    if report.severity in ["critical", "high"]:
+        from services.notification_service import notification_service, NotificationType, NotificationChannel, NotificationPriority
+        
+        # Find super admin to notify
+        super_admin = await db.users.find_one({"user_type": "super_admin"}, {"_id": 0, "id": 1})
+        if super_admin:
+            try:
+                await notification_service.create_notification(
+                    db=db,
+                    user_id=super_admin["id"],
+                    notification_type=NotificationType.SYSTEM_ALERT,
+                    channel=NotificationChannel.IN_APP,
+                    priority=NotificationPriority.URGENT if report.severity == "critical" else NotificationPriority.HIGH,
+                    data={
+                        "message": f"🚨 {report.severity.upper()} ERROR: {report.error_type}\n{report.error_message[:200]}"
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to send error notification: {e}")
+    
+    logger.warning(f"[ERROR_REPORT] {report.severity}: {report.error_type} - {report.error_message[:100]}")
+    
+    return {
+        "success": True,
+        "report_id": error_doc["id"],
+        "message": "Error report received"
+    }
+
+
+@router.get("/error-reports")
+async def get_error_reports(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 50,
+    payload: dict = Depends(verify_super_admin)
+):
+    """Get error reports (super admin only)"""
+    db = await get_database()
+    
+    query = {}
+    if status:
+        query["status"] = status
+    if severity:
+        query["severity"] = severity
+    
+    cursor = db.error_reports.find(
+        query,
+        {"_id": 0}
+    ).sort("created_at", -1).limit(limit)
+    
+    reports = await cursor.to_list(length=limit)
+    
+    # Get stats
+    total_new = await db.error_reports.count_documents({"status": "new"})
+    total_critical = await db.error_reports.count_documents({"severity": "critical", "status": "new"})
+    
+    return {
+        "reports": reports,
+        "stats": {
+            "total_new": total_new,
+            "critical_unresolved": total_critical
+        }
+    }
+
+
+@router.put("/error-reports/{report_id}/acknowledge")
+async def acknowledge_error_report(
+    report_id: str,
+    payload: dict = Depends(verify_super_admin)
+):
+    """Acknowledge an error report"""
+    db = await get_database()
+    
+    result = await db.error_reports.update_one(
+        {"id": report_id},
+        {
+            "$set": {
+                "status": "acknowledged",
+                "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+                "acknowledged_by": payload.get("user_id")
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    return {"success": True}
+
+
+@router.put("/error-reports/{report_id}/resolve")
+async def resolve_error_report(
+    report_id: str,
+    payload: dict = Depends(verify_super_admin)
+):
+    """Mark an error report as resolved"""
+    db = await get_database()
+    
+    result = await db.error_reports.update_one(
+        {"id": report_id},
+        {
+            "$set": {
+                "status": "resolved",
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+                "resolved_by": payload.get("user_id")
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    return {"success": True}
