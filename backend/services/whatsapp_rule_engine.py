@@ -114,7 +114,7 @@ class WhatsAppRuleEngine:
         """Check if message matches blocked patterns"""
         for pattern in self.blocked_patterns:
             if pattern.search(text):
-                logger.warning(f"[WHATSAPP] Blocked spam message matching pattern")
+                logger.warning("[WHATSAPP] Blocked spam message matching pattern")
                 return True
         return False
     
