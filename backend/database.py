@@ -98,7 +98,17 @@ async def create_indexes():
         await db.data_requests.create_index("id", unique=True)
         await db.data_requests.create_index("user_id")
         await db.data_requests.create_index([("user_id", 1), ("request_type", 1)])
-        
+
+        # Application tracking indexes
+        await db.applications.create_index("id", unique=True)
+        await db.applications.create_index("tracking_id", unique=True)
+        await db.applications.create_index("session_id")
+        await db.applications.create_index("user_id")
+        await db.applications.create_index("service")
+        await db.applications.create_index("status")
+        await db.applications.create_index([("user_id", 1), ("created_at", -1)])
+        await db.applications.create_index([("status", 1), ("created_at", -1)])
+
         logger.info("Database indexes created successfully")
         
     except Exception as e:

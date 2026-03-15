@@ -9,7 +9,7 @@ from database import get_database
 from auth_utils import verify_token
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from presidio_service import mask_pii
-from knowledge_scraper import get_realtime_knowledge, search_knowledge
+from knowledge_scraper import get_realtime_knowledge, search_knowledge, extract_service_content
 from voice_service import voice_service
 from dotenv import load_dotenv
 
@@ -33,6 +33,7 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
+from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, get_flow_state
 
 load_dotenv()
 
@@ -151,10 +152,9 @@ async def chat(request: ChatRequest, http_request: Request):
         )
     
     # Fall through to LLM for complex queries
-    # Allow guest access without token verification for consular bot
-    user_id = request.user_id or "guest"
+    user_id    = request.user_id or "guest"
     company_id = request.company_id
-    
+
     # Use secure session management
     session = await session_manager.get_or_create_session(
         channel="web",
@@ -163,84 +163,139 @@ async def chat(request: ChatRequest, http_request: Request):
         metadata={"company_id": company_id, "language": request.language}
     )
     session_id = session['id']
-    
-    llm_model = "gpt-5.2"
+
+    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     if company_id:
         company = await db.companies.find_one({"id": company_id}, {"_id": 0})
         if company:
-            llm_model = company.get('llm_model', 'gpt-5.2')
-    
-    # Get real-time knowledge base from official sources
-    knowledge_base = await get_realtime_knowledge()
-    context_info = search_knowledge(sanitized_message, knowledge_base)
-    
-    # Build system prompt with live scraped context
-    _base_system_message = f"""You are Seva Setu Bot, a helpful consular assistant for the Consulate General of India, Johannesburg.
+            llm_model = company.get('llm_model', llm_model)
 
-LANGUAGE INSTRUCTIONS:
-- Always respond in the EXACT same language and script the user writes in.
-- Hindi → Devanagari script. Tamil → Tamil script. English → English. Never romanize native scripts.
+    # ── Pre-fetch scrape + current flow state ─────────────────────────
+    knowledge_base = await get_realtime_knowledge()
+    context_info   = search_knowledge(sanitized_message, knowledge_base)
+
+    current_flow   = await get_flow_state(session_id)
+    current_state  = current_flow.get("state", "idle")
+
+    # ── If in docs_uploading and an image was sent, scan it first ─────
+    image_doc_data: dict | None = None
+    if current_state == "docs_uploading" and request.image_base64:
+        try:
+            api_key = os.environ.get('EMERGENT_LLM_KEY')
+            scan_chat = LlmChat(
+                api_key=api_key,
+                session_id=str(uuid.uuid4()),
+                system_message=(
+                    "You are a document OCR assistant. Extract all visible text and fields from "
+                    "the document image. Return a JSON object with keys: "
+                    "full_name, dob, document_number, nationality, issue_date, expiry_date, address. "
+                    "Use null for missing fields. Output ONLY valid JSON."
+                )
+            ).with_model("openai", llm_model)
+            raw = await scan_chat.send_message(
+                UserMessage(
+                    text="Extract all fields from this document.",
+                    file_contents=[ImageContent(image_base64=request.image_base64)]
+                )
+            )
+            import json as _json
+            try:
+                image_doc_data = _json.loads(raw)
+            except Exception:
+                image_doc_data = {"raw": raw}
+            image_doc_data["filename"] = "uploaded_doc"
+        except Exception as e:
+            logger.warning(f"Doc scan failed during upload: {sanitize_logs(str(e))}")
+
+    # ── Build service-specific scraped summary ─────────────────────────
+    scraped_summary = ""
+    active_service = detect_service(sanitized_message) or current_flow.get("service")
+    if active_service:
+        scraped_summary = extract_service_content(active_service, knowledge_base)
+
+    # ── Application flow state machine ────────────────────────────────
+    flow_response, needs_llm, current_step = await process_flow(
+        session_id, sanitized_message,
+        has_image=bool(request.image_base64),
+        image_doc_data=image_doc_data,
+        user_id=user_id,
+        scraped_summary=scraped_summary,
+    )
+
+    if flow_response is not None and not needs_llm:
+        # Pure state-machine response — no LLM needed
+        bot_response = flow_response
+    else:
+        # LLM needed (info query, question during pause, etc.)
+
+        # Detect service for info context
+        detected_svc = detect_service(sanitized_message)
+        svc_docs_hint = ""
+        if detected_svc and detected_svc in SERVICES:
+            svc = SERVICES[detected_svc]
+            docs = "\n".join(f"  • {d}" for d in svc["documents"])
+            svc_docs_hint = (
+                f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
+            )
+
+        _base_system_message = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+
+LANGUAGE: Always respond in English only, regardless of what language the user writes in.
 
 RESPONSE STYLE:
-- Respond naturally and conversationally — no rigid templates.
-- Do NOT echo or repeat the user's question.
+- Be concise, accurate, and helpful.
+- Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
 - Use bullet points only when listing multiple items.
-- Keep answers concise and accurate.
-
-INFORMATION SOURCES:
-The following data is scraped live from both official websites. Use it to answer the user's question.
-
+- Do NOT repeat information already shown in the conversation.
+{svc_docs_hint}
+OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
 {context_info}
 
-FALLBACK RULE (IMPORTANT):
-- If the scraped website content does not contain enough information to answer the user's question, say so briefly and ALWAYS provide the contact details below so the user can get help directly:
+FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
+  📞 +27 6830 38144  |  📧 cons.joburg@mea.gov.in
+  🏢 1st Floor, Cedar Square, Fourways, Johannesburg 2055
+  🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
+  VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
 
-  📞 Phone: +27 6830 38144
-  📧 Email: cons.joburg@mea.gov.in
-  🏢 Address: Consulate General of India, 1st Floor, Cedar Square, Corner Willow Ave & Cedar Road, Fourways, Johannesburg 2055
-  🕐 Hours: Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
-  🌐 Website: https://www.cgijoburg.gov.in
-
-  VFS Global (visa & passport submissions):
-  📍 VFS Global Visa Application Centre, Johannesburg
-  🕐 Mon–Fri 08:00–15:00 (appointment mandatory)
-  🌐 https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"""
-    
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
-    chat_instance = LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message=_base_system_message
-    ).with_model("openai", llm_model)
-    
-    user_msg_content = []
-    if request.image_base64:
-        image_content = ImageContent(image_base64=request.image_base64)
-        user_msg_content.append(image_content)
-    
-    user_message = UserMessage(
-        text=sanitized_message,  # Use sanitized message
-        file_contents=user_msg_content if user_msg_content else None
-    )
-    
-    try:
-        bot_response = await chat_instance.send_message(user_message)
-        
-        # Track token usage and costs
-        await record_llm_usage(
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        chat_instance = LlmChat(
+            api_key=api_key,
             session_id=session_id,
-            input_text=sanitized_message,
-            output_text=bot_response,
-            model=llm_model
+            system_message=_base_system_message
+        ).with_model("openai", llm_model)
+
+        user_msg_content = []
+        if request.image_base64:
+            user_msg_content.append(ImageContent(image_base64=request.image_base64))
+
+        user_message = UserMessage(
+            text=sanitized_message,
+            file_contents=user_msg_content if user_msg_content else None
         )
-        
-    except Exception as e:
-        logger.error(f"AI service error: {sanitize_logs(str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"AI service error: {str(e)}"
-        )
+
+        try:
+            bot_response = await chat_instance.send_message(user_message)
+            await record_llm_usage(
+                session_id=session_id,
+                input_text=sanitized_message,
+                output_text=bot_response,
+                model=llm_model
+            )
+        except Exception as e:
+            logger.error(f"AI service error: {sanitize_logs(str(e))}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"AI service error: {str(e)}"
+            )
+
+        # Append flow guidance suffix (e.g. "apply to start" or "continue/discard")
+        # Reload session to get latest flow state (updated by process_flow)
+        updated_session = await session_manager.get_session(session_id)
+        flow_service = (updated_session or session).get("flow", {}).get("service") or detect_service(sanitized_message)
+        suffix = flow_suffix(current_step, flow_service)
+        if suffix:
+            bot_response += suffix
     
     # Generate voice response if requested
     audio_base64 = None
@@ -266,8 +321,6 @@ FALLBACK RULE (IMPORTANT):
         content=bot_response,
         metadata={"has_audio": audio_base64 is not None}
     )
-    
-    current_step = session.get('step', 'register')
     
     return ChatResponse(
         session_id=session_id,
@@ -315,7 +368,7 @@ OUTPUT FORMAT (MUST be valid JSON):
 }}
 
 Be accurate and thorough."""
-    ).with_model("openai", "gpt-5.2")
+    ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
     image_content = ImageContent(image_base64=request.image_base64)
     user_message = UserMessage(
@@ -496,7 +549,7 @@ RESPONSE LENGTH GUIDE:
 - Process question (how to apply?) → Numbered steps, brief
 - Document question (what documents?) → Bullet list only
 
-LANGUAGE: Match the user's language. Hindi → Hindi, English → English.
+LANGUAGE: Always respond in English only.
 
 EXAMPLE GOOD RESPONSES:
 
@@ -524,7 +577,7 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
         api_key=api_key,
         session_id=session_id,
         system_message=_base_system_message
-    ).with_model("openai", "gpt-5.2")
+    ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
     user_message = UserMessage(text=sanitized_message)
     
@@ -545,3 +598,72 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
         session_id=session_id,
         response=bot_response
     )
+
+
+# =====================================================================
+# APPLICATION TRACKING ENDPOINTS
+# =====================================================================
+
+class ApplicationStatusResponse(BaseModel):
+    tracking_id: str
+    service: str
+    service_name: str
+    status: str
+    form_data: Dict[str, Any]
+    documents: List[Dict[str, Any]]
+    required_documents: List[str]
+    created_at: str
+    updated_at: str
+    submitted_at: Optional[str] = None
+
+
+@router.get("/application/{tracking_id}", response_model=ApplicationStatusResponse)
+async def get_application_status(tracking_id: str):
+    """Check the status of an application by tracking ID."""
+    db = await get_database()
+    app = await db.applications.find_one(
+        {"tracking_id": tracking_id.upper()}, {"_id": 0}
+    )
+    if not app:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application {tracking_id} not found."
+        )
+    return ApplicationStatusResponse(
+        tracking_id=app["tracking_id"],
+        service=app["service"],
+        service_name=app["service_name"],
+        status=app["status"],
+        form_data=app.get("form_data", {}),
+        documents=app.get("documents", []),
+        required_documents=app.get("required_documents", []),
+        created_at=app["created_at"],
+        updated_at=app["updated_at"],
+        submitted_at=app.get("submitted_at"),
+    )
+
+
+@router.get("/applications/session/{session_id}")
+async def get_session_applications(session_id: str):
+    """List all applications linked to a session."""
+    db = await get_database()
+    cursor = db.applications.find({"session_id": session_id}, {"_id": 0})
+    apps = await cursor.to_list(length=20)
+    return {
+        "session_id": session_id,
+        "total": len(apps),
+        "applications": [
+            {
+                "tracking_id":  a["tracking_id"],
+                "service_name": a["service_name"],
+                "status":       a["status"],
+                "created_at":   a["created_at"],
+                "submitted_at": a.get("submitted_at"),
+                "documents_uploaded": sum(
+                    1 for d in a.get("documents", []) if d.get("status") == "uploaded"
+                ),
+                "documents_required": len(a.get("required_documents", [])),
+            }
+            for a in apps
+        ],
+    }

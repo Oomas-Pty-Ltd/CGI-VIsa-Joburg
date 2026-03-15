@@ -34,14 +34,14 @@ async def _fetch_with_retry(url: str, retries: int = 2) -> Optional[str]:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; SevaSetuBot/1.0)"}
     for attempt in range(retries):
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False) as client:
                 response = await client.get(url, headers=headers)
                 if response.status_code == 200:
                     return response.text
                 raise Exception(f"HTTP {response.status_code}")
         except Exception as e:
             if attempt < retries - 1:
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
             else:
                 raise
 
@@ -88,8 +88,21 @@ async def scrape_vfs_global() -> Dict:
         await send_exception_email("VFS Global Scraping Failed", str(e))
         return {"source": "VFS Global", "status": "failed", "page_content": "", **CONTACT_FALLBACK}
 
+_knowledge_cache: Optional[Dict] = None
+_knowledge_cache_time: Optional[datetime] = None
+_CACHE_TTL_SECONDS = 1800  # 30 minutes
+
 async def get_realtime_knowledge() -> Dict:
-    """Fetch real-time information from both official websites concurrently with retry."""
+    """Fetch real-time information from both official websites concurrently with retry.
+    Results are cached for 30 minutes to avoid scraping on every message."""
+    global _knowledge_cache, _knowledge_cache_time
+
+    now = datetime.now(timezone.utc)
+    if _knowledge_cache is not None and _knowledge_cache_time is not None:
+        age = (now - _knowledge_cache_time).total_seconds()
+        if age < _CACHE_TTL_SECONDS:
+            return _knowledge_cache
+
     try:
         cgi_data, vfs_data = await asyncio.gather(
             scrape_cgi_joburg(),
@@ -110,9 +123,13 @@ async def get_realtime_knowledge() -> Dict:
         }
 
         await log_knowledge_changes(combined_data)
+        _knowledge_cache = combined_data
+        _knowledge_cache_time = now
         return combined_data
     except Exception as e:
         await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
+        if _knowledge_cache is not None:
+            return _knowledge_cache  # serve stale cache on error
         return get_fallback_knowledge()
 
 async def log_knowledge_changes(new_data: Dict):
@@ -270,6 +287,50 @@ def get_fallback_vfs_info() -> Dict:
             "timings": "Monday-Friday: 08:00-15:00"
         }
     }
+
+_SERVICE_KEYWORDS = {
+    "visa":     ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline"],
+    "passport": ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document"],
+    "oci":      ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin"],
+    "pcc":      ["pcc", "police clearance", "clearance certificate", "criminal record"],
+}
+
+
+def extract_service_content(service_key: str, knowledge_base: Dict) -> str:
+    """Return service-specific lines extracted from scraped website content.
+    Falls back to structured data from the fallback knowledge base."""
+    kws = _SERVICE_KEYWORDS.get(service_key, [])
+
+    # Try live scraped pages first
+    cgi_content = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
+    vfs_content = knowledge_base.get("vfs_global", {}).get("page_content", "")
+
+    parts = []
+    for source, content in [("CGI Johannesburg website", cgi_content), ("VFS Global website", vfs_content)]:
+        if not content:
+            continue
+        lines = [l.strip() for l in content.split("\n") if l.strip()]
+        relevant = [l for l in lines if any(k in l.lower() for k in kws)]
+        if relevant:
+            parts.append(f"From {source}:\n" + "\n".join(relevant[:12]))
+
+    if parts:
+        return "\n\n".join(parts)
+
+    # Websites blocked — use fallback structured data
+    fallback = get_fallback_knowledge()
+    svc_data = fallback.get("services", {}).get(service_key)
+    if not svc_data:
+        return ""
+
+    lines = []
+    for k, v in svc_data.items():
+        if isinstance(v, list):
+            lines.append(f"{k.replace('_', ' ').title()}: " + ", ".join(v))
+        else:
+            lines.append(f"{k.replace('_', ' ').title()}: {v}")
+    return "From official knowledge base (live websites temporarily unavailable):\n" + "\n".join(lines)
+
 
 def search_knowledge(query: str, knowledge_base: Dict) -> str:
     """Return all scraped website content plus contact info as context for the LLM."""
