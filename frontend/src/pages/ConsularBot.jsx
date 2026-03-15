@@ -56,13 +56,14 @@ export default function ConsularBot() {
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "instant" });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Use instant scroll during typing to keep up with content growth
+    scrollToBottom(!isTyping);
+  }, [messages, isTyping]);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -103,6 +104,13 @@ export default function ConsularBot() {
 
   const handleSend = async () => {
     if (!input.trim()) return;
+
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsSpeaking(false);
+    }
 
     const userMessage = { role: "user", content: input };
     setMessages((prev) => [...prev, userMessage]);

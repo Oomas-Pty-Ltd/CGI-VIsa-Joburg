@@ -17,116 +17,90 @@ OFFICIAL_SOURCES = [
 
 EXCEPTION_EMAIL = "mayurakole@example.com"
 
-async def scrape_cgi_joburg() -> Dict:
-    """Real-time scraping of Consulate General of India Johannesburg website"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
-            response = await client.get("https://www.cgijoburg.gov.in/")
-            
-            if response.status_code != 200:
+CONTACT_FALLBACK = {
+    "emergency_contact": "+27 6830 38144",
+    "email": "cons.joburg@mea.gov.in",
+    "address": "Consulate General of India, 1st Floor, Cedar Square, Corner Willow Ave & Cedar Road, Fourways, Johannesburg 2055",
+    "website": "https://www.cgijoburg.gov.in",
+    "vfs_address": "VFS Global Visa Application Centre, Johannesburg",
+    "vfs_website": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
+    "office_hours": "Monday–Friday: 09:00–17:00 | Consular services: 09:00–12:00 (by appointment)",
+    "vfs_hours": "Monday–Friday: 08:00–15:00 (appointment mandatory)",
+}
+
+
+async def _fetch_with_retry(url: str, retries: int = 2) -> Optional[str]:
+    """Fetch a URL, retrying once on failure. Returns HTML text or None."""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; SevaSetuBot/1.0)"}
+    for attempt in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    return response.text
                 raise Exception(f"HTTP {response.status_code}")
-            
-            # Return structured data even if we can't parse HTML perfectly
-            data = {
-                "source": "cgijoburg.gov.in",
-                "scraped_at": datetime.now(timezone.utc).isoformat(),
-                "status": "live_scraped",
-                "emergency_contact": "+27 6830 38144",
-                "email": "cons.joburg@mea.gov.in",
-                "website": "https://www.cgijoburg.gov.in",
-                "services": {
-                    "passport": {
-                        "info": "Apply online at passportindia.gov.in, submit at VFS Johannesburg",
-                        "validity": "10 years for adults, 5 years for minors",
-                        "fees": "Check current fees at official website",
-                        "process": "Online application → Document submission at VFS → Processing"
-                    },
-                    "visa": {
-                        "info": "Apply through VFS Global Johannesburg",
-                        "types": ["Tourist Visa", "Business Visa", "Medical Visa", "e-Visa"],
-                        "processing_time": "7-10 working days (standard)"
-                    },
-                    "oci": {
-                        "info": "Overseas Citizen of India registration",
-                        "eligibility": "Person of Indian Origin, spouse of Indian citizen",
-                        "validity": "Lifelong (re-issue at age 20 and 50)"
-                    },
-                    "consular_services": {
-                        "attestation": "Document attestation available",
-                        "birth_death_registration": "Register births and deaths",
-                        "police_clearance": "PCC available for residents"
-                    }
-                },
-                "office_hours": {
-                    "monday_friday": "09:00 - 17:00",
-                    "consular_services": "09:00 - 12:00 (by appointment)"
-                }
-            }
-            return data
-            
+        except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(2)
+            else:
+                raise
+
+
+async def scrape_cgi_joburg() -> Dict:
+    """Scrape Consulate General of India Johannesburg website with retry."""
+    try:
+        html = await _fetch_with_retry("https://www.cgijoburg.gov.in/")
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Extract visible text paragraphs
+        texts = [p.get_text(separator=" ", strip=True) for p in soup.find_all(["p", "li", "h1", "h2", "h3"]) if p.get_text(strip=True)]
+        page_content = "\n".join(texts[:80])  # limit to first 80 elements
+
+        return {
+            "source": "cgijoburg.gov.in",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "live_scraped",
+            "page_content": page_content,
+            **CONTACT_FALLBACK,
+        }
     except Exception as e:
         await send_exception_email("CGI Joburg Scraping Failed", str(e))
-        return get_fallback_knowledge()
+        return {"source": "cgijoburg.gov.in", "status": "failed", "page_content": "", **CONTACT_FALLBACK}
+
 
 async def scrape_vfs_global() -> Dict:
-    """Real-time scraping of VFS Global website"""
+    """Scrape VFS Global website with retry."""
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, verify=False) as client:
-            response = await client.get("https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/")
-            
-            if response.status_code != 200:
-                raise Exception(f"HTTP {response.status_code}")
-            
-            data = {
-                "source": "VFS Global",
-                "scraped_at": datetime.now(timezone.utc).isoformat(),
-                "status": "live_scraped",
-                "location": {
-                    "name": "VFS Global Visa Application Centre",
-                    "city": "Johannesburg",
-                    "country": "South Africa",
-                    "timings": "Monday-Friday: 08:00-15:00",
-                    "appointment": "Mandatory - Book online at visa.vfsglobal.com",
-                    "website": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"
-                },
-                "services": {
-                    "visa_processing": {
-                        "standard": "7-10 working days",
-                        "tatkal": "3-5 working days (additional fee)"
-                    },
-                    "document_submission": "By appointment only",
-                    "passport_services": "Available",
-                    "tracking": "Available online with reference number",
-                    "payment": "Cash and card accepted"
-                },
-                "important_notes": [
-                    "Appointment required for all services",
-                    "Carry original documents and copies",
-                    "Arrive 15 minutes before appointment",
-                    "Mobile phones not allowed inside"
-                ]
-            }
-            return data
-            
+        html = await _fetch_with_retry("https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/")
+        soup = BeautifulSoup(html, "html.parser")
+
+        texts = [p.get_text(separator=" ", strip=True) for p in soup.find_all(["p", "li", "h1", "h2", "h3"]) if p.get_text(strip=True)]
+        page_content = "\n".join(texts[:80])
+
+        return {
+            "source": "VFS Global",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "live_scraped",
+            "page_content": page_content,
+            **CONTACT_FALLBACK,
+        }
     except Exception as e:
         await send_exception_email("VFS Global Scraping Failed", str(e))
-        return get_fallback_vfs_info()
+        return {"source": "VFS Global", "status": "failed", "page_content": "", **CONTACT_FALLBACK}
 
 async def get_realtime_knowledge() -> Dict:
-    """Fetch real-time information from official websites"""
+    """Fetch real-time information from both official websites concurrently with retry."""
     try:
-        # Scrape both sources concurrently
         cgi_data, vfs_data = await asyncio.gather(
             scrape_cgi_joburg(),
             scrape_vfs_global()
         )
-        
+
         combined_data = {
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "cgi_joburg": cgi_data,
             "vfs_global": vfs_data,
-            "emergency_contact": "+27 6830 38144",
-            "email": "cons.joburg@mea.gov.in",
+            **CONTACT_FALLBACK,
             "official_links": {
                 "consulate": "https://www.cgijoburg.gov.in/",
                 "vfs": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
@@ -134,10 +108,8 @@ async def get_realtime_knowledge() -> Dict:
                 "e_visa": "https://indianvisaonline.gov.in/"
             }
         }
-        
-        # Log changes
+
         await log_knowledge_changes(combined_data)
-        
         return combined_data
     except Exception as e:
         await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
@@ -300,27 +272,38 @@ def get_fallback_vfs_info() -> Dict:
     }
 
 def search_knowledge(query: str, knowledge_base: Dict) -> str:
-    """Search knowledge base for relevant information"""
-    query_lower = query.lower()
-    
-    # Passport queries
-    if any(word in query_lower for word in ['passport', 'पासपोर्ट', 'paspoort']):
-        return json.dumps(knowledge_base.get('services', {}).get('passport', {}), indent=2)
-    
-    # Visa queries
-    if any(word in query_lower for word in ['visa', 'वीजा', 'visum']):
-        return json.dumps(knowledge_base.get('services', {}).get('visa', {}), indent=2)
-    
-    # OCI queries
-    if any(word in query_lower for word in ['oci', 'overseas citizen']):
-        return json.dumps(knowledge_base.get('services', {}).get('oci', {}), indent=2)
-    
-    # Contact/emergency
-    if any(word in query_lower for word in ['contact', 'emergency', 'phone', 'संपर्क']):
-        return f"Emergency: {knowledge_base.get('emergency_contact')}\nEmail: {knowledge_base.get('email')}"
-    
-    # VFS location
-    if any(word in query_lower for word in ['vfs', 'location', 'address', 'कहां']):
-        return json.dumps(knowledge_base.get('vfs_locations', {}), indent=2)
-    
-    return None
+    """Return all scraped website content plus contact info as context for the LLM."""
+    cgi = knowledge_base.get("cgi_joburg", {})
+    vfs = knowledge_base.get("vfs_global", {})
+
+    cgi_content = cgi.get("page_content", "").strip()
+    vfs_content = vfs.get("page_content", "").strip()
+
+    cgi_status = cgi.get("status", "unknown")
+    vfs_status = vfs.get("status", "unknown")
+
+    contact_block = f"""
+CONTACT & ADDRESS (always show if information not found):
+- Phone: {CONTACT_FALLBACK['emergency_contact']}
+- Email: {CONTACT_FALLBACK['email']}
+- Address: {CONTACT_FALLBACK['address']}
+- Office hours: {CONTACT_FALLBACK['office_hours']}
+- VFS address: {CONTACT_FALLBACK['vfs_address']}
+- VFS hours: {CONTACT_FALLBACK['vfs_hours']}
+- Website: {CONTACT_FALLBACK['website']}
+- VFS website: {CONTACT_FALLBACK['vfs_website']}
+""".strip()
+
+    sections = [contact_block]
+
+    if cgi_content:
+        sections.append(f"=== CGI JOHANNESBURG WEBSITE (live) ===\n{cgi_content}")
+    else:
+        sections.append(f"=== CGI JOHANNESBURG WEBSITE: scraping failed ({cgi_status}) ===")
+
+    if vfs_content:
+        sections.append(f"=== VFS GLOBAL WEBSITE (live) ===\n{vfs_content}")
+    else:
+        sections.append(f"=== VFS GLOBAL WEBSITE: scraping failed ({vfs_status}) ===")
+
+    return "\n\n".join(sections)

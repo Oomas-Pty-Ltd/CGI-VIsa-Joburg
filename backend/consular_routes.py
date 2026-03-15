@@ -82,13 +82,8 @@ async def chat(request: ChatRequest, http_request: Request):
             step="error"
         )
     
-    # Mask PII in input
-    input_result = guardrail_service.validate_input(request.message)
-    sanitized_message = input_result.sanitized_text
-    
-    if input_result.pii_detected:
-        logger.info(f"[GUARDRAIL] PII detected in input and masked: {input_result.pii_detected}")
-    
+    sanitized_message = request.message
+
     # Intent classification - try rule-based first
     intent_result = classify_intent(sanitized_message)
     logger.info(f"[INTENT] Category: {intent_result.category.value}, Confidence: {intent_result.confidence:.2f}, Requires LLM: {intent_result.requires_llm}")
@@ -179,77 +174,44 @@ async def chat(request: ChatRequest, http_request: Request):
     knowledge_base = await get_realtime_knowledge()
     context_info = search_knowledge(sanitized_message, knowledge_base)
     
-    # Build enhanced prompt with official source context (BASE PROMPT)
-    _base_system_message = f"""You are Seva Setu Bot, an ADVANCED AI-powered consular assistant with learning and analytical capabilities.
+    # Build system prompt with live scraped context
+    _base_system_message = f"""You are Seva Setu Bot, a helpful consular assistant for the Consulate General of India, Johannesburg.
 
-CORE CAPABILITIES:
-1. **Real-time Learning**: Analyze user patterns and adapt responses
-2. **Context Awareness**: Remember conversation history and user preferences
-3. **Intelligent Analysis**: Use AI to provide personalized recommendations
-4. **Multi-modal Processing**: Handle text, images, and documents intelligently
+LANGUAGE INSTRUCTIONS:
+- Always respond in the EXACT same language and script the user writes in.
+- Hindi → Devanagari script. Tamil → Tamil script. English → English. Never romanize native scripts.
 
-RESPONSE FORMAT - ALWAYS USE MARKDOWN:
-- Use **bold** for important points
-- Use bullet points (•) for lists
-- Use numbered lists (1., 2., 3.) for steps
-- Use --- for section breaks
-- Use > for important quotes/notices
-- Use proper spacing and line breaks
+RESPONSE STYLE:
+- Respond naturally and conversationally — no rigid templates.
+- Do NOT echo or repeat the user's question.
+- Do NOT add feedback/rating prompts or sign-off phrases.
+- Use bullet points only when listing multiple items.
+- Keep answers concise and accurate.
 
-CRITICAL LANGUAGE INSTRUCTIONS:
-1. ALWAYS respond in the EXACT SAME LANGUAGE and SCRIPT the user writes in
-2. Hindi (मुझे) → Respond in Devanagari script (मैं आपकी मदद...)
-3. Tamil (நான்) → Respond in Tamil script (நான் உங்களுக்கு...)
-4. English → Respond in English
-5. NEVER romanize native scripts
+INFORMATION SOURCES:
+The following data is scraped live from both official websites. Use it to answer the user's question.
 
-INTELLIGENT RESPONSE STRUCTURE:
-```
-**[Personalized Greeting]**
+{context_info}
 
-**Your Query:** [Summarize user's request]
+FALLBACK RULE (IMPORTANT):
+- If the scraped website content does not contain enough information to answer the user's question, say so briefly and ALWAYS provide the contact details below so the user can get help directly:
 
-**Here's what I found for you:**
+  📞 Phone: +27 6830 38144
+  📧 Email: cons.joburg@mea.gov.in
+  🏢 Address: Consulate General of India, 1st Floor, Cedar Square, Corner Willow Ave & Cedar Road, Fourways, Johannesburg 2055
+  🕐 Hours: Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
+  🌐 Website: https://www.cgijoburg.gov.in
 
-1. **[Main Point]**
-   • Detail 1
-   • Detail 2
-   
-2. **[Second Point]**
-   • Detail 1
-   • Detail 2
-
----
-
-**📞 Official Contact:**
-• Emergency: +27 6830 38144
-• Email: cons.joburg@mea.gov.in
-
----
-
-**🤔 Did I help you?**
-Please rate my response and share feedback for continuous improvement.
-```
-
-REAL-TIME OFFICIAL DATA (LIVE SCRAPED):
-{context_info if context_info else 'Accessing live data from official sources...'}
-
-LEARNING & ANALYSIS:
-- Track user's language preference
-- Note frequent queries
-- Adapt response complexity to user level
-- Provide proactive suggestions based on query patterns
-
-Always cite sources, use proper formatting, and ask for feedback."""
-    
-    # Apply security hardening to system prompt
-    system_message = create_safe_system_prompt(_base_system_message)
+  VFS Global (visa & passport submissions):
+  📍 VFS Global Visa Application Centre, Johannesburg
+  🕐 Mon–Fri 08:00–15:00 (appointment mandatory)
+  🌐 https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"""
     
     api_key = os.environ.get('EMERGENT_LLM_KEY')
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=session_id,
-        system_message=system_message
+        system_message=_base_system_message
     ).with_model("openai", llm_model)
     
     user_msg_content = []
@@ -280,15 +242,6 @@ Always cite sources, use proper formatting, and ask for feedback."""
             detail=f"AI service error: {str(e)}"
         )
     
-    # Validate and sanitize output
-    output_result = guardrail_service.validate_output(bot_response)
-    bot_response = output_result.sanitized_text
-    
-    if output_result.pii_detected:
-        logger.warning(f"[GUARDRAIL] PII detected in output, masked: {output_result.pii_detected}")
-    if output_result.unsafe_patterns:
-        logger.warning(f"[GUARDRAIL] Unsafe patterns detected, disclaimers added: {output_result.unsafe_patterns}")
-    
     # Generate voice response if requested
     audio_base64 = None
     if request.enable_voice:
@@ -311,10 +264,7 @@ Always cite sources, use proper formatting, and ask for feedback."""
         session_id=session_id,
         role="assistant", 
         content=bot_response,
-        metadata={
-            "has_audio": audio_base64 is not None,
-            "guardrail_flags": output_result.unsafe_patterns
-        }
+        metadata={"has_audio": audio_base64 is not None}
     )
     
     current_step = session.get('step', 'register')
@@ -518,10 +468,8 @@ async def chat_widget(request: WidgetChatRequest):
             response="I cannot process that request. Please ask about consular services."
         )
     
-    # Mask PII in input
-    input_result = guardrail_service.validate_input(request.message)
-    sanitized_message = input_result.sanitized_text
-    
+    sanitized_message = request.message
+
     # Use secure session management for widgets
     session = await session_manager.get_or_create_session(
         channel="widget",
@@ -571,14 +519,11 @@ Closed on Indian & SA public holidays"
 
 NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
     
-    # Apply security hardening
-    system_message = create_safe_system_prompt(_base_system_message)
-    
     api_key = os.environ.get('EMERGENT_LLM_KEY')
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=session_id,
-        system_message=system_message
+        system_message=_base_system_message
     ).with_model("openai", "gpt-5.2")
     
     user_message = UserMessage(text=sanitized_message)
@@ -592,14 +537,9 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
             detail=f"Service error: {str(e)}"
         )
     
-    # Validate and sanitize output
-    output_result = guardrail_service.validate_output(bot_response)
-    bot_response = output_result.sanitized_text
-    
     # Store messages using session manager
     await session_manager.add_message(session_id, "user", request.message)
-    await session_manager.add_message(session_id, "assistant", bot_response, 
-                                       metadata={"guardrail_flags": output_result.unsafe_patterns})
+    await session_manager.add_message(session_id, "assistant", bot_response)
     
     return WidgetChatResponse(
         session_id=session_id,
