@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -32,75 +32,95 @@ const LANGUAGES = [
   { code: "af", name: "Afrikaans", flag: "🇿🇦" }
 ];
 
+const SESSION_STORAGE_KEY = "sevaSetu_sessionId";
+
 export default function ConsularBot() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState(null);
-  const [currentStep, setCurrentStep] = useState("register");
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_STORAGE_KEY));
+  const [currentStep, setCurrentStep] = useState("greeting");
   const [isRecording, setIsRecording] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [enableVoice, setEnableVoice] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
-  const typingIntervalRef = useRef(null);
-  const typingStoppedRef = useRef(false);
   const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
-  
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const audioRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const chatScrollRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const enableVoiceRef = useRef(true); // live ref — avoids stale closure in async callbacks
 
-  // Scroll the chat container directly to avoid page-level scroll jitter
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      if (chatScrollRef.current) {
-        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-      }
-    });
-  }, []);
+  // Auto-scroll: directly set scrollTop so it tracks every typing tick instantly
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  useEffect(() => {
-    if (!isTyping) scrollToBottom();
-  }, [isTyping]);
+  const buildAdvisories = () =>
+    ADVISORY_MESSAGES.filter(a => a.active).map(a => ({
+      role: "advisory", type: a.type, title: a.title, content: a.content
+    }));
+
+  const initNewSession = async (lang = "en") => {
+    try {
+      const res = await axios.post(`${API}/consular/chat/init`, { language: lang });
+      const { session_id, greeting, step } = res.data;
+      localStorage.setItem(SESSION_STORAGE_KEY, session_id);
+      setSessionId(session_id);
+      setCurrentStep(step || "consent");
+      setMessages([{ role: "assistant", content: greeting }, ...buildAdvisories()]);
+    } catch {
+      // Fallback static greeting if backend unreachable
+      setMessages([{ role: "assistant", content: GREETING_MESSAGE }, ...buildAdvisories()]);
+    }
+  };
+
+  const loadHistory = async (sid) => {
+    try {
+      const res = await axios.get(`${API}/consular/history/${sid}`);
+      const { found, messages: hist, step } = res.data;
+      if (!found || !hist || hist.length === 0) {
+        // Session expired or not found — start fresh
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        setSessionId(null);
+        await initNewSession(selectedLanguage);
+        return;
+      }
+      const restored = hist.map(m => ({ role: m.role, content: m.content }));
+      // Inject advisories after the first bot message
+      const first = restored.slice(0, 1);
+      const rest = restored.slice(1);
+      setMessages([...first, ...buildAdvisories(), ...rest]);
+      setCurrentStep(step || "consent");
+    } catch {
+      await initNewSession(selectedLanguage);
+    }
+  };
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      const guestToken = "guest_" + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem("token", guestToken);
+    if (!localStorage.getItem("token")) {
+      localStorage.setItem("token", "guest_" + Math.random().toString(36).substring(2, 11));
     }
-    
-    // Build initial messages array with greeting and active advisories
-    const initialMessages = [
-      {
-        role: "assistant",
-        content: GREETING_MESSAGE
-      }
-    ];
-    
-    // Add active advisory messages
-    ADVISORY_MESSAGES.filter(adv => adv.active).forEach(advisory => {
-      initialMessages.push({
-        role: "advisory",
-        type: advisory.type,
-        title: advisory.title,
-        content: advisory.content
-      });
-    });
-    
-    setMessages(initialMessages);
+    const saved = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (saved) {
+      loadHistory(saved);
+    } else {
+      initNewSession(selectedLanguage);
+    }
   }, []);
 
   // Cleanup camera stream on unmount
@@ -112,51 +132,38 @@ export default function ConsularBot() {
     };
   }, [cameraStream]);
 
-  const handleSend = async (overrideText) => {
-    if (isTyping) return;
-    const text = overrideText !== undefined ? overrideText : input;
-    if (!text.trim()) return;
-
-    // Stop any currently playing audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      setIsSpeaking(false);
-    }
-
-    const userMessage = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMessage]);
-    const messageText = text;
-    setInput("");
-    
-    // Show typing indicator
+  const sendChat = async (messageText, action = null, actionData = null) => {
     setIsTyping(true);
-
+    const voiceRequested = enableVoiceRef.current; // snapshot before async gap
     try {
-      const response = await axios.post(
-        `${API}/consular/chat`,
-        {
-          message: messageText,
-          session_id: sessionId,
-          user_id: "guest",
-          enable_voice: enableVoice,
-          language: selectedLanguage
-        }
-      );
+      const response = await axios.post(`${API}/consular/chat`, {
+        message: messageText,
+        session_id: sessionId,
+        user_id: "guest",
+        enable_voice: voiceRequested, // tell backend: skip TTS if voice off (saves time)
+        language: selectedLanguage,
+        step: currentStep,
+        ...(action && { action, action_data: actionData }),
+      });
 
       if (!sessionId) {
         setSessionId(response.data.session_id);
+        localStorage.setItem(SESSION_STORAGE_KEY, response.data.session_id);
       }
 
-      // Type out the response with animation
       const botResponse = response.data.response;
-      await typeMessage(botResponse);
-      
-      setCurrentStep(response.data.step);
-      setIsTyping(false);
+      const botActions = response.data.actions || [];
+      const usedWebsite = !!response.data.used_website;
 
-      // Play audio response if available
-      if (response.data.audio_base64 && enableVoice) {
+      // Update step IMMEDIATELY so the next user message uses the correct step,
+      // even if they type during the animation.
+      setCurrentStep(response.data.step);
+
+      // Hide dots and start animation
+      setIsTyping(false);
+      await typeMessage(botResponse, botActions, usedWebsite);
+
+      if (response.data.audio_base64 && enableVoiceRef.current) {
         playAudio(response.data.audio_base64);
       }
     } catch (error) {
@@ -167,79 +174,107 @@ export default function ConsularBot() {
     }
   };
 
-  const typeMessage = async (fullMessage) => {
-    typingStoppedRef.current = false;
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    const messageText = input;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: messageText }]);
+    await sendChat(messageText);
+  };
 
+  const handleActionClick = async (action) => {
+    // For track_application, call the track endpoint directly
+    if (action.action === "track_application" && action.data?.reference_id) {
+      const refId = action.data.reference_id;
+      setMessages((prev) => [...prev, { role: "user", content: `Track application ${refId}` }]);
+      setIsTyping(true);
+      try {
+        const res = await axios.get(`${API}/consular/track/${refId}`);
+        const d = res.data;
+        setIsTyping(false);
+        const content = d.found
+          ? `📋 **Application Status**\n\n🆔 Reference: **${d.application_id}**\n👤 Name: ${d.full_name}\n🛂 Service: ${d.service_type?.replace(/_/g, " ")?.replace(/\b\w/g, c => c.toUpperCase())}\n📧 Email: ${d.email}\n📅 Submitted: ${d.submitted_at}\n✅ Status: **${d.status?.replace(/\b\w/g, c => c.toUpperCase())}**`
+          : `❌ ${d.message}`;
+        await typeMessage(content, [], false);
+      } catch {
+        setIsTyping(false);
+        toast.error("Could not fetch application status.");
+      }
+      return;
+    }
+
+    // For new_application, start fresh
+    if (action.action === "new_application") {
+      await handleNewChat();
+      return;
+    }
+
+    // For apply_service, send as a regular chat action
+    const label = action.label || action.action;
+    setMessages((prev) => [...prev, { role: "user", content: label }]);
+    await sendChat(label, action.action, action.data || { service: action.service });
+  };
+
+  const typeMessage = async (fullMessage, actions = [], usedWebsite = false) => {
     return new Promise((resolve) => {
       let currentText = "";
       let index = 0;
-      const typingSpeed = 15;
+      const typingSpeed = 12;
 
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      // Insert placeholder message
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "", actions: [], usedWebsite }
+      ]);
 
       const typeInterval = setInterval(() => {
-        if (typingStoppedRef.current) {
-          clearInterval(typeInterval);
-          typingIntervalRef.current = null;
-          setMessages((prev) => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1] = { role: "assistant", content: fullMessage };
-            return newMessages;
-          });
-          resolve();
-          return;
-        }
-
         if (index < fullMessage.length) {
           currentText += fullMessage[index];
           setMessages((prev) => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1] = { role: "assistant", content: currentText };
-            return newMessages;
+            const next = [...prev];
+            next[next.length - 1] = {
+              role: "assistant",
+              content: currentText,
+              actions: [],
+              usedWebsite
+            };
+            return next;
           });
           index++;
         } else {
           clearInterval(typeInterval);
-          typingIntervalRef.current = null;
+          // Attach actions only after typing finishes
+          setMessages((prev) => {
+            const next = [...prev];
+            next[next.length - 1] = {
+              role: "assistant",
+              content: currentText,
+              actions,
+              usedWebsite
+            };
+            return next;
+          });
           resolve();
         }
       }, typingSpeed);
-
-      typingIntervalRef.current = typeInterval;
     });
-  };
-
-  const handleStop = () => {
-    if (!isTyping) return;
-    typingStoppedRef.current = true;
-    setIsTyping(false);
   };
 
   const playAudio = (audioBase64) => {
     try {
-      // Stop any currently playing audio immediately
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.onended = null;
-        audioRef.current.onerror = null;
-        audioRef.current = null;
-      }
-
       setIsSpeaking(true);
       const audio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
       audioRef.current = audio;
-
+      
       audio.onended = () => {
         setIsSpeaking(false);
-        audioRef.current = null;
       };
-
+      
       audio.onerror = () => {
         setIsSpeaking(false);
-        audioRef.current = null;
         toast.error("Audio playback failed");
       };
-
+      
       audio.play();
     } catch (error) {
       setIsSpeaking(false);
@@ -350,6 +385,30 @@ export default function ConsularBot() {
     }
   }, [mediaRecorder]);
 
+  const handleVoiceToggle = (e) => {
+    const enabled = e.target.checked;
+    enableVoiceRef.current = enabled; // sync ref immediately (before re-render)
+    setEnableVoice(enabled);
+    if (!enabled && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsSpeaking(false);
+    }
+  };
+
+  const handleNewChat = async () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setIsSpeaking(false);
+    setMessages([]);
+    setCurrentStep("greeting");
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    setSessionId(null);
+    await initNewSession(selectedLanguage);
+  };
+
   const handleVoice = () => {
     if (isRecording) {
       stopRecording();
@@ -435,10 +494,19 @@ export default function ConsularBot() {
       });
       
       if (response.data.success) {
-        toast.success('Document processed! Data extracted.');
+        toast.success('Document saved!');
+        const doneActions = [
+          { label: "📁 Upload Another Document", action: "upload_document", data: {} },
+          { label: "✅ All Documents Uploaded — Continue", action: "documents_done", data: {} },
+        ];
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `📄 **Document Scanned Successfully!**\n\n${response.data.extracted_data}` }
+          {
+            role: "assistant",
+            content: `📄 **Document Saved!**\n\n${response.data.message}\n\nUpload more documents or click **Continue** when done.`,
+            actions: doneActions,
+            usedWebsite: false,
+          }
         ]);
       }
     } catch (error) {
@@ -476,10 +544,19 @@ export default function ConsularBot() {
         });
         
         if (response.data.success) {
-          toast.success('Document processed! Data extracted and translated.');
+          toast.success('Document saved!');
+          const doneActions = [
+            { label: "📁 Upload Another Document", action: "upload_document", data: {} },
+            { label: "✅ All Documents Uploaded — Continue", action: "documents_done", data: {} },
+          ];
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: `📄 **Document Scanned!**\n\n${response.data.extracted_data}` }
+            {
+              role: "assistant",
+              content: `📄 **Document Saved: ${file.name}**\n\n${response.data.message}\n\nUpload more documents or click **Continue** when done.`,
+              actions: doneActions,
+              usedWebsite: false,
+            }
           ]);
         }
       } catch (error) {
@@ -669,16 +746,7 @@ export default function ConsularBot() {
                     <input
                       type="checkbox"
                       checked={enableVoice}
-                      onChange={(e) => {
-                        setEnableVoice(e.target.checked);
-                        if (!e.target.checked && audioRef.current) {
-                          audioRef.current.pause();
-                          audioRef.current.onended = null;
-                          audioRef.current.onerror = null;
-                          audioRef.current = null;
-                          setIsSpeaking(false);
-                        }
-                      }}
+                      onChange={handleVoiceToggle}
                       className="sr-only peer"
                       data-testid="voice-toggle"
                     />
@@ -694,6 +762,18 @@ export default function ConsularBot() {
                     </div>
                   </div>
                 </label>
+              </div>
+
+              {/* New Chat Button */}
+              <div className="mt-4">
+                <Button
+                  onClick={handleNewChat}
+                  variant="outline"
+                  className="w-full border-orange-300 text-[#E06F2C] hover:bg-orange-50"
+                  aria-label="Start a new conversation"
+                >
+                  🔄 New Chat
+                </Button>
               </div>
 
               {/* Organization Info */}
@@ -725,7 +805,7 @@ export default function ConsularBot() {
               aria-label="Chat conversation"
             >
               <div
-                ref={chatScrollRef}
+                ref={chatContainerRef}
                 className="flex-1 overflow-y-auto p-6 space-y-4"
                 data-testid="chat-messages"
                 role="log"
@@ -736,7 +816,7 @@ export default function ConsularBot() {
                 {messages.map((msg, index) => (
                   <div
                     key={index}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} w-full`}
                     data-testid={`message-${index}`}
                     role="article"
                     aria-label={`${msg.role === "user" ? "Your message" : "Seva Setu response"}`}
@@ -766,21 +846,45 @@ export default function ConsularBot() {
                         </div>
                       </div>
                     ) : (
-                      <div
-                        className={`max-w-md px-4 py-3 rounded-lg ${
-                          msg.role === "user"
-                            ? "bg-[#E06F2C] text-white"
-                            : "bg-white border border-gray-200 text-[#1A2E40]"
-                        }`}
-                      >
-                        {msg.role === "assistant" ? (
-                          <div className="prose prose-sm max-w-none prose-headings:text-[#1A2E40] prose-headings:font-bold prose-p:text-[#1A2E40] prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:text-[#1A2E40] prose-strong:text-[#E06F2C] prose-strong:font-semibold prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.content}
-                            </ReactMarkdown>
+                      <div className={`flex flex-col gap-2 ${msg.role === "user" ? "items-end" : "items-start"} max-w-[75%]`}>
+                        <div
+                          className={`px-4 py-3 rounded-2xl w-full ${
+                            msg.role === "user"
+                              ? "bg-[#E06F2C] text-white rounded-br-sm"
+                              : "bg-white border border-gray-200 text-[#1A2E40] rounded-bl-sm shadow-sm"
+                          }`}
+                        >
+                          {msg.role === "assistant" ? (
+                            <div className="prose prose-sm max-w-none prose-headings:text-[#1A2E40] prose-headings:font-bold prose-p:text-[#1A2E40] prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:text-[#1A2E40] prose-strong:text-[#E06F2C] prose-strong:font-semibold prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline prose-code:bg-orange-50 prose-code:text-[#E06F2C] prose-code:px-1 prose-code:rounded">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <span className="text-sm leading-relaxed">{msg.content}</span>
+                          )}
+                        </div>
+
+                        {/* Source label for website-fetched responses */}
+                        {msg.role === "assistant" && msg.usedWebsite && (
+                          <span className="text-[10px] text-gray-400 flex items-center gap-1 px-1">
+                            🌐 Sourced from cgijoburg.gov.in &amp; vfsglobal.com
+                          </span>
+                        )}
+
+                        {/* Action buttons rendered after typing finishes */}
+                        {msg.role === "assistant" && msg.actions && msg.actions.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {msg.actions.map((act, ai) => (
+                              <button
+                                key={ai}
+                                onClick={() => handleActionClick(act)}
+                                className="px-3 py-1.5 text-sm font-semibold rounded-full border-2 border-[#E06F2C] text-[#E06F2C] hover:bg-[#E06F2C] hover:text-white transition-all duration-150 bg-white shadow-sm"
+                              >
+                                {act.label}
+                              </button>
+                            ))}
                           </div>
-                        ) : (
-                          msg.content
                         )}
                       </div>
                     )}
@@ -792,54 +896,20 @@ export default function ConsularBot() {
                     className="flex justify-start"
                     data-testid="typing-indicator"
                     role="status"
-                    aria-label="Seva Setu is typing"
+                    aria-label="Searching official websites"
                   >
-                    <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
+                    <div className="bg-white border border-orange-100 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-3 shadow-sm">
                       <div className="flex gap-1" aria-hidden="true">
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
                       </div>
-                      <span className="text-sm text-gray-500">Seva Setu is typing...</span>
+                      <span className="text-sm text-gray-500">🔍 Searching official websites…</span>
                     </div>
                   </div>
                 )}
                 <div ref={messagesEndRef} />
               </div>
-
-              {/* Suggestion Chips */}
-              {!isTyping && (() => {
-                const quickReplies =
-                  currentStep === "consent_pending" ? [
-                    { label: "✅ Yes, proceed", value: "yes" },
-                    { label: "❌ No, cancel",   value: "no"  },
-                  ] :
-                  currentStep === "paused" ? [
-                    { label: "▶️ Continue",  value: "continue" },
-                    { label: "🗑️ Discard",   value: "discard"  },
-                  ] :
-                  currentStep === "docs_pending" ? [
-                    { label: "📤 Submit application", value: "submit" },
-                  ] : null;
-
-                const chips = quickReplies || null;
-                if (!chips) return null;
-
-                return (
-                  <div className="px-4 pb-2 flex flex-wrap gap-2">
-                    {chips.map((chip) => (
-                      <button
-                        key={chip.value}
-                        onClick={() => handleSend(chip.value)}
-                        disabled={isTyping}
-                        className="text-xs px-3 py-1.5 rounded-full border border-[#E06F2C] text-[#E06F2C] hover:bg-[#E06F2C] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {chip.label}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
 
               {/* Input Area */}
               <div className="border-t border-gray-200 p-4" role="form" aria-label="Message input form">
@@ -851,7 +921,7 @@ export default function ConsularBot() {
                     id="chat-input-field"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && !isTyping && (e.preventDefault(), handleSend())}
+                    onKeyPress={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
                     placeholder={`Type your message in ${currentLang.name}...`}
                     className="flex-1 min-h-[60px]"
                     data-testid="chat-input"
@@ -897,25 +967,14 @@ export default function ConsularBot() {
                     >
                       <FileText className="w-5 h-5" aria-hidden="true" />
                     </Button>
-                    {isTyping ? (
-                      <Button
-                        onClick={handleStop}
-                        className="bg-red-500 hover:bg-red-600 text-white min-h-[44px] min-w-[44px]"
-                        data-testid="stop-btn"
-                        aria-label="Stop response"
-                      >
-                        <Square className="w-5 h-5 fill-current" aria-hidden="true" />
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={handleSend}
-                        className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
-                        data-testid="send-btn"
-                        aria-label="Send message"
-                      >
-                        <Send className="w-5 h-5" aria-hidden="true" />
-                      </Button>
-                    )}
+                    <Button
+                      onClick={handleSend}
+                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
+                      data-testid="send-btn"
+                      aria-label="Send message"
+                    >
+                      <Send className="w-5 h-5" aria-hidden="true" />
+                    </Button>
                   </div>
                 </div>
               </div>
