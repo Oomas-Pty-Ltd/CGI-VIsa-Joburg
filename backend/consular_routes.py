@@ -33,7 +33,7 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, get_flow_state
+from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state
 
 load_dotenv()
 
@@ -212,6 +212,17 @@ async def chat(request: ChatRequest, http_request: Request):
     active_service = detect_service(sanitized_message) or current_flow.get("service")
     if active_service:
         scraped_summary = extract_service_content(active_service, knowledge_base)
+    elif detect_website_service(sanitized_message):
+        # Website-only service — do a generic keyword search from scraped pages
+        scraped_summary = extract_service_content("visa", knowledge_base)  # broad fallback
+        # Better: search raw page content for the keyword
+        kw = sanitized_message.lower().split()[0]
+        cgi_text = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
+        vfs_text = knowledge_base.get("vfs_global", {}).get("page_content", "")
+        relevant = [l.strip() for l in (cgi_text + "\n" + vfs_text).split("\n")
+                    if l.strip() and kw in l.lower()]
+        if relevant:
+            scraped_summary = "\n".join(relevant[:15])
 
     # ── Application flow state machine ────────────────────────────────
     flow_response, needs_llm, current_step = await process_flow(

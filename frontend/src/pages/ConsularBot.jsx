@@ -54,16 +54,24 @@ export default function ConsularBot() {
   const fileInputRef = useRef(null);
   const audioRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const chatScrollRef = useRef(null);
 
-  // Auto-scroll to bottom
-  const scrollToBottom = (smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "instant" });
-  };
+  // Scroll the chat container directly to avoid page-level scroll jitter
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (chatScrollRef.current) {
+        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
 
   useEffect(() => {
-    // Use instant scroll during typing to keep up with content growth
-    scrollToBottom(!isTyping);
-  }, [messages, isTyping]);
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isTyping) scrollToBottom();
+  }, [isTyping]);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -102,8 +110,9 @@ export default function ConsularBot() {
     };
   }, [cameraStream]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = async (overrideText) => {
+    const text = overrideText !== undefined ? overrideText : input;
+    if (!text.trim()) return;
 
     // Stop any currently playing audio
     if (audioRef.current) {
@@ -112,9 +121,9 @@ export default function ConsularBot() {
       setIsSpeaking(false);
     }
 
-    const userMessage = { role: "user", content: input };
+    const userMessage = { role: "user", content: text };
     setMessages((prev) => [...prev, userMessage]);
-    const messageText = input;
+    const messageText = text;
     setInput("");
     
     // Show typing indicator
@@ -673,8 +682,9 @@ export default function ConsularBot() {
               role="region"
               aria-label="Chat conversation"
             >
-              <div 
-                className="flex-1 overflow-y-auto p-6 space-y-4" 
+              <div
+                ref={chatScrollRef}
+                className="flex-1 overflow-y-auto p-6 space-y-4"
                 data-testid="chat-messages"
                 role="log"
                 aria-live="polite"
@@ -754,6 +764,39 @@ export default function ConsularBot() {
                 )}
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Suggestion Chips */}
+              {!isTyping && (() => {
+                const quickReplies =
+                  currentStep === "consent_pending" ? [
+                    { label: "✅ Yes, proceed", value: "yes" },
+                    { label: "❌ No, cancel",   value: "no"  },
+                  ] :
+                  currentStep === "paused" ? [
+                    { label: "▶️ Continue",  value: "continue" },
+                    { label: "🗑️ Discard",   value: "discard"  },
+                  ] :
+                  currentStep === "docs_pending" ? [
+                    { label: "📤 Submit application", value: "submit" },
+                  ] : null;
+
+                const chips = quickReplies || null;
+                if (!chips) return null;
+
+                return (
+                  <div className="px-4 pb-2 flex flex-wrap gap-2">
+                    {chips.map((chip) => (
+                      <button
+                        key={chip.value}
+                        onClick={() => handleSend(chip.value)}
+                        className="text-xs px-3 py-1.5 rounded-full border border-[#E06F2C] text-[#E06F2C] hover:bg-[#E06F2C] hover:text-white transition-colors"
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Input Area */}
               <div className="border-t border-gray-200 p-4" role="form" aria-label="Message input form">

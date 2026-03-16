@@ -1,0 +1,20 @@
+
+==================================================
+TIMESTAMP: 2026-03-15T18:14:07.381771+00:00
+SUBJECT: VFS Global Scraping Failed
+DETAILS: HTTP 403
+
+==================================================
+TIMESTAMP: 2026-03-15T18:14:07.405015+00:00
+SUBJECT: VFS Global Scraping Failed
+DETAILS: HTTP 403
+
+==================================================
+TIMESTAMP: 2026-03-15T18:14:07.832186+00:00
+SUBJECT: CGI Joburg Scraping Failed
+DETAILS: HTTP 403
+
+==================================================
+TIMESTAMP: 2026-03-15T18:14:10.595419+00:00
+SUBJECT: CGI Joburg Scraping Failed
+DETAILS: HTTP 403

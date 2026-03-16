@@ -5,9 +5,6 @@ from typing import List, Dict, Optional
 import asyncio
 from datetime import datetime, timezone
 import hashlib
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import os
 
 OFFICIAL_SOURCES = [
@@ -30,17 +27,24 @@ CONTACT_FALLBACK = {
 
 
 async def _fetch_with_retry(url: str, retries: int = 2) -> Optional[str]:
-    """Fetch a URL, retrying once on failure. Returns HTML text or None."""
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; SevaSetuBot/1.0)"}
+    """Fetch a URL, retrying once on transient failure. Returns HTML text or None."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
     for attempt in range(retries):
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, verify=False) as client:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True, verify=False) as client:
                 response = await client.get(url, headers=headers)
                 if response.status_code == 200:
                     return response.text
+                # 403/404/5xx — no point retrying with same request
                 raise Exception(f"HTTP {response.status_code}")
         except Exception as e:
-            if attempt < retries - 1:
+            err = str(e)
+            # Don't retry permanent blocks (403, 404, SSL errors)
+            if attempt < retries - 1 and "HTTP 4" not in err and "HTTP 5" not in err:
                 await asyncio.sleep(0.5)
             else:
                 raise
@@ -90,148 +94,121 @@ async def scrape_vfs_global() -> Dict:
 
 _knowledge_cache: Optional[Dict] = None
 _knowledge_cache_time: Optional[datetime] = None
+_scrape_in_progress: bool = False
 _CACHE_TTL_SECONDS = 1800  # 30 minutes
 
+
+async def _do_scrape() -> Dict:
+    """Run both scrapers concurrently and return combined knowledge."""
+    cgi_data, vfs_data = await asyncio.gather(
+        scrape_cgi_joburg(),
+        scrape_vfs_global(),
+    )
+    return {
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "cgi_joburg": cgi_data,
+        "vfs_global": vfs_data,
+        **CONTACT_FALLBACK,
+        "official_links": {
+            "consulate": "https://www.cgijoburg.gov.in/",
+            "vfs": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
+            "passport_seva": "https://portal2.passportindia.gov.in/",
+            "e_visa": "https://indianvisaonline.gov.in/",
+        },
+    }
+
+
+async def _refresh_cache_background():
+    """Scrape in the background and update cache without blocking requests."""
+    global _knowledge_cache, _knowledge_cache_time, _scrape_in_progress
+    if _scrape_in_progress:
+        return
+    _scrape_in_progress = True
+    try:
+        data = await _do_scrape()
+        await log_knowledge_changes(data)
+        _knowledge_cache = data
+        _knowledge_cache_time = datetime.now(timezone.utc)
+    except Exception as e:
+        await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
+    finally:
+        _scrape_in_progress = False
+
+
 async def get_realtime_knowledge() -> Dict:
-    """Fetch real-time information from both official websites concurrently with retry.
-    Results are cached for 30 minutes to avoid scraping on every message."""
+    """Return cached knowledge immediately. Trigger background refresh when cache is stale."""
     global _knowledge_cache, _knowledge_cache_time
 
     now = datetime.now(timezone.utc)
-    if _knowledge_cache is not None and _knowledge_cache_time is not None:
-        age = (now - _knowledge_cache_time).total_seconds()
-        if age < _CACHE_TTL_SECONDS:
-            return _knowledge_cache
+    cache_stale = (
+        _knowledge_cache is None
+        or _knowledge_cache_time is None
+        or (now - _knowledge_cache_time).total_seconds() >= _CACHE_TTL_SECONDS
+    )
 
+    if cache_stale and not _scrape_in_progress:
+        # Fire-and-forget — don't await, so the request is never blocked by scraping
+        asyncio.create_task(_refresh_cache_background())
+
+    # Return cache immediately (may be stale on first request — falls back below)
+    if _knowledge_cache is not None:
+        return _knowledge_cache
+
+    # Absolute first startup — wait for the scrape just this once (no cache at all)
     try:
-        cgi_data, vfs_data = await asyncio.gather(
-            scrape_cgi_joburg(),
-            scrape_vfs_global()
-        )
-
-        combined_data = {
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-            "cgi_joburg": cgi_data,
-            "vfs_global": vfs_data,
-            **CONTACT_FALLBACK,
-            "official_links": {
-                "consulate": "https://www.cgijoburg.gov.in/",
-                "vfs": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
-                "passport_seva": "https://portal2.passportindia.gov.in/",
-                "e_visa": "https://indianvisaonline.gov.in/"
-            }
-        }
-
-        await log_knowledge_changes(combined_data)
-        _knowledge_cache = combined_data
+        data = await _do_scrape()
+        await log_knowledge_changes(data)
+        _knowledge_cache = data
         _knowledge_cache_time = now
-        return combined_data
+        return data
     except Exception as e:
         await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
-        if _knowledge_cache is not None:
-            return _knowledge_cache  # serve stale cache on error
         return get_fallback_knowledge()
 
+_LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+
 async def log_knowledge_changes(new_data: Dict):
-    """Log changes in scraped data"""
-    log_file = "/app/logs/knowledge_changes.log"
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
-    
+    """Log changes in scraped data."""
     try:
-        # Calculate hash of new data
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        log_file  = os.path.join(_LOG_DIR, "knowledge_changes.log")
+        hash_file = os.path.join(_LOG_DIR, "last_knowledge_hash.txt")
+
         new_hash = hashlib.md5(json.dumps(new_data, sort_keys=True).encode()).hexdigest()
-        
-        # Read previous hash if exists
-        hash_file = "/app/logs/last_knowledge_hash.txt"
+
         previous_hash = None
         if os.path.exists(hash_file):
-            with open(hash_file, 'r') as f:
+            with open(hash_file, "r") as f:
                 previous_hash = f.read().strip()
-        
-        # If data changed, log it
+
         if previous_hash != new_hash:
             log_entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "previous_hash": previous_hash,
                 "new_hash": new_hash,
                 "change_detected": True,
-                "data_snapshot": new_data
             }
-            
-            with open(log_file, 'a') as f:
+            with open(log_file, "a") as f:
                 f.write(json.dumps(log_entry) + "\n")
-            
-            # Save new hash
-            with open(hash_file, 'w') as f:
+            with open(hash_file, "w") as f:
                 f.write(new_hash)
-            
-            # Send notification email about changes
-            await send_change_notification(log_entry)
     except Exception as e:
         print(f"Error logging changes: {e}")
 
 async def send_exception_email(subject: str, error_details: str):
-    """Send exception report to mayurakole"""
+    """Log exception to local file (email not configured in dev)."""
     try:
-        msg = MIMEMultipart()
-        msg['From'] = "sevasetu-bot@consulate.gov.in"
-        msg['To'] = "mayurakole@example.com"
-        msg['Subject'] = f"[Seva Setu Bot] Exception: {subject}"
-        
-        body = f"""
-        Seva Setu Bot Exception Report
-        ================================
-        
-        Timestamp: {datetime.now(timezone.utc).isoformat()}
-        Subject: {subject}
-        
-        Error Details:
-        {error_details}
-        
-        System: Consulate General of India Johannesburg
-        Bot: Seva Setu
-        
-        This is an automated alert from the consular bot system.
-        """
-        
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Log to file instead of actual email (for demo)
-        log_file = "/app/logs/exception_emails.log"
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
-        with open(log_file, 'a') as f:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        log_file = os.path.join(_LOG_DIR, "exception_emails.log")
+        with open(log_file, "a") as f:
             f.write(f"\n{'='*50}\n")
-            f.write(f"TO: mayurakole@example.com\n")
+            f.write(f"TIMESTAMP: {datetime.now(timezone.utc).isoformat()}\n")
             f.write(f"SUBJECT: {subject}\n")
-            f.write(f"BODY:\n{body}\n")
-        
-        print(f"Exception email logged: {subject}")
+            f.write(f"DETAILS: {error_details}\n")
+        print(f"Exception logged: {subject}")
     except Exception as e:
-        print(f"Failed to send exception email: {e}")
+        print(f"Failed to log exception: {e}")
 
-async def send_change_notification(change_log: Dict):
-    """Send notification when website content changes"""
-    try:
-        subject = "Website Content Change Detected"
-        body = f"""
-        Seva Setu Bot Change Notification
-        ==================================
-        
-        A change has been detected in the official consulate website content.
-        
-        Timestamp: {change_log['timestamp']}
-        Previous Hash: {change_log['previous_hash']}
-        New Hash: {change_log['new_hash']}
-        
-        The knowledge base has been updated with the latest information.
-        Please review the changes in /app/logs/knowledge_changes.log
-        
-        This is an automated notification from Seva Setu Bot.
-        """
-        
-        await send_exception_email(subject, body)
-    except Exception as e:
-        print(f"Failed to send change notification: {e}")
 
 def get_fallback_knowledge() -> Dict:
     """Fallback knowledge base when scraping fails"""
@@ -289,10 +266,14 @@ def get_fallback_vfs_info() -> Dict:
     }
 
 _SERVICE_KEYWORDS = {
-    "visa":     ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline"],
-    "passport": ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document"],
-    "oci":      ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin"],
-    "pcc":      ["pcc", "police clearance", "clearance certificate", "criminal record"],
+    "visa":        ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline"],
+    "passport":    ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document"],
+    "oci":         ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin"],
+    "pcc":         ["pcc", "police clearance", "clearance certificate", "criminal record"],
+    "marriage":    ["marriage", "matrimonial", "spouse", "wedding", "nikah", "marry"],
+    "birth":       ["birth", "born", "newborn", "child registration", "birth certificate"],
+    "attestation": ["attestation", "apostille", "notary", "affidavit", "power of attorney", "legalization"],
+    "renunciation":["renunciation", "renounce", "surrender passport", "citizenship"],
 }
 
 

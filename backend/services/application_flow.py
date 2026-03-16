@@ -134,6 +134,117 @@ SERVICES: Dict[str, Dict] = {
             {"key": "purpose",         "question": "What is the **purpose** for which you need the PCC?"},
         ],
     },
+    "marriage": {
+        "name": "Marriage Certificate / Registration",
+        "description": (
+            "The Consulate General of India, Johannesburg provides services for registration of marriages "
+            "of Indian nationals solemnized in South Africa under the Hindu Marriage Act or Special Marriage Act. "
+            "Both spouses must appear in person at the consulate. "
+            "The consulate also attests South African marriage certificates for use in India. "
+            "Processing time: 5–7 business days. Appointment required. "
+            "For attestation of documents for use in India, bring originals and certified copies."
+        ),
+        "documents": [
+            "Valid Indian passport of Indian spouse — original + photocopy",
+            "South African marriage certificate (registered with Home Affairs) — original + photocopy",
+            "Proof of residence in South Africa of both spouses",
+            "Recent passport-size photographs of both spouses",
+            "Affidavit confirming marital status (if previously married)",
+            "Divorce decree / death certificate of previous spouse (if applicable)",
+        ],
+        "fields": [
+            {"key": "full_name",          "question": "Please enter the **full name of the Indian spouse** (as in passport):"},
+            {"key": "dob",                "question": "Please enter their **date of birth** (DD/MM/YYYY):"},
+            {"key": "passport_number",    "question": "Please enter the **Indian passport number**:"},
+            {"key": "spouse_name",        "question": "Please enter the **full name of the other spouse**:"},
+            {"key": "marriage_date",      "question": "Please enter the **date of marriage** (DD/MM/YYYY):"},
+            {"key": "marriage_place",     "question": "Please enter the **place of marriage** (city, country):"},
+            {"key": "phone",              "question": "Please enter your **phone number**:"},
+            {"key": "email",              "question": "Please enter your **email address**:"},
+        ],
+    },
+    "birth": {
+        "name": "Birth Certificate Registration",
+        "description": (
+            "Indian nationals residing in South Africa can register the birth of their child born abroad "
+            "at the Consulate General of India, Johannesburg. "
+            "Registration is required to obtain an Indian passport for the child. "
+            "Both parents must appear in person with the child. "
+            "Processing time: 3–5 business days. "
+            "Note: The child must also be registered with South African Home Affairs."
+        ),
+        "documents": [
+            "South African birth certificate of the child — original + photocopy",
+            "Indian passport of both parents — original + photocopy",
+            "Proof of residence in South Africa",
+            "Hospital birth record / discharge summary",
+            "Recent passport-size photographs of the child",
+            "Marriage certificate of parents (if applicable)",
+        ],
+        "fields": [
+            {"key": "child_name",         "question": "Please enter the **child's full name**:"},
+            {"key": "dob",                "question": "Please enter the **child's date of birth** (DD/MM/YYYY):"},
+            {"key": "birth_place",        "question": "Please enter the **place of birth** (hospital, city):"},
+            {"key": "father_name",        "question": "Please enter the **father's full name** (as in passport):"},
+            {"key": "mother_name",        "question": "Please enter the **mother's full name** (as in passport):"},
+            {"key": "father_passport",    "question": "Please enter the **father's Indian passport number**:"},
+            {"key": "phone",              "question": "Please enter your **phone number**:"},
+            {"key": "email",              "question": "Please enter your **email address**:"},
+        ],
+    },
+    "attestation": {
+        "name": "Document Attestation / Apostille",
+        "description": (
+            "The Consulate General of India, Johannesburg provides attestation services for Indian documents "
+            "that need to be used in South Africa, and for South African documents that need to be used in India. "
+            "Common documents: educational certificates, affidavits, power of attorney, commercial documents. "
+            "For documents to be used in India, an Apostille is issued by the South African government first, "
+            "then the consulate countersigns. "
+            "Processing time: 3–5 business days. Walk-in accepted for attestation services."
+        ),
+        "documents": [
+            "Original document(s) to be attested — with photocopies",
+            "Valid Indian passport — original + photocopy (for Indian national documents)",
+            "Proof of residence in South Africa",
+            "Application form (available at the consulate)",
+            "Fee payment receipt",
+        ],
+        "fields": [
+            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
+            {"key": "passport_number", "question": "Please enter your **passport number**:"},
+            {"key": "doc_type",        "question": "What **type of document** needs attestation? (e.g. degree certificate, affidavit, power of attorney):"},
+            {"key": "doc_purpose",     "question": "What is the **purpose** of attestation? (e.g. employment in India, property registration, etc.):"},
+            {"key": "phone",           "question": "Please enter your **phone number**:"},
+            {"key": "email",           "question": "Please enter your **email address**:"},
+        ],
+    },
+    "renunciation": {
+        "name": "Renunciation of Indian Citizenship",
+        "description": (
+            "Indian nationals who have acquired citizenship of another country (including South Africa) "
+            "are required by law to renounce their Indian citizenship and surrender their Indian passport. "
+            "The renunciation certificate is issued by the Consulate General of India, Johannesburg. "
+            "After renunciation, an OCI card can be applied for to maintain ties with India. "
+            "Processing time: 4–6 weeks. Apply in person at the consulate with prior appointment."
+        ),
+        "documents": [
+            "Indian passport — original (to be surrendered)",
+            "New foreign citizenship certificate / foreign passport — original + photocopy",
+            "Proof of current address in South Africa",
+            "Completed renunciation application form",
+            "Recent passport-size photographs",
+            "Paid fee receipt (fee payable at consulate)",
+        ],
+        "fields": [
+            {"key": "full_name",          "question": "Please enter your **full name** (as in your Indian passport):"},
+            {"key": "dob",                "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
+            {"key": "indian_passport",    "question": "Please enter your **Indian passport number** (to be surrendered):"},
+            {"key": "new_citizenship",    "question": "What is your **new citizenship / nationality**?"},
+            {"key": "new_passport",       "question": "Please enter your **new foreign passport number**:"},
+            {"key": "phone",              "question": "Please enter your **phone number**:"},
+            {"key": "email",              "question": "Please enter your **email address**:"},
+        ],
+    },
 }
 
 CONTACT_INFO = (
@@ -194,16 +305,88 @@ def is_question(msg: str) -> bool:
     return any(low.startswith(w) for w in q_starts)
 
 
+_SERVICE_PATTERNS: Dict[str, list] = {
+    "passport": [
+        "passport", "पासपोर्ट", "renew passport", "passport renewal", "new passport",
+        "fresh passport", "passport expired", "travel document", "tatkal",
+        "passportindia", "passport application", "emergency passport",
+        "lost passport", "damaged passport", "passport reissue",
+    ],
+    "visa": [
+        "visa", "वीजा", "tourist visa", "business visa", "student visa",
+        "medical visa", "e-visa", "evisa", "entry visa", "visit india",
+        "travel to india", "go to india", "trip to india", "travel india",
+        "indianvisaonline", "vfs", "vfs global", "vfs appointment",
+        "visa application", "visa fee", "visa processing", "visa stamping",
+        "visa on arrival", "conference visa", "employment visa",
+    ],
+    "oci": [
+        "oci", "overseas citizen", "overseas citizenship", "oci card",
+        "person of indian origin", "indian origin", "pio card",
+        "lifelong visa", "oci registration", "oci renewal", "oci reissue",
+        "oci child", "oci minor", "oci spouse", "ociservices",
+        "indian origin card", "proof of indian origin",
+    ],
+    "pcc": [
+        "pcc", "police clearance", "clearance certificate",
+        "police certificate", "criminal record", "criminal clearance",
+        "good standing certificate", "no criminal record",
+        "background check", "character certificate", "clearance letter",
+        "immigration clearance", "police verification",
+    ],
+    "marriage": [
+        "marriage certificate", "marriage registration", "marry", "married",
+        "wedding certificate", "matrimonial", "nikah certificate",
+        "register marriage", "marriage abroad", "marriage in south africa",
+        "spouse visa", "marriage attestation", "marriage document",
+    ],
+    "birth": [
+        "birth certificate", "birth registration", "register birth",
+        "born abroad", "child born", "newborn", "baby registration",
+        "birth record", "birth abroad", "child registration",
+    ],
+    "attestation": [
+        "attestation", "apostille", "notarization", "notary",
+        "document attestation", "attest document", "certify document",
+        "degree attestation", "certificate attestation", "affidavit",
+        "power of attorney", "poa", "document authentication",
+        "legalization", "stamp document",
+    ],
+    "renunciation": [
+        "renunciation", "renounce", "surrender passport", "give up citizenship",
+        "renounce indian citizenship", "surrender indian passport",
+        "change citizenship", "foreign citizenship", "new citizenship",
+        "took south african citizenship", "naturalisation",
+    ],
+}
+
+# Services that can be detected from website keywords even if not in SERVICES
+_WEBSITE_ONLY_KEYWORDS: Dict[str, str] = {
+    "life certificate":     "Life Certificate (Jeevan Pramaan)",
+    "income certificate":   "Income Certificate",
+    "domicile":             "Domicile Certificate",
+    "emergency certificate": "Emergency Certificate of Identity",
+    "death certificate":    "Death Registration",
+    "nri":                  "NRI Services",
+    "pension":              "Pension Services",
+}
+
+
 def detect_service(msg: str) -> Optional[str]:
+    """Return a SERVICES key if message matches, else None."""
     low = msg.lower()
-    if any(w in low for w in ["passport", "पासपोर्ट"]):
-        return "passport"
-    if any(w in low for w in ["oci", "overseas citizen"]):
-        return "oci"
-    if any(w in low for w in ["pcc", "police clearance"]):
-        return "pcc"
-    if any(w in low for w in ["visa", "वीजा"]):
-        return "visa"
+    for service, patterns in _SERVICE_PATTERNS.items():
+        if any(p in low for p in patterns):
+            return service
+    return None
+
+
+def detect_website_service(msg: str) -> Optional[str]:
+    """Return a human-readable service name for keywords not in SERVICES dict."""
+    low = msg.lower()
+    for kw, label in _WEBSITE_ONLY_KEYWORDS.items():
+        if kw in low:
+            return label
     return None
 
 
@@ -332,6 +515,29 @@ def _summary(service_key: str, data: Dict) -> str:
         + "\n".join(lines)
         + f"\n\n📎 Now let's collect your **{len(svc['documents'])} required documents**."
     )
+
+
+def _website_only_info_page(service_label: str, scraped_summary: str = "") -> str:
+    """Info page for services detected from keywords but not in the SERVICES registry.
+    Shows scraped website content + contact info. No registration flow."""
+    parts = [f"## {service_label}"]
+
+    if scraped_summary and len(scraped_summary.strip()) > 40:
+        parts.append(
+            f"**Information from official websites:**\n{scraped_summary.strip()}"
+        )
+    else:
+        parts.append(
+            "Live website information is currently unavailable for this service. "
+            "Please contact the consulate directly for detailed requirements."
+        )
+
+    parts.append(
+        f"**For this service, please contact the consulate directly:**\n\n"
+        f"{CONTACT_INFO}\n\n"
+        f"You may also visit **https://www.cgijoburg.gov.in** for the latest updates."
+    )
+    return "\n\n".join(parts)
 
 
 def _service_info_page(service_key: str, scraped_summary: str = "") -> str:
@@ -623,14 +829,25 @@ async def process_flow(
 
     # ------------------------------------------------------------------
     # Service info request — show structured info (scraped + static)
-    # then offer to apply
+    # Triggers from idle OR info_shown (user switches service or asks again)
     # ------------------------------------------------------------------
     svc = detect_service(message)
-    if svc and state == "idle":
+    if svc and state in ("idle", "info_shown"):
         flow["state"]   = "info_shown"
         flow["service"] = svc
         await _save_flow(session_id, flow)
         return (_service_info_page(svc, scraped_summary), False, "info_shown")
+
+    # ------------------------------------------------------------------
+    # Website-only service — scan websites, show info, no registration flow
+    # (e.g. life certificate, death registration, domicile, NRI services)
+    # ------------------------------------------------------------------
+    website_svc_label = detect_website_service(message)
+    if website_svc_label and state in ("idle", "info_shown"):
+        flow["state"]   = "info_shown"
+        flow["service"] = None
+        await _save_flow(session_id, flow)
+        return (_website_only_info_page(website_svc_label, scraped_summary), False, "info_shown")
 
     # Default: let LLM handle
     return (None, True, state)
