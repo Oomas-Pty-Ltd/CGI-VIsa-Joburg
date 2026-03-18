@@ -769,6 +769,15 @@ async def process_flow(
             await _clear_flow(session_id)
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
 
+        # Validate the answer before accepting
+        validation_error = _validate_field(fields[fi]["key"], message.strip())
+        if validation_error:
+            await _save_flow(session_id, flow)
+            return (
+                f"⚠️ {validation_error}\n\n" + _field_question(service, fi),
+                False, "collecting"
+            )
+
         # Accept the answer
         flow["data"][fields[fi]["key"]] = message.strip()
         fi += 1
@@ -858,12 +867,102 @@ def _looks_like_answer(msg: str, field_key: str) -> bool:
     import re
     msg = msg.strip()
     if field_key == "dob":
-        return bool(re.search(r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", msg))
+        return bool(re.search(r"\d{1,2}/\d{1,2}/\d{4}", msg))
     if field_key == "email":
         return "@" in msg
     if field_key == "phone":
         return bool(re.search(r"\+?\d[\d\s\-]{6,}", msg))
     return len(msg) < 120 and "?" not in msg
+
+
+def _validate_field(key: str, value: str) -> Optional[str]:
+    """
+    Validate a form field value.
+    Returns an error message string if invalid, or None if valid.
+    """
+    import re
+    from datetime import date
+
+    v = value.strip()
+
+    # --- Name fields ---
+    _name_keys = {"full_name", "child_name", "father_name", "mother_name", "spouse_name"}
+    if key in _name_keys:
+        if len(v) < 2:
+            return "Name is too short. Please enter your full name."
+        if re.search(r"\d", v):
+            return "Name should not contain numbers. Please enter a valid name."
+        if len(v) > 120:
+            return "Name is too long. Please enter a valid name."
+        return None
+
+    # --- Date fields (DD/MM/YYYY) ---
+    _date_keys = {"dob", "marriage_date"}
+    if key in _date_keys:
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", v)
+        if not m:
+            return "Please enter the date in **DD/MM/YYYY** format (e.g. 15/08/1990)."
+        try:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            entered = date(year, month, day)
+        except ValueError:
+            return "That is not a valid date. Please re-enter in **DD/MM/YYYY** format."
+        today = date.today()
+        if key == "dob":
+            if entered >= today:
+                return "Date of birth cannot be today or a future date."
+            if (today - entered).days < 365:
+                return "Date of birth seems incorrect. Please re-enter."
+            if year < 1900:
+                return "Date of birth year is too far in the past. Please re-enter."
+        if key == "marriage_date":
+            if entered > today:
+                return "Marriage date cannot be in the future."
+        return None
+
+    # --- Passport / document numbers ---
+    _passport_keys = {"passport_number", "indian_passport", "new_passport", "father_passport"}
+    if key in _passport_keys:
+        # Indian passport: 1 letter + 7 digits (e.g. A1234567)
+        # Foreign passports vary — require at least 5 alphanumeric chars
+        cleaned = re.sub(r"[\s\-]", "", v).upper()
+        if len(cleaned) < 5:
+            return "Passport number is too short. Please enter a valid passport number."
+        if not re.match(r"^[A-Z0-9]+$", cleaned):
+            return "Passport number should contain only letters and digits."
+        return None
+
+    # --- Email ---
+    if key == "email":
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            return "Please enter a valid email address (e.g. name@example.com)."
+        return None
+
+    # --- Phone ---
+    if key == "phone":
+        digits = re.sub(r"[\s\+\-\(\)]", "", v)
+        if not digits.isdigit():
+            return "Phone number should contain only digits (and optional +, spaces, or dashes)."
+        if len(digits) < 7:
+            return "Phone number is too short. Please enter a valid phone number."
+        if len(digits) > 15:
+            return "Phone number is too long. Please enter a valid phone number."
+        return None
+
+    # --- Travel dates (flexible range format) ---
+    if key == "travel_dates":
+        if len(v) < 5:
+            return "Please enter your intended travel dates (e.g. 01/06/2026 – 20/06/2026)."
+        if not re.search(r"\d", v):
+            return "Please include actual dates for your travel (e.g. 01/06/2026 – 20/06/2026)."
+        return None
+
+    # --- Generic non-empty check for all remaining fields ---
+    if len(v) < 2:
+        return "This field cannot be empty. Please provide a valid answer."
+    if len(v) > 500:
+        return "Response is too long. Please be more concise."
+    return None
 
 
 # =====================================================================
