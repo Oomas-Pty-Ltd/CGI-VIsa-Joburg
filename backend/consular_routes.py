@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
+import asyncio
 import uuid
+import json
 from datetime import datetime, timezone
 import base64
 import os
@@ -9,7 +12,12 @@ from database import get_database
 from auth_utils import verify_token
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from presidio_service import mask_pii
-from knowledge_scraper import get_realtime_knowledge, search_knowledge, extract_service_content
+from knowledge_scraper import (
+    get_realtime_knowledge,
+    search_knowledge,
+    extract_service_content,
+)
+from services.hybrid_retrieval import hybrid_search
 from voice_service import voice_service
 from dotenv import load_dotenv
 
@@ -123,6 +131,14 @@ async def chat(request: ChatRequest, http_request: Request):
             step="escalated"
         )
     
+    # Map intent categories that have a direct application flow
+    _INTENT_TO_SERVICE = {
+        IntentCategory.PASSPORT: "passport",
+        IntentCategory.VISA:     "visa",
+        IntentCategory.OCI:      "oci",
+        IntentCategory.PIO:      "oci",  # PIO converts to OCI
+    }
+
     # Try deterministic response first (no LLM cost)
     deterministic_response = get_deterministic_response(intent_result)
     if deterministic_response and not request.image_base64:
@@ -132,19 +148,31 @@ async def chat(request: ChatRequest, http_request: Request):
             user_identifier=user_id,
             session_id=request.session_id
         )
-        
+
         # Add source tag
         response_data = intent_classifier.get_structured_response(intent_result.suggested_response_key)
         source_tag = f"\n\n---\n*Source: {response_data.get('source', 'CGI Johannesburg')}*"
         final_response = deterministic_response + source_tag
-        
+
+        # TC 1.2 — always ask if the information is sufficient
+        final_response += "\n\n---\nIs this sufficient information, or do you need more details?"
+
+        # TC 1.3 — if this is a core service, invite them to start the application
+        matched_service = _INTENT_TO_SERVICE.get(intent_result.category)
+        if matched_service and matched_service in SERVICES:
+            svc_name = SERVICES[matched_service]["name"]
+            final_response += (
+                f"\n\n**Are you interested in starting the application process for {svc_name}?** "
+                f"Type **apply** to begin."
+            )
+
         # Store messages
         await session_manager.add_message(session['id'], "user", request.message)
-        await session_manager.add_message(session['id'], "assistant", final_response, 
+        await session_manager.add_message(session['id'], "assistant", final_response,
                                           metadata={"intent": intent_result.category.value, "llm_used": False})
-        
+
         logger.info(f"[INTENT] Served deterministic response for: {intent_result.category.value}")
-        
+
         return ChatResponse(
             session_id=session['id'],
             response=final_response,
@@ -155,27 +183,31 @@ async def chat(request: ChatRequest, http_request: Request):
     user_id    = request.user_id or "guest"
     company_id = request.company_id
 
-    # Use secure session management
-    session = await session_manager.get_or_create_session(
-        channel="web",
-        user_identifier=user_id,
-        session_id=request.session_id,
-        metadata={"company_id": company_id, "language": request.language}
+    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # ── Parallel: session creation + knowledge fetch ───────────────────
+    session, knowledge_base = await asyncio.gather(
+        session_manager.get_or_create_session(
+            channel="web",
+            user_identifier=user_id,
+            session_id=request.session_id,
+            metadata={"company_id": company_id, "language": request.language}
+        ),
+        get_realtime_knowledge(),
     )
     session_id = session['id']
 
-    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     if company_id:
         company = await db.companies.find_one({"id": company_id}, {"_id": 0})
         if company:
             llm_model = company.get('llm_model', llm_model)
 
-    # ── Pre-fetch scrape + current flow state ─────────────────────────
-    knowledge_base = await get_realtime_knowledge()
-    context_info   = search_knowledge(sanitized_message, knowledge_base)
-
-    current_flow   = await get_flow_state(session_id)
-    current_state  = current_flow.get("state", "idle")
+    # ── Parallel: hybrid search + flow state ──────────────────────────
+    context_info, current_flow = await asyncio.gather(
+        hybrid_search(sanitized_message, knowledge_base),
+        get_flow_state(session_id),
+    )
+    current_state = current_flow.get("state", "idle")
 
     # ── If in docs_uploading and an image was sent, scan it first ─────
     image_doc_data: dict | None = None
@@ -213,16 +245,15 @@ async def chat(request: ChatRequest, http_request: Request):
     if active_service:
         scraped_summary = extract_service_content(active_service, knowledge_base)
     elif detect_website_service(sanitized_message):
-        # Website-only service — do a generic keyword search from scraped pages
-        scraped_summary = extract_service_content("visa", knowledge_base)  # broad fallback
-        # Better: search raw page content for the keyword
-        kw = sanitized_message.lower().split()[0]
+        # Website-only service — keyword search from scraped pages (no visa fallback)
+        words = [w for w in sanitized_message.lower().split() if len(w) > 3]
         cgi_text = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
         vfs_text = knowledge_base.get("vfs_global", {}).get("page_content", "")
-        relevant = [l.strip() for l in (cgi_text + "\n" + vfs_text).split("\n")
-                    if l.strip() and kw in l.lower()]
-        if relevant:
-            scraped_summary = "\n".join(relevant[:15])
+        relevant = [
+            l.strip() for l in (cgi_text + "\n" + vfs_text).split("\n")
+            if l.strip() and any(w in l.lower() for w in words)
+        ]
+        scraped_summary = "\n".join(relevant[:15])
 
     # ── Application flow state machine ────────────────────────────────
     flow_response, needs_llm, current_step = await process_flow(
@@ -231,6 +262,8 @@ async def chat(request: ChatRequest, http_request: Request):
         image_doc_data=image_doc_data,
         user_id=user_id,
         scraped_summary=scraped_summary,
+        knowledge_base=knowledge_base,
+        preloaded_flow=current_flow,   # reuse what we already fetched
     )
 
     if flow_response is not None and not needs_llm:
@@ -287,12 +320,13 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
 
         try:
             bot_response = await chat_instance.send_message(user_message)
-            await record_llm_usage(
+            # Fire-and-forget: don't block the response on usage tracking
+            asyncio.create_task(record_llm_usage(
                 session_id=session_id,
                 input_text=sanitized_message,
                 output_text=bot_response,
                 model=llm_model
-            )
+            ))
         except Exception as e:
             logger.error(f"AI service error: {sanitize_logs(str(e))}")
             raise HTTPException(
@@ -300,10 +334,9 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
                 detail=f"AI service error: {str(e)}"
             )
 
-        # Append flow guidance suffix (e.g. "apply to start" or "continue/discard")
-        # Reload session to get latest flow state (updated by process_flow)
-        updated_session = await session_manager.get_session(session_id)
-        flow_service = (updated_session or session).get("flow", {}).get("service") or detect_service(sanitized_message)
+        # Append flow guidance suffix only when the current message is about a specific service
+        # Never pull service from session history — that caused every response to show "apply for visa"
+        flow_service = detect_service(sanitized_message)
         suffix = flow_suffix(current_step, flow_service)
         if suffix:
             bot_response += suffix
@@ -318,20 +351,19 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
         except Exception as e:
             logger.warning(f"Voice generation failed: {sanitize_logs(str(e))}")
     
-    # Store messages using session manager
-    await session_manager.add_message(
+    # Store both messages in parallel — no need to wait before returning
+    asyncio.create_task(session_manager.add_message(
         session_id=session_id,
         role="user",
-        content=request.message,  # Store original for user reference
+        content=request.message,
         metadata={"sanitized": sanitized_message != request.message}
-    )
-    
-    await session_manager.add_message(
+    ))
+    asyncio.create_task(session_manager.add_message(
         session_id=session_id,
-        role="assistant", 
+        role="assistant",
         content=bot_response,
         metadata={"has_audio": audio_base64 is not None}
-    )
+    ))
     
     return ChatResponse(
         session_id=session_id,
@@ -339,6 +371,192 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
         step=current_step,
         audio_base64=audio_base64
     )
+
+
+@router.post("/chat/stream", dependencies=[Depends(check_rate_limit)])
+async def chat_stream(request: ChatRequest):
+    """
+    Streaming version of /chat.
+    Returns Server-Sent Events so the frontend can render text progressively.
+    Non-LLM (deterministic) responses are sent as a single chunk + done event.
+    """
+    db = await get_database()
+
+    _san = sanitize_user_input(request.message or "", context="web_chat")
+    if not _san.is_safe:
+        async def _blocked():
+            yield f"data: {json.dumps({'error': 'Message blocked for security reasons'})}\n\n"
+        return StreamingResponse(_blocked(), media_type="text/event-stream")
+    sanitized_message = _san.sanitized_text
+    if not sanitized_message:
+        async def _empty():
+            yield f"data: {json.dumps({'error': 'Empty message'})}\n\n"
+        return StreamingResponse(_empty(), media_type="text/event-stream")
+
+    # ── Intent classification (fast, no I/O) ─────────────────────────
+    intent_result  = classify_intent(sanitized_message)
+    deterministic  = get_deterministic_response(intent_result)
+
+    async def _stream_deterministic(text: str, sid: str, step: str) -> AsyncGenerator:
+        yield f"data: {json.dumps({'chunk': text})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'session_id': sid, 'step': step})}\n\n"
+
+    if deterministic:
+        session = await session_manager.get_or_create_session(
+            channel="web", user_identifier=request.user_id or "guest",
+            session_id=request.session_id,
+            metadata={"language": request.language}
+        )
+        return StreamingResponse(
+            _stream_deterministic(deterministic, session["id"], "complete"),
+            media_type="text/event-stream"
+        )
+
+    # ── Full LLM path ─────────────────────────────────────────────────
+    user_id   = request.user_id or "guest"
+    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    session, knowledge_base = await asyncio.gather(
+        session_manager.get_or_create_session(
+            channel="web", user_identifier=user_id,
+            session_id=request.session_id,
+            metadata={"language": request.language}
+        ),
+        get_realtime_knowledge(),
+    )
+    session_id = session["id"]
+
+    context_info, current_flow = await asyncio.gather(
+        hybrid_search(sanitized_message, knowledge_base),
+        get_flow_state(session_id),
+    )
+    current_state = current_flow.get("state", "idle")
+
+    # Image scan (only when in doc-upload state)
+    image_doc_data = None
+    if current_state == "docs_uploading" and request.image_base64:
+        try:
+            api_key = os.environ.get("EMERGENT_LLM_KEY")
+            scan_chat = LlmChat(
+                api_key=api_key, session_id=str(uuid.uuid4()),
+                system_message=(
+                    "Extract all visible fields from the document image. "
+                    "Return ONLY valid JSON with keys: full_name, dob, document_number, "
+                    "nationality, issue_date, expiry_date, address. Use null for missing fields."
+                )
+            ).with_model("openai", llm_model)
+            raw = await scan_chat.send_message(
+                UserMessage(text="Extract fields.", file_contents=[ImageContent(image_base64=request.image_base64)])
+            )
+            try:
+                import json as _j; image_doc_data = _j.loads(raw)
+            except Exception:
+                image_doc_data = {"raw": raw}
+            image_doc_data["filename"] = "uploaded_doc"
+        except Exception as e:
+            logger.warning(f"Doc scan failed: {sanitize_logs(str(e))}")
+
+    active_service = detect_service(sanitized_message) or current_flow.get("service")
+    scraped_summary = extract_service_content(active_service, knowledge_base) if active_service else ""
+
+    flow_response, needs_llm, current_step = await process_flow(
+        session_id, sanitized_message,
+        has_image=bool(request.image_base64),
+        image_doc_data=image_doc_data,
+        user_id=user_id,
+        scraped_summary=scraped_summary,
+        knowledge_base=knowledge_base,
+        preloaded_flow=current_flow,
+    )
+
+    # ── Non-LLM flow response ─────────────────────────────────────────
+    if flow_response is not None and not needs_llm:
+        flow_service = detect_service(sanitized_message)
+        suffix = flow_suffix(current_step, flow_service)
+        full_text = flow_response + (suffix or "")
+        asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
+        asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
+        return StreamingResponse(
+            _stream_deterministic(full_text, session_id, current_step),
+            media_type="text/event-stream"
+        )
+
+    # ── Build LLM context ─────────────────────────────────────────────
+    detected_svc = detect_service(sanitized_message)
+    svc_docs_hint = ""
+    if detected_svc and detected_svc in SERVICES:
+        svc = SERVICES[detected_svc]
+        docs = "\n".join(f"  • {d}" for d in svc["documents"])
+        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
+
+    system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+
+LANGUAGE: Always respond in English only.
+
+RESPONSE STYLE:
+- Be concise, accurate, and helpful.
+- Do NOT echo the user's question back.
+- Do NOT add feedback/rating prompts or sign-off phrases.
+- Use bullet points only when listing multiple items.
+- Do NOT repeat information already shown in the conversation.
+{svc_docs_hint}
+OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
+{context_info}
+
+FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
+  📞 +27 6830 38144  |  📧 cons.joburg@mea.gov.in
+  🏢 1st Floor, Cedar Square, Fourways, Johannesburg 2055
+  🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
+  VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    chat_instance = LlmChat(
+        api_key=api_key, session_id=session_id, system_message=system_msg
+    ).with_model("openai", llm_model)
+
+    user_msg_content = []
+    if request.image_base64:
+        user_msg_content.append(ImageContent(image_base64=request.image_base64))
+    user_message = UserMessage(
+        text=sanitized_message,
+        file_contents=user_msg_content if user_msg_content else None
+    )
+
+    # ── Stream generator ──────────────────────────────────────────────
+    async def _llm_stream() -> AsyncGenerator:
+        full_text = ""
+        try:
+            if hasattr(chat_instance, "send_message_stream"):
+                async for chunk in chat_instance.send_message_stream(user_message):
+                    full_text += chunk
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            else:
+                # Fallback for older LlmChat without streaming support
+                full_text = await chat_instance.send_message(user_message)
+                yield f"data: {json.dumps({'chunk': full_text})}\n\n"
+        except Exception as e:
+            logger.error(f"[STREAM] LLM error: {sanitize_logs(str(e))}")
+            yield f"data: {json.dumps({'error': 'AI service error, please try again.'})}\n\n"
+            return
+
+        flow_service = detect_service(sanitized_message)
+        suffix = flow_suffix(current_step, flow_service)
+        if suffix:
+            full_text += suffix
+            yield f"data: {json.dumps({'chunk': suffix})}\n\n"
+
+        yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'step': current_step})}\n\n"
+
+        # Fire-and-forget persistence + usage tracking
+        asyncio.create_task(record_llm_usage(
+            session_id=session_id, input_text=sanitized_message,
+            output_text=full_text, model=llm_model
+        ))
+        asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
+        asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
+
+    return StreamingResponse(_llm_stream(), media_type="text/event-stream")
+
 
 @router.post("/document-scan")
 async def document_scan(request: DocumentScanRequest):

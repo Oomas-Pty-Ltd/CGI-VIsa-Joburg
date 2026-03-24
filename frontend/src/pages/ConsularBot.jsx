@@ -35,7 +35,7 @@ const LANGUAGES = [
 export default function ConsularBot() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState(null);
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem("consular_session_id") || null);
   const [currentStep, setCurrentStep] = useState("register");
   const [isRecording, setIsRecording] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
@@ -81,7 +81,7 @@ export default function ConsularBot() {
       const guestToken = "guest_" + Math.random().toString(36).substr(2, 9);
       localStorage.setItem("token", guestToken);
     }
-    
+
     // Build initial messages array with greeting and active advisories
     const initialMessages = [
       {
@@ -89,7 +89,7 @@ export default function ConsularBot() {
         content: GREETING_MESSAGE
       }
     ];
-    
+
     // Add active advisory messages
     ADVISORY_MESSAGES.filter(adv => adv.active).forEach(advisory => {
       initialMessages.push({
@@ -99,8 +99,35 @@ export default function ConsularBot() {
         content: advisory.content
       });
     });
-    
+
     setMessages(initialMessages);
+
+    // Persistence: if a saved session exists, check for an in-progress application
+    const savedSession = localStorage.getItem("consular_session_id");
+    if (savedSession) {
+      axios.get(`${API}/consular/session/${savedSession}`)
+        .then(res => {
+          const flow = res.data?.flow;
+          const inProgressStates = ["collecting", "docs_uploading", "docs_pending", "consent_pending", "paused"];
+          if (flow && inProgressStates.includes(flow.state)) {
+            const serviceName = flow.service
+              ? flow.service.charAt(0).toUpperCase() + flow.service.slice(1)
+              : "application";
+            setMessages(prev => [
+              ...prev,
+              {
+                role: "assistant",
+                content: `Welcome back! You have an **in-progress ${serviceName} application** (Tracking ID: \`${flow.tracking_id || "pending"}\`).\n\nType **continue** to resume where you left off, or **discard** to start fresh.`
+              }
+            ]);
+          }
+        })
+        .catch(() => {
+          // Session expired or not found — clear it silently
+          localStorage.removeItem("consular_session_id");
+          setSessionId(null);
+        });
+    }
   }, []);
 
   // Cleanup camera stream on unmount
@@ -146,6 +173,7 @@ export default function ConsularBot() {
 
       if (!sessionId) {
         setSessionId(response.data.session_id);
+        localStorage.setItem("consular_session_id", response.data.session_id);
       }
 
       // Type out the response with animation
@@ -154,6 +182,12 @@ export default function ConsularBot() {
       
       setCurrentStep(response.data.step);
       setIsTyping(false);
+
+      // Clear saved session only when application is fully submitted
+      if (response.data.step === "submitted") {
+        localStorage.removeItem("consular_session_id");
+        setSessionId(null);
+      }
 
       // Play audio response if available
       if (response.data.audio_base64 && enableVoice) {

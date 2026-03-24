@@ -231,26 +231,25 @@ DEFAULT_KNOWLEDGE = [
         "answer": """**Consulate General of India, Johannesburg**
 
 **Address:**
-2nd Floor, Sandown Mews East
-88 Stella Street, Sandton
-Johannesburg, South Africa
+1st Floor, Cedar Square, Corner Willow Ave & Cedar Road
+Fourways, Johannesburg 2055
 
 **Contact:**
-📞 Phone: +27 11 783 0202
+📞 Phone: +27 6830 38144
 📧 Email: cons.joburg@mea.gov.in
 🌐 Website: https://www.cgijoburg.gov.in
 
 **Office Hours:**
-Monday - Friday: 9:00 AM - 5:30 PM
+Monday–Friday: 09:00–17:00
 
-**Consular Services (Token Counter):**
-Monday - Friday: 9:00 AM - 12:30 PM
+**Consular Services:**
+Monday–Friday: 09:00–12:00 (by appointment only)
 
 **Closed:** Indian and South African public holidays
 
 **24/7 Emergency:** +27 6830 38144""",
         "keywords": ["office", "address", "hours", "timing", "contact", "location"],
-        "source": "https://www.cgijoburg.gov.in/page/contact-us/",
+        "source": "https://www.cgijoburg.gov.in/",
         "source_verified": True
     },
     {
@@ -306,22 +305,24 @@ class KnowledgeService:
         # Check if knowledge base exists
         count = await db.knowledge_base.count_documents({})
         
-        if count == 0:
-            # Insert default knowledge
-            for entry_data in DEFAULT_KNOWLEDGE:
-                entry = KnowledgeEntry(
-                    category=KnowledgeCategory(entry_data["category"]),
-                    title=entry_data["title"],
-                    question=entry_data["question"],
-                    answer=entry_data["answer"],
-                    keywords=entry_data["keywords"],
-                    source=entry_data["source"],
-                    source_verified=entry_data["source_verified"]
-                )
-                await db.knowledge_base.insert_one(entry.to_dict())
-            
-            logger.info(f"Initialized knowledge base with {len(DEFAULT_KNOWLEDGE)} entries")
-        
+        # Always upsert default entries by title so corrections are applied on restart
+        for entry_data in DEFAULT_KNOWLEDGE:
+            entry = KnowledgeEntry(
+                category=KnowledgeCategory(entry_data["category"]),
+                title=entry_data["title"],
+                question=entry_data["question"],
+                answer=entry_data["answer"],
+                keywords=entry_data["keywords"],
+                source=entry_data["source"],
+                source_verified=entry_data["source_verified"]
+            )
+            await db.knowledge_base.update_one(
+                {"title": entry_data["title"]},
+                {"$set": entry.to_dict()},
+                upsert=True
+            )
+
+        logger.info(f"Upserted {len(DEFAULT_KNOWLEDGE)} default knowledge entries")
         self.initialized = True
     
     async def search(

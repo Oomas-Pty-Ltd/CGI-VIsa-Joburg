@@ -47,11 +47,9 @@ class LlmChat:
         self.model = MODEL_MAP.get(model, model)
         return self
 
-    async def send_message(self, message: UserMessage) -> str:
-        client = openai.AsyncOpenAI(api_key=self.api_key)
+    def _build_messages(self, message: UserMessage) -> tuple:
+        """Return (history, openai_messages_list, content)."""
         history = _sessions.get(self.session_id, [])
-
-        # Build message content (text + optional images)
         if message.file_contents:
             content: Any = []
             if message.text:
@@ -66,15 +64,17 @@ class LlmChat:
                     })
         else:
             content = message.text
-
         user_msg = {"role": "user", "content": content}
         history.append(user_msg)
-
         messages = []
         if self.system_message:
             messages.append({"role": "system", "content": self.system_message})
         messages.extend(history)
+        return history, messages
 
+    async def send_message(self, message: UserMessage) -> str:
+        history, messages = self._build_messages(message)
+        client = openai.AsyncOpenAI(api_key=self.api_key)
         try:
             response = await client.chat.completions.create(
                 model=self.model,
@@ -84,7 +84,28 @@ class LlmChat:
         except Exception as e:
             logger.error(f"[LlmChat] API error: {e}")
             raise
-
         history.append({"role": "assistant", "content": assistant_text})
         _sessions[self.session_id] = history
         return assistant_text
+
+    async def send_message_stream(self, message: UserMessage):
+        """Yield text chunks as they stream from the LLM."""
+        history, messages = self._build_messages(message)
+        client = openai.AsyncOpenAI(api_key=self.api_key)
+        full_response = ""
+        try:
+            stream = await client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    full_response += delta
+                    yield delta
+        except Exception as e:
+            logger.error(f"[LlmChat] stream error: {e}")
+            raise
+        history.append({"role": "assistant", "content": full_response})
+        _sessions[self.session_id] = history
