@@ -140,13 +140,21 @@ DEFAULT_KNOWLEDGE = [
     },
     {
         "category": "visa",
-        "title": "Tourist Visa",
-        "question": "How to apply for Indian tourist visa?",
-        "answer": """**Indian Tourist Visa:**
+        "title": "Indian Visa — Requirements & Fees",
+        "question": "How to apply for Indian visa? What are the visa fees?",
+        "answer": """**Indian Visa — Requirements & Fees**
 
-**Validity:** Up to 10 years (multiple entry)
+**Visa Fees (VFS Johannesburg):**
+• Tourist Visa: ZAR 1,750
+• Business Visa: ZAR 2,100
+• Student Visa: ZAR 1,500
+• Medical Visa: ZAR 1,750
+• Urgent/Express processing: +ZAR 500 extra
+*(Fees subject to change — verify at visa.vfsglobal.com)*
 
-**Apply Online:** indianvisaonline.gov.in
+**Validity:** Tourist up to 10 years (multiple entry); Business/Student per approval
+
+**Apply Online:** indianvisaonline.gov.in | E-Visa available for most countries
 
 **Requirements:**
 • Valid passport (6+ months validity)
@@ -156,13 +164,13 @@ DEFAULT_KNOWLEDGE = [
 • Return flight tickets
 • Bank statements (3 months)
 
-**Processing:** 3-5 working days
+**Processing:** Standard 3–5 working days | Urgent 1–2 working days
 
-**Fees:** Varies by nationality and duration
-
-**E-Visa:** Available for most countries - apply online for faster processing.""",
-        "keywords": ["tourist visa", "visit visa", "travel visa", "holiday"],
-        "source": "https://indianvisaonline.gov.in",
+**Submit at:** VFS Global Johannesburg — Mon–Fri 08:00–15:00 (appointment mandatory)""",
+        "keywords": ["visa", "tourist visa", "visit visa", "travel visa", "holiday",
+                     "visa fees", "visa fee", "visa cost", "visa price", "visa charges",
+                     "how much visa", "fees", "cost", "price", "charges", "zar"],
+        "source": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
         "source_verified": True
     },
     {
@@ -220,7 +228,8 @@ DEFAULT_KNOWLEDGE = [
 • Bank transfer
 
 *Fees subject to change. Verify current rates before visiting.*""",
-        "keywords": ["fees", "cost", "price", "payment", "charges"],
+        "keywords": ["fees", "cost", "price", "payment", "charges", "zar", "rand",
+                     "visa fees", "passport fees", "oci fees", "how much"],
         "source": "https://www.cgijoburg.gov.in/page/fee-schedule/",
         "source_verified": True
     },

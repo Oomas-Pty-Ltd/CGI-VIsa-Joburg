@@ -16,6 +16,107 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// ── Custom markdown renderer for bot responses ──────────────────────────────
+const MD = {
+  h1: ({ children }) => (
+    <h1 className="text-base font-bold text-[#1A2E40] mt-4 mb-1.5 first:mt-0 leading-snug border-b border-gray-100 pb-1">
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="text-sm font-bold text-[#1A2E40] mt-3 mb-1 first:mt-0 leading-snug">
+      {children}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="text-sm font-semibold text-[#E06F2C] mt-2 mb-0.5 first:mt-0">
+      {children}
+    </h3>
+  ),
+  p: ({ children }) => (
+    <p className="text-sm text-[#1A2E40] mb-2 last:mb-0 leading-relaxed">
+      {children}
+    </p>
+  ),
+  ul: ({ children }) => (
+    <ul className="mb-2 last:mb-0 space-y-1 pl-1">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="mb-2 last:mb-0 space-y-1 pl-1">{children}</ol>
+  ),
+  li: ({ children, ordered, index }) => (
+    <li className="flex items-start gap-2 text-sm text-[#1A2E40] leading-relaxed">
+      <span className="mt-[3px] flex-shrink-0 text-[#E06F2C] font-bold text-xs select-none min-w-[1.1rem]">
+        {ordered ? `${(index ?? 0) + 1}.` : "•"}
+      </span>
+      <span className="flex-1">{children}</span>
+    </li>
+  ),
+  strong: ({ children }) => (
+    <strong className="font-semibold text-[#1A2E40]">{children}</strong>
+  ),
+  em: ({ children }) => (
+    <em className="italic text-gray-500">{children}</em>
+  ),
+  hr: () => (
+    <hr className="my-3 border-0 border-t border-gray-200" />
+  ),
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[#E06F2C] underline underline-offset-2 hover:text-[#c45a1a] break-all"
+    >
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-3 border-[#E06F2C] pl-3 my-2 text-sm text-gray-600 italic bg-orange-50 py-1 rounded-r">
+      {children}
+    </blockquote>
+  ),
+  code: ({ inline, children }) =>
+    inline ? (
+      <code className="bg-gray-100 text-[#1A2E40] px-1 py-0.5 rounded text-xs font-mono">
+        {children}
+      </code>
+    ) : (
+      <pre className="bg-gray-100 text-[#1A2E40] px-3 py-2 rounded text-xs font-mono overflow-x-auto my-2 whitespace-pre-wrap">
+        <code>{children}</code>
+      </pre>
+    ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto my-2 rounded border border-gray-200">
+      <table className="w-full text-sm border-collapse">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+  th: ({ children }) => (
+    <th className="border-b border-gray-200 px-3 py-1.5 text-left text-xs font-semibold text-[#1A2E40] uppercase tracking-wide">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border-b border-gray-100 px-3 py-1.5 text-sm text-[#1A2E40]">
+      {children}
+    </td>
+  ),
+  tr: ({ children }) => (
+    <tr className="even:bg-gray-50 hover:bg-orange-50 transition-colors">
+      {children}
+    </tr>
+  ),
+};
+
+const BotMessage = ({ content }) => (
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
+    {content}
+  </ReactMarkdown>
+);
+
 const STEPS = [
   { id: 1, label: "Register", value: "register" },
   { id: 2, label: "Upload", value: "upload" },
@@ -36,11 +137,13 @@ export default function ConsularBot() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState(() => localStorage.getItem("consular_session_id") || null);
+  const sessionIdRef = useRef(localStorage.getItem("consular_session_id") || null);
   const [currentStep, setCurrentStep] = useState("register");
   const [isRecording, setIsRecording] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [enableVoice, setEnableVoice] = useState(true);
+  const enableVoiceRef = useRef(true); // always reflects latest value inside async handlers
   const [isTyping, setIsTyping] = useState(false);
   const typingIntervalRef = useRef(null);
   const typingStoppedRef = useRef(false);
@@ -125,6 +228,7 @@ export default function ConsularBot() {
         .catch(() => {
           // Session expired or not found — clear it silently
           localStorage.removeItem("consular_session_id");
+          sessionIdRef.current = null;
           setSessionId(null);
         });
     }
@@ -142,7 +246,10 @@ export default function ConsularBot() {
   const handleSend = async (overrideText) => {
     if (isTyping) return;
     const text = overrideText !== undefined ? overrideText : input;
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      toast.error("Please type a message before sending.");
+      return;
+    }
 
     // Stop any currently playing audio
     if (audioRef.current) {
@@ -159,44 +266,82 @@ export default function ConsularBot() {
     // Show typing indicator
     setIsTyping(true);
 
+    // Add empty bot message placeholder — filled in as chunks arrive
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
     try {
-      const response = await axios.post(
-        `${API}/consular/chat`,
-        {
+      const res = await fetch(`${API}/consular/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           message: messageText,
-          session_id: sessionId,
+          session_id: sessionIdRef.current,
           user_id: "guest",
-          enable_voice: enableVoice,
-          language: selectedLanguage
+          enable_voice: false,   // voice not supported over stream
+          language: selectedLanguage,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop(); // keep incomplete tail
+
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          let evt;
+          try { evt = JSON.parse(part.slice(6)); } catch { continue; }
+
+          if (evt.error) {
+            toast.error(evt.error);
+            setMessages((prev) => prev.slice(0, -1));
+            setIsTyping(false);
+            return;
+          }
+          if (evt.chunk) {
+            fullText += evt.chunk;
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { role: "assistant", content: fullText };
+              return updated;
+            });
+          }
+          if (evt.done) {
+            const sid = evt.session_id;
+            // Always sync — backend may create a new session when old one expires
+            if (sid && sid !== sessionIdRef.current) {
+              sessionIdRef.current = sid;
+              setSessionId(sid);
+              localStorage.setItem("consular_session_id", sid);
+            }
+            setCurrentStep(evt.step || "complete");
+            if (evt.step === "submitted") {
+              localStorage.removeItem("consular_session_id");
+              sessionIdRef.current = null;
+              setSessionId(null);
+            }
+            // Speak the completed response if voice is enabled
+            if (enableVoiceRef.current && fullText) {
+              speakText(fullText);
+            }
+          }
         }
-      );
-
-      if (!sessionId) {
-        setSessionId(response.data.session_id);
-        localStorage.setItem("consular_session_id", response.data.session_id);
-      }
-
-      // Type out the response with animation
-      const botResponse = response.data.response;
-      await typeMessage(botResponse);
-      
-      setCurrentStep(response.data.step);
-      setIsTyping(false);
-
-      // Clear saved session only when application is fully submitted
-      if (response.data.step === "submitted") {
-        localStorage.removeItem("consular_session_id");
-        setSessionId(null);
-      }
-
-      // Play audio response if available
-      if (response.data.audio_base64 && enableVoice) {
-        playAudio(response.data.audio_base64);
       }
     } catch (error) {
       console.error("Chat error:", error);
       toast.error("Failed to send message. Please try again.");
-      setMessages((prev) => prev.slice(0, -1));
+      setMessages((prev) => prev.slice(0, -2)); // remove user + empty bot
+    } finally {
       setIsTyping(false);
     }
   };
@@ -279,6 +424,72 @@ export default function ConsularBot() {
       setIsSpeaking(false);
       console.error("Audio play error:", error);
     }
+  };
+
+  // Browser TTS — strips markdown, respects enableVoiceRef
+  const speakText = (text) => {
+    if (!enableVoiceRef.current) return;
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+
+    // Voices may not be loaded yet on first call — wait for them
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.onvoiceschanged = null;
+        speakText(text);
+      };
+      return;
+    }
+
+    // Strip markdown so the bot doesn't read "asterisk asterisk" etc.
+    const plain = text
+      .replace(/\*\*?([^*]+)\*\*?/g, "$1")
+      .replace(/#{1,6}\s/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/`[^`]+`/g, "")
+      .replace(/•/g, "")
+      .replace(/\n+/g, " ")
+      .trim();
+
+    if (!plain) return;
+
+    const utter = new SpeechSynthesisUtterance(plain);
+    utter.lang = selectedLanguage || "en";
+    utter.rate = 1.3;
+
+    // Strictly female voices only — known female voice names across all platforms
+    const FEMALE_NAMES = /heera|priya|aditi|neerja|kalpana|swara|zira|samantha|karen|moira|fiona|tessa|victoria|linda|emma|aria|jenny|sonia|natasha|susan|hazel|amelie|alice|alva|anna|claire|carmit|damayanti|ioana|joana|laura|lekha|luciana|mariska|mei\-jia|melina|milena|monica|paulina|sangeeta|sara|satu|sin\-ji|yelda|yuna|zosia/i;
+
+    const allVoices = window.speechSynthesis.getVoices();
+
+    // Filter to female-only voices
+    const femaleVoices = allVoices.filter(
+      (v) => FEMALE_NAMES.test(v.name) || /female|woman|girl/i.test(v.name)
+    );
+
+    const femaleVoice =
+      // 1. Indian English female (en-IN)
+      femaleVoices.find((v) => v.lang === "en-IN") ||
+      // 2. Hindi female (hi-IN)
+      femaleVoices.find((v) => v.lang === "hi-IN") ||
+      // 3. Any English female
+      femaleVoices.find((v) => v.lang.startsWith("en")) ||
+      // 4. Any female voice at all
+      femaleVoices[0] ||
+      null;
+
+    if (femaleVoice) {
+      utter.voice = femaleVoice;
+      utter.lang  = femaleVoice.lang;
+    } else {
+      // No female voice found — set lang hint only, do not use a male voice
+      utter.lang = "en-IN";
+    }
+
+    utter.onstart = () => setIsSpeaking(true);
+    utter.onend   = () => setIsSpeaking(false);
+    utter.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utter);
   };
 
   // =====================================================================
@@ -546,7 +757,7 @@ export default function ConsularBot() {
         className="sr-only"
         id="status-announcer"
       >
-        {isTyping && "Seva Setu is typing a response..."}
+        {isTyping && "Loading..."}
         {isSpeaking && "Playing voice response..."}
       </div>
 
@@ -704,12 +915,20 @@ export default function ConsularBot() {
                       type="checkbox"
                       checked={enableVoice}
                       onChange={(e) => {
+                        enableVoiceRef.current = e.target.checked;
                         setEnableVoice(e.target.checked);
-                        if (!e.target.checked && audioRef.current) {
-                          audioRef.current.pause();
-                          audioRef.current.onended = null;
-                          audioRef.current.onerror = null;
-                          audioRef.current = null;
+                        if (!e.target.checked) {
+                          // Stop base64 audio if playing
+                          if (audioRef.current) {
+                            audioRef.current.pause();
+                            audioRef.current.onended = null;
+                            audioRef.current.onerror = null;
+                            audioRef.current = null;
+                          }
+                          // Stop browser TTS if speaking
+                          if (window.speechSynthesis) {
+                            window.speechSynthesis.cancel();
+                          }
                           setIsSpeaking(false);
                         }
                       }}
@@ -793,26 +1012,20 @@ export default function ConsularBot() {
                           }`} aria-hidden="true" />
                           <h4 className="font-bold text-sm">{msg.title}</h4>
                         </div>
-                        <div className="prose prose-sm max-w-none ml-7 prose-p:my-1 prose-p:text-current prose-ul:my-1 prose-li:text-current prose-strong:font-bold">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </ReactMarkdown>
+                        <div className="ml-7">
+                          <BotMessage content={msg.content} />
                         </div>
                       </div>
                     ) : (
                       <div
-                        className={`max-w-md px-4 py-3 rounded-lg ${
+                        className={`max-w-[88%] px-4 py-3 rounded-2xl ${
                           msg.role === "user"
-                            ? "bg-[#E06F2C] text-white"
-                            : "bg-white border border-gray-200 text-[#1A2E40]"
+                            ? "bg-[#E06F2C] text-white rounded-br-sm text-sm leading-relaxed"
+                            : "bg-white border border-gray-200 text-[#1A2E40] rounded-bl-sm shadow-sm"
                         }`}
                       >
                         {msg.role === "assistant" ? (
-                          <div className="prose prose-sm max-w-none prose-headings:text-[#1A2E40] prose-headings:font-bold prose-p:text-[#1A2E40] prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:text-[#1A2E40] prose-strong:text-[#E06F2C] prose-strong:font-semibold prose-a:text-[#E06F2C] prose-a:no-underline hover:prose-a:underline">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.content}
-                            </ReactMarkdown>
-                          </div>
+                          <BotMessage content={msg.content} />
                         ) : (
                           msg.content
                         )}
@@ -826,7 +1039,7 @@ export default function ConsularBot() {
                     className="flex justify-start"
                     data-testid="typing-indicator"
                     role="status"
-                    aria-label="Seva Setu is typing"
+                    aria-label="Loading..."
                   >
                     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
                       <div className="flex gap-1" aria-hidden="true">
@@ -834,7 +1047,7 @@ export default function ConsularBot() {
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
                         <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
                       </div>
-                      <span className="text-sm text-gray-500">Seva Setu is typing...</span>
+                      <span className="text-sm text-gray-500">Loading...</span>
                     </div>
                   </div>
                 )}
@@ -942,8 +1155,9 @@ export default function ConsularBot() {
                       </Button>
                     ) : (
                       <Button
-                        onClick={handleSend}
-                        className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
+                        onClick={() => handleSend()}
+                        disabled={isTyping}
+                        className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                         data-testid="send-btn"
                         aria-label="Send message"
                       >

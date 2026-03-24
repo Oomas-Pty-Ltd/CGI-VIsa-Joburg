@@ -41,7 +41,7 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state
+from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state, is_apply_intent
 
 load_dotenv()
 
@@ -401,16 +401,22 @@ async def chat_stream(request: ChatRequest):
         yield f"data: {json.dumps({'chunk': text})}\n\n"
         yield f"data: {json.dumps({'done': True, 'session_id': sid, 'step': step})}\n\n"
 
-    if deterministic:
-        session = await session_manager.get_or_create_session(
-            channel="web", user_identifier=request.user_id or "guest",
-            session_id=request.session_id,
-            metadata={"language": request.language}
-        )
-        return StreamingResponse(
-            _stream_deterministic(deterministic, session["id"], "complete"),
-            media_type="text/event-stream"
-        )
+    # Only use deterministic shortcut for pure greetings / FAQs with NO active
+    # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
+    # reach process_flow so the application state-machine runs correctly.
+    if deterministic and not is_apply_intent(sanitized_message):
+        # Quick peek at flow state — skip deterministic if user is mid-flow
+        _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
+        if _quick_flow.get("state", "idle") == "idle":
+            session = await session_manager.get_or_create_session(
+                channel="web", user_identifier=request.user_id or "guest",
+                session_id=request.session_id,
+                metadata={"language": request.language}
+            )
+            return StreamingResponse(
+                _stream_deterministic(deterministic, session["id"], "complete"),
+                media_type="text/event-stream"
+            )
 
     # ── Full LLM path ─────────────────────────────────────────────────
     user_id   = request.user_id or "guest"
@@ -470,10 +476,11 @@ async def chat_stream(request: ChatRequest):
     )
 
     # ── Non-LLM flow response ─────────────────────────────────────────
+    # Do NOT append flow_suffix here — flow_response already contains
+    # the complete prompt (e.g. consent_prompt ends with "Reply yes/no").
+    # flow_suffix is only for LLM responses that need a nudge back into flow.
     if flow_response is not None and not needs_llm:
-        flow_service = detect_service(sanitized_message)
-        suffix = flow_suffix(current_step, flow_service)
-        full_text = flow_response + (suffix or "")
+        full_text = flow_response
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
         asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
         return StreamingResponse(

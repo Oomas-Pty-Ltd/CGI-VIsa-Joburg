@@ -553,8 +553,8 @@ def _service_info_page(service_key: str, scraped_summary: str = "") -> str:
 
     parts.append(f"**Documents required:**\n{docs}")
     parts.append(
-        f"---\nWould you like to **apply** for {svc['name']}?\n"
-        f"Type **apply** to start your application."
+        f"---\n**Are you interested in starting the application process for {svc['name']}?**\n"
+        f"Type **apply** to begin, or ask any questions you may have."
     )
     return "\n\n".join(parts)
 
@@ -579,6 +579,39 @@ def _docs_complete_prompt(service_key: str, uploaded: List[Dict], tracking_id: s
 # =====================================================================
 # MAIN ENTRY POINT
 # =====================================================================
+def _pause_prompt(svc_name: str, question: str = "") -> str:
+    """Prompt shown when user asks a question while a form is in progress."""
+    q_note = f'\n\nYou asked: *"{question[:80]}"*' if question else ""
+    return (
+        f"⏸ Your **{svc_name}** application is currently in progress.{q_note}\n\n"
+        f"What would you like to do?\n\n"
+        f"- Reply **continue** — resume your application from where you left off\n"
+        f"- Reply **cancel** — cancel the application and I'll look up your query for you"
+    )
+
+
+async def _search_and_format(question: str, knowledge_base: Optional[Dict]) -> str:
+    """
+    Search knowledge base using the keyword-driven selective scanner.
+    Tries service-specific extraction first, then falls back to deep scan.
+    """
+    if not question or knowledge_base is None:
+        return ""
+    try:
+        from knowledge_scraper import extract_service_content, _SERVICE_KEYWORDS
+        from services.hybrid_retrieval import hybrid_search
+        # Try service-specific extraction first (focused, fast)
+        for svc_key, kws in _SERVICE_KEYWORDS.items():
+            if any(k in question.lower() for k in kws):
+                result = extract_service_content(svc_key, knowledge_base)
+                if result:
+                    return result
+        # Full hybrid pipeline: MongoDB → scraped cache → deep crawl → fallback
+        return await hybrid_search(question, knowledge_base)
+    except Exception:
+        return ""
+
+
 async def process_flow(
     session_id: str,
     message: str,
@@ -586,6 +619,8 @@ async def process_flow(
     image_doc_data: Optional[Dict] = None,
     user_id: str = "guest",
     scraped_summary: str = "",
+    knowledge_base: Optional[Dict] = None,
+    preloaded_flow: Optional[Dict] = None,  # avoids duplicate DB read when caller has it
 ) -> Tuple[Optional[str], bool, str]:
     """
     Process a message through the application flow state machine.
@@ -596,7 +631,7 @@ async def process_flow(
         - needs_llm : True if LLM should generate/augment the response
         - new_step  : step label for ChatResponse
     """
-    flow    = await _get_flow(session_id)
+    flow    = preloaded_flow if preloaded_flow is not None else await _get_flow(session_id)
     state   = flow.get("state", "idle")
     service = flow.get("service")
     fi      = flow.get("field_index", 0)
@@ -607,14 +642,28 @@ async def process_flow(
     # STATE: paused  (user asked a question mid-registration)
     # ------------------------------------------------------------------
     if state == "paused":
+        svc_name = SERVICES[service]["name"] if service and service in SERVICES else "your application"
+
         if is_discard(message):
+            saved_question = flow.get("paused_question", "")
             if app_id:
                 await _update_application(app_id, {"status": "discarded"})
             await _clear_flow(session_id)
-            return (
-                "Your application has been **discarded**. All data has been cleared.\n\nHow can I help you?",
-                False, "idle"
-            )
+
+            # Search knowledge base / websites for the original question
+            search_result = await _search_and_format(saved_question, knowledge_base)
+
+            cancel_msg = f"Your **{svc_name}** application has been **cancelled**. All data has been cleared.\n\n"
+            if search_result and saved_question:
+                cancel_msg += (
+                    f"Here's what I found about **\"{saved_question[:80]}\"**:\n\n"
+                    f"{search_result}\n\n"
+                    f"---\nLet me know if you need anything else."
+                )
+            else:
+                cancel_msg += "How can I help you?"
+            return (cancel_msg, False, "idle")
+
         if is_continue(message):
             saved_fi        = flow.get("paused_field_index", fi)
             paused_in_state = flow.get("paused_in_state", "collecting")
@@ -626,15 +675,24 @@ async def process_flow(
             await _save_flow(session_id, flow)
             if paused_in_state == "docs_uploading":
                 return (
-                    "Resuming document upload.\n\n" + _doc_upload_prompt(service, flow.get("doc_index", 0)),
+                    "✅ Resuming document upload.\n\n" + _doc_upload_prompt(service, flow.get("doc_index", 0)),
                     False, "docs_uploading"
                 )
+            if paused_in_state == "docs_pending":
+                tracking_id = flow.get("tracking_id", "")
+                return (
+                    f"✅ Resuming your application.\n\n"
+                    f"🔖 Tracking ID: `{tracking_id}`\n\n"
+                    f"Type **submit** to finalise, or **discard** to cancel.",
+                    False, "docs_pending"
+                )
             return (
-                "Resuming your application.\n\n" + _field_question(service, saved_fi),
+                "✅ Resuming your application.\n\n" + _field_question(service, saved_fi),
                 False, "collecting"
             )
-        # Still asking — let LLM answer, then remind
-        return (None, True, "paused")
+
+        # Any other message while paused — show the continue/cancel prompt again
+        return (_pause_prompt(svc_name), False, "paused")
 
     # ------------------------------------------------------------------
     # STATE: docs_pending  (all docs processed, waiting for submit)
@@ -670,7 +728,8 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "docs_pending"
             await _save_flow(session_id, flow)
-            return (None, True, "paused")
+            svc_name = SERVICES[service]["name"]
+            return (_pause_prompt(svc_name, message), False, "paused")
         tracking_id = flow.get("tracking_id", "")
         return (
             f"Please type **submit** to complete your application, or **discard** to cancel.\n"
@@ -697,7 +756,8 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "docs_uploading"
             await _save_flow(session_id, flow)
-            return (None, True, "paused")
+            svc_name = SERVICES[service]["name"]
+            return (_pause_prompt(svc_name, message), False, "paused")
 
         # Accept uploaded image or skip
         if has_image or "skip" in message.lower():
@@ -761,7 +821,8 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "collecting"
             await _save_flow(session_id, flow)
-            return (None, True, "paused")
+            svc_name = SERVICES[service]["name"]
+            return (_pause_prompt(svc_name, message), False, "paused")
 
         if is_discard(message):
             if app_id:
@@ -829,12 +890,31 @@ async def process_flow(
     # STATE: info_shown / idle  — detect apply intent
     # ------------------------------------------------------------------
     if is_apply_intent(message) or state == "consent_pending":
-        svc = detect_service(message) or service
+        detected_svc = detect_service(message)
+        # Fall back to session service when:
+        #   - already in consent_pending (mid-flow), OR
+        #   - info_shown (user just asked about this service, "apply" means that service)
+        # Do NOT fall back from idle — that caused stale cross-session carry-over
+        # (e.g. old PCC session → user types "apply oci" → PCC wrongly suggested)
+        if state in ("consent_pending", "info_shown"):
+            svc = detected_svc or service
+        else:
+            svc = detected_svc
+
         if svc:
             flow["state"]   = "consent_pending"
             flow["service"] = svc
             await _save_flow(session_id, flow)
             return (_consent_prompt(svc, scraped_summary), False, "consent_pending")
+
+        # Apply intent detected but no recognisable service — ask the user
+        if is_apply_intent(message) and not svc:
+            svc_list = "\n".join(f"• {v['name']}" for v in SERVICES.values())
+            return (
+                f"I'd be happy to help you apply! Which service are you looking for?\n\n{svc_list}\n\n"
+                f"Just mention the service name (e.g. *passport*, *visa*, *OCI card*, *PCC*) and I'll guide you.",
+                False, "idle"
+            )
 
     # ------------------------------------------------------------------
     # Service info request — show structured info (scraped + static)
@@ -971,16 +1051,25 @@ def _validate_field(key: str, value: str) -> Optional[str]:
 def flow_suffix(state: str, service: Optional[str]) -> str:
     """Append after LLM response to guide user back into the flow."""
     svc_name = SERVICES[service]["name"] if service and service in SERVICES else "your application"
-    if state == "paused":
-        return (
-            f"\n\n---\n"
-            f"⏸ Your **{svc_name}** application is paused.\n"
-            f"Reply **continue** to resume, or **discard** to cancel and clear all data."
-        )
+    # Note: "paused" state no longer uses LLM — it returns direct prompts,
+    # so no suffix is needed for it here.
     if state == "consent_pending" and service:
         return (
             f"\n\n---\n"
             f"Would you still like to **apply** for {svc_name}? "
             f"Reply **yes** to start registration or **no** to cancel."
+        )
+    if state in ("idle", "info_shown"):
+        if service and service in SERVICES:
+            svc_name = SERVICES[service]["name"]
+            return (
+                f"\n\n---\n"
+                f"Is this sufficient information, or do you need more details?\n"
+                f"**Are you interested in starting the application process for {svc_name}?** "
+                f"Type **apply** to begin."
+            )
+        return (
+            "\n\n---\n"
+            "Is this sufficient information, or do you need more details?"
         )
     return ""

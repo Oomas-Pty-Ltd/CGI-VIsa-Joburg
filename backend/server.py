@@ -84,6 +84,11 @@ async def lifespan(app: FastAPI):
         # Initialize knowledge base
         await knowledge_service.initialize()
         logger.info("Knowledge base initialized")
+
+        # Pre-warm the scraper cache so the first user chat request is instant
+        from knowledge_scraper import get_realtime_knowledge
+        asyncio.create_task(get_realtime_knowledge())
+        logger.info("Scraper cache pre-warm started in background")
         
         # Start session cleanup task (runs every hour)
         async def periodic_session_cleanup():

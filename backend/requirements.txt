@@ -79,6 +79,7 @@ passlib==1.7.4
 pathspec==1.0.3
 phonenumbers==9.0.22
 pillow==12.1.0
+playwright>=1.44.0
 platformdirs==4.5.1
 pluggy==1.6.0
 preshed==3.0.12

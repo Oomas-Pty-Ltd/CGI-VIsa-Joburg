@@ -59,8 +59,8 @@ export default function ChatWidget() {
       const response = await axios.post(`${API}/consular/chat-widget`, {
         message: userMessage,
         session_id: sessionId,
-        mode: "concise" // Tell backend to give concise responses
-      });
+        mode: "concise"
+      }, { timeout: 60000 });
 
       if (!sessionId) {
         setSessionId(response.data.session_id);
