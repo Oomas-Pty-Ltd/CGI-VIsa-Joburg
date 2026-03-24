@@ -355,7 +355,7 @@ Lifelong visa for foreign nationals of Indian origin.
 Johannesburg
 
 **Phone:** +27 11 783 0202
-**Emergency:** +27 6830 38144 (24/7)
+**Emergency:** (+27) 11 581 9800 (24/7)
 **Email:** cons.joburg@mea.gov.in
 
 **Office Hours:**
@@ -373,7 +373,7 @@ Mon-Fri: 9:00 AM - 12:30 PM
         "content": """**🚨 EMERGENCY CONTACT:**
 
 **24/7 Emergency Helpline:**
-📞 +27 6830 38144
+📞 (+27) 11 581 9800
 
 **For:**
 • Indian citizens in distress

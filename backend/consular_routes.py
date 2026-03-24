@@ -297,8 +297,8 @@ OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
 {context_info}
 
 FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
-  📞 +27 6830 38144  |  📧 cons.joburg@mea.gov.in
-  🏢 1st Floor, Cedar Square, Fourways, Johannesburg 2055
+  📞 (+27) 11 581 9800  |  📧 cons.joburg@mea.gov.in
+  🏢 1 Eton Road, Parktown 2193, Johannesburg
   🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
   VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
 
@@ -511,8 +511,8 @@ OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
 {context_info}
 
 FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
-  📞 +27 6830 38144  |  📧 cons.joburg@mea.gov.in
-  🏢 1st Floor, Cedar Square, Fourways, Johannesburg 2055
+  📞 (+27) 11 581 9800  |  📧 cons.joburg@mea.gov.in
+  🏢 1 Eton Road, Parktown 2193, Johannesburg
   🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
   VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
 

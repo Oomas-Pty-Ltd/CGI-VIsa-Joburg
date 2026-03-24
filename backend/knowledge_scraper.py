@@ -121,7 +121,7 @@ async def _fetch_with_playwright(url: str) -> str:
                 "**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf,mp4,webp}",
                 lambda route: route.abort()
             )
-            await page.goto(url, wait_until="networkidle", timeout=20000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=12000)
             html = await page.content()
             await browser.close()
             _playwright_available = True
@@ -238,14 +238,21 @@ CGI_SUB_PAGES = [
 EXCEPTION_EMAIL = "mayurakole@example.com"
 
 CONTACT_FALLBACK = {
-    "emergency_contact": "+27 6830 38144",
-    "email": "cons.joburg@mea.gov.in",
-    "address": "Consulate General of India, 1st Floor, Cedar Square, Corner Willow Ave & Cedar Road, Fourways, Johannesburg 2055",
-    "website": "https://www.cgijoburg.gov.in",
+    "phone_main":        "(+27) 11 581 9800",
+    "phone_consular":    "(+27) 11 482 1368 (Consular Enquiries)",
+    "fax":               "(+27) 11 482 4648 / 8492",
+    "emergency_contact": "(+27) 11 581 9800",
+    "email":             "cons.joburg@mea.gov.in",
+    "address": (
+        "Consulate General of India, Johannesburg | "
+        "1 Eton Road, Corner Jan Smuts Avenue & Eton Road, "
+        "Parktown 2193, Johannesburg, South Africa"
+    ),
+    "website":    "https://www.cgijoburg.gov.in",
     "vfs_address": "VFS Global Visa Application Centre, Johannesburg",
     "vfs_website": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
     "office_hours": "Monday–Friday: 09:00–17:00 | Consular services: 09:00–12:00 (by appointment)",
-    "vfs_hours": "Monday–Friday: 08:00–15:00 (appointment mandatory)",
+    "vfs_hours":    "Monday–Friday: 08:00–15:00 (appointment mandatory)",
 }
 
 
@@ -358,20 +365,17 @@ async def scrape_cgi_joburg() -> Dict:
                 continue
             page_name = url.rstrip("/").split("/")[-1] or "home"
             combined_parts.append(f"[Page: {page_name}]\n{result}")
-            # Use homepage HTML for contact extraction
+            # Reuse already-fetched homepage HTML — don't fetch again
             if url == "https://www.cgijoburg.gov.in/":
                 contact_html = result
 
         page_content = "\n\n".join(combined_parts)
 
-        # Extract live contact details from homepage
+        # Extract live contact details from already-fetched homepage HTML
         live_contact = CONTACT_FALLBACK.copy()
         if contact_html:
             try:
-                soup = BeautifulSoup(
-                    await _fetch_with_retry("https://www.cgijoburg.gov.in/"),
-                    "html.parser"
-                )
+                soup = BeautifulSoup(contact_html, "html.parser")
                 live_contact = _extract_contact_details(soup)
             except Exception:
                 pass
@@ -395,8 +399,7 @@ async def scrape_vfs_global() -> Dict:
     so we also try the static/alternative endpoints for actual content.
     """
     vfs_urls = [
-        # Try static/print versions and alternative paths first
-        "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
+        # Static VFS pages that reliably return 200
         "https://www.vfsglobal.com/india/southafrica/english/index.html",
         "https://www.vfsglobal.com/india/southafrica/english/contact-us.html",
     ]
@@ -631,7 +634,7 @@ def get_fallback_knowledge() -> Dict:
     return {
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "source": "Fallback - Official Information (cached)",
-        "emergency_contact": "+27 6830 38144",
+        "emergency_contact": "(+27) 11 581 9800",
         "email": "cons.joburg@mea.gov.in",
         "services": {
             "passport": {
@@ -730,16 +733,6 @@ def get_fallback_knowledge() -> Dict:
     }
 
 
-def get_fallback_vfs_info() -> Dict:
-    return {
-        "source": "VFS Global (cached)",
-        "location": {
-            "address": "VFS Global, Johannesburg",
-            "timings": "Monday–Friday: 08:00–15:00"
-        }
-    }
-
-
 _SERVICE_KEYWORDS = {
     "visa":        ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline",
                     "e_visa", "evisa", "visa fee", "visa fees", "visa cost", "visa price", "visa charges",
@@ -780,6 +773,14 @@ _STOP_WORDS = {
     "my", "me", "you", "to", "for", "of", "in", "on", "at", "do", "does",
     "will", "would", "could", "should", "with", "from", "this", "that",
     "and", "or", "but", "not", "have", "has", "had", "been", "being", "i",
+}
+
+# Flow-control words that are never knowledge queries — skip deep scan entirely
+_NO_CRAWL_WORDS = {
+    "yes", "yep", "yeah", "nope", "okay", "sure",
+    "apply", "start", "begin", "register", "proceed", "confirm",
+    "cancel", "stop", "exit", "quit", "back", "next", "done",
+    "hello", "hi", "hey", "thanks", "thank", "bye", "goodbye",
 }
 
 _HIT_THRESHOLD = 3       # min matching lines to consider Level 1 "found"
@@ -920,6 +921,12 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
     """
     keywords = _extract_keywords(query)
     if not keywords:
+        return _search_knowledge_sync(query, knowledge_base)
+
+    # Skip deep scan entirely for flow-control words (yes/no/apply/hello etc.)
+    # They are never knowledge queries — crawling for them wastes resources
+    query_words = set(re.findall(r'\b[a-zA-Z]+\b', query.lower()))
+    if query_words and query_words.issubset(_NO_CRAWL_WORDS | _STOP_WORDS):
         return _search_knowledge_sync(query, knowledge_base)
 
     cache_key = "_".join(sorted(set(keywords[:6])))

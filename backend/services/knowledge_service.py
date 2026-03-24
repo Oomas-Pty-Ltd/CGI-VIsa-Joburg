@@ -240,11 +240,13 @@ DEFAULT_KNOWLEDGE = [
         "answer": """**Consulate General of India, Johannesburg**
 
 **Address:**
-1st Floor, Cedar Square, Corner Willow Ave & Cedar Road
-Fourways, Johannesburg 2055
+1 Eton Road, Corner Jan Smuts Avenue & Eton Road
+Parktown 2193, Johannesburg, South Africa
 
 **Contact:**
-📞 Phone: +27 6830 38144
+📞 Main: (+27) 11 581 9800
+📞 Consular Enquiries: (+27) 11 482 1368
+📠 Fax: (+27) 11 482 4648 / 8492
 📧 Email: cons.joburg@mea.gov.in
 🌐 Website: https://www.cgijoburg.gov.in
 
@@ -254,11 +256,10 @@ Monday–Friday: 09:00–17:00
 **Consular Services:**
 Monday–Friday: 09:00–12:00 (by appointment only)
 
-**Closed:** Indian and South African public holidays
-
-**24/7 Emergency:** +27 6830 38144""",
-        "keywords": ["office", "address", "hours", "timing", "contact", "location"],
-        "source": "https://www.cgijoburg.gov.in/",
+**Closed:** Indian and South African public holidays""",
+        "keywords": ["office", "address", "hours", "timing", "contact", "location",
+                     "phone", "email", "fax", "parktown", "eton road", "jan smuts"],
+        "source": "https://www.cgijoburg.gov.in/page/contact-us/",
         "source_verified": True
     },
     {
@@ -268,7 +269,7 @@ Monday–Friday: 09:00–12:00 (by appointment only)
         "answer": """**Emergency Consular Assistance**
 
 **24/7 Emergency Helpline:**
-📞 +27 6830 38144
+📞 (+27) 11 581 9800
 
 **For emergencies involving:**
 • Indian citizens in distress

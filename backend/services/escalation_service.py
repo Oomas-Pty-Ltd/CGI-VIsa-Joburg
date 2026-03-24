@@ -354,7 +354,7 @@ class EscalationService:
 Your request has been marked as **URGENT** and sent to our emergency response team.
 
 **Immediate Actions:**
-📞 **Emergency Helpline:** +27 6830 38144 (24/7)
+📞 **Emergency Helpline:** (+27) 11 581 9800 (24/7)
 
 A consular officer will contact you as soon as possible.
 

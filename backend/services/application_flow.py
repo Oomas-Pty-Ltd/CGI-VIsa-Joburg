@@ -248,9 +248,9 @@ SERVICES: Dict[str, Dict] = {
 }
 
 CONTACT_INFO = (
-    "📞 **+27 6830 38144**\n"
+    "📞 **(+27) 11 581 9800**\n"
     "📧 cons.joburg@mea.gov.in\n"
-    "🏢 1st Floor, Cedar Square, Corner Willow Ave & Cedar Road, Fourways, Johannesburg 2055\n"
+    "🏢 1 Eton Road, Corner Jan Smuts Avenue & Eton Road, Parktown 2193, Johannesburg\n"
     "🕐 Mon–Fri 09:00–17:00 | Consular services: 09:00–12:00 (by appointment)\n"
     "🌐 https://www.cgijoburg.gov.in"
 )

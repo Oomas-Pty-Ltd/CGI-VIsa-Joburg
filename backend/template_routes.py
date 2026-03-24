@@ -215,7 +215,7 @@ Please investigate immediately.""",
 {{alert_message}}
 
 If you have any concerns, please contact:
-📞 Emergency: +27 6830 38144
+📞 Emergency: (+27) 11 581 9800
 📧 Email: cons.joburg@mea.gov.in
 
 Stay vigilant. Stay safe.""",

@@ -81,7 +81,7 @@ class RuleEngineResult(BaseModel):
 
 class WhatsAppRuleEngine:
     def __init__(self):
-        self.emergency_contact = "+27 6830 38144"
+        self.emergency_contact = "(+27) 11 581 9800"
         self.emergency_email = "cons.joburg@mea.gov.in"
         
         # Compile blocked patterns for efficiency

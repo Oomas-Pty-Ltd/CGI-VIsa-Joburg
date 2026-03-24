@@ -59,7 +59,7 @@ KNOWLEDGE BASE - CGI JOHANNESBURG:
 **Office Information:**
 - Address: 2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg
 - Phone: +27 11 783 0202
-- Emergency: +27 6830 38144 (24/7)
+- Emergency: (+27) 11 581 9800 (24/7)
 - Email: cons.joburg@mea.gov.in
 - Website: https://www.cgijoburg.gov.in
 - Hours: Mon-Fri 9:00 AM - 5:30 PM
