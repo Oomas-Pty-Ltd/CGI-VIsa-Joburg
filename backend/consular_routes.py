@@ -41,13 +41,80 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state, is_apply_intent
+from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query
 
 load_dotenv()
 
 router = APIRouter(prefix="/consular", tags=["consular"])
 import logging
+import io
 logger = logging.getLogger(__name__)
+
+
+# ── Supported image format detection ─────────────────────────────────────────
+_B64_MAGIC = {
+    "/9j/":   "image/jpeg",
+    "iVBORw": "image/png",
+    "R0lGOD": "image/gif",
+    "UklGR":  "image/webp",
+}
+_UNSUPPORTED_B64 = {
+    "JVBER": "PDF",
+    "Qk0":   "BMP",
+    "SUkq":  "TIFF",
+    "TU0A":  "TIFF",
+    "AAAAF": "HEIC/HEIF",
+}
+
+
+def _normalize_image(image_base64: str) -> tuple[str, str]:
+    """
+    Detect image format from base64 magic bytes.
+    - Supported formats (JPEG, PNG, WEBP, GIF): return as-is with correct media_type.
+    - Convertible formats (BMP, TIFF): convert to JPEG via Pillow.
+    - PDF: raise ValueError with a user-friendly message.
+    - Unknown: attempt Pillow conversion to JPEG.
+
+    Returns (image_base64, media_type).
+    Raises ValueError for unrecoverable formats.
+    """
+    prefix = image_base64[:10]
+
+    # Already a supported format
+    for magic, mime in _B64_MAGIC.items():
+        if prefix.startswith(magic):
+            return image_base64, mime
+
+    # PDF — cannot convert without poppler
+    if prefix.startswith("JVBER"):
+        raise ValueError(
+            "PDF files cannot be scanned directly. "
+            "Please take a **photo or screenshot** of the document and upload that instead."
+        )
+
+    # HEIC — not supported
+    if prefix.startswith("AAAAF"):
+        raise ValueError(
+            "HEIC/HEIF images are not supported. "
+            "Please convert to JPEG or PNG before uploading."
+        )
+
+    # Attempt Pillow conversion for BMP, TIFF, and any other Pillow-readable format
+    try:
+        from PIL import Image
+        raw = base64.b64decode(image_base64)
+        img = Image.open(io.BytesIO(raw))
+        # Convert palette/RGBA modes for JPEG compatibility
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        converted = base64.b64encode(buf.getvalue()).decode()
+        return converted, "image/jpeg"
+    except Exception as e:
+        raise ValueError(
+            f"Unsupported image format. Please upload a JPEG, PNG, WEBP, or GIF file. ({e})"
+        )
 
 class ChatRequest(BaseModel):
     message: str
@@ -141,7 +208,7 @@ async def chat(request: ChatRequest, http_request: Request):
 
     # Try deterministic response first (no LLM cost)
     deterministic_response = get_deterministic_response(intent_result)
-    if deterministic_response and not request.image_base64:
+    if deterministic_response and not request.image_base64 and not is_tracking_query(sanitized_message):
         user_id = request.user_id or "guest"
         session = await session_manager.get_or_create_session(
             channel="web",
@@ -209,35 +276,14 @@ async def chat(request: ChatRequest, http_request: Request):
     )
     current_state = current_flow.get("state", "idle")
 
-    # ── If in docs_uploading and an image was sent, scan it first ─────
+    # ── If in docs_uploading and an image was sent, mark as uploaded ──
     image_doc_data: dict | None = None
     if current_state == "docs_uploading" and request.image_base64:
-        try:
-            api_key = os.environ.get('EMERGENT_LLM_KEY')
-            scan_chat = LlmChat(
-                api_key=api_key,
-                session_id=str(uuid.uuid4()),
-                system_message=(
-                    "You are a document OCR assistant. Extract all visible text and fields from "
-                    "the document image. Return a JSON object with keys: "
-                    "full_name, dob, document_number, nationality, issue_date, expiry_date, address. "
-                    "Use null for missing fields. Output ONLY valid JSON."
-                )
-            ).with_model("openai", llm_model)
-            raw = await scan_chat.send_message(
-                UserMessage(
-                    text="Extract all fields from this document.",
-                    file_contents=[ImageContent(image_base64=request.image_base64)]
-                )
-            )
-            import json as _json
-            try:
-                image_doc_data = _json.loads(raw)
-            except Exception:
-                image_doc_data = {"raw": raw}
-            image_doc_data["filename"] = "uploaded_doc"
-        except Exception as e:
-            logger.warning(f"Doc scan failed during upload: {sanitize_logs(str(e))}")
+        image_doc_data = {
+            "filename": "uploaded_doc",
+            "file_id": str(uuid.uuid4()),
+            "status": "uploaded",
+        }
 
     # ── Build service-specific scraped summary ─────────────────────────
     scraped_summary = ""
@@ -404,7 +450,7 @@ async def chat_stream(request: ChatRequest):
     # Only use deterministic shortcut for pure greetings / FAQs with NO active
     # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
     # reach process_flow so the application state-machine runs correctly.
-    if deterministic and not is_apply_intent(sanitized_message):
+    if deterministic and not is_apply_intent(sanitized_message) and not is_tracking_query(sanitized_message):
         # Quick peek at flow state — skip deterministic if user is mid-flow
         _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
         if _quick_flow.get("state", "idle") == "idle":
@@ -438,29 +484,14 @@ async def chat_stream(request: ChatRequest):
     )
     current_state = current_flow.get("state", "idle")
 
-    # Image scan (only when in doc-upload state)
+    # Mark as uploaded (no scan)
     image_doc_data = None
     if current_state == "docs_uploading" and request.image_base64:
-        try:
-            api_key = os.environ.get("EMERGENT_LLM_KEY")
-            scan_chat = LlmChat(
-                api_key=api_key, session_id=str(uuid.uuid4()),
-                system_message=(
-                    "Extract all visible fields from the document image. "
-                    "Return ONLY valid JSON with keys: full_name, dob, document_number, "
-                    "nationality, issue_date, expiry_date, address. Use null for missing fields."
-                )
-            ).with_model("openai", llm_model)
-            raw = await scan_chat.send_message(
-                UserMessage(text="Extract fields.", file_contents=[ImageContent(image_base64=request.image_base64)])
-            )
-            try:
-                import json as _j; image_doc_data = _j.loads(raw)
-            except Exception:
-                image_doc_data = {"raw": raw}
-            image_doc_data["filename"] = "uploaded_doc"
-        except Exception as e:
-            logger.warning(f"Doc scan failed: {sanitize_logs(str(e))}")
+        image_doc_data = {
+            "filename": "uploaded_doc",
+            "file_id": str(uuid.uuid4()),
+            "status": "uploaded",
+        }
 
     active_service = detect_service(sanitized_message) or current_flow.get("service")
     scraped_summary = extract_service_content(active_service, knowledge_base) if active_service else ""
@@ -606,16 +637,20 @@ OUTPUT FORMAT (MUST be valid JSON):
 Be accurate and thorough."""
     ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
-    image_content = ImageContent(image_base64=request.image_base64)
+    try:
+        normalized_b64, media_type = _normalize_image(request.image_base64)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    image_content = ImageContent(image_base64=normalized_b64, media_type=media_type)
     user_message = UserMessage(
         text=f"Extract all information from this {request.document_type}. Translate to English if needed.",
         file_contents=[image_content]
     )
-    
+
     try:
         extracted_data = await chat_instance.send_message(user_message)
-        
-        # Save extracted data to session
+
         await db.chat_sessions.update_one(
             {"id": request.session_id},
             {
@@ -626,16 +661,23 @@ Be accurate and thorough."""
                 }
             }
         )
-        
+
         return {
             "success": True,
             "extracted_data": extracted_data,
             "message": "Document processed successfully. Data extracted and translated to English for form filling."
         }
     except Exception as e:
+        err = str(e)
+        if "unsupported image" in err.lower() or "invalid_image_format" in err.lower():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid document format. Please upload a JPEG, PNG, WEBP, or GIF image."
+            )
+        logger.error(f"Document scan error: {sanitize_logs(err)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Document scan error: {str(e)}"
+            detail="Document scan failed. Please try again."
         )
 
 @router.post("/form-submit")
@@ -899,6 +941,46 @@ async def get_session_applications(session_id: str):
                     1 for d in a.get("documents", []) if d.get("status") == "uploaded"
                 ),
                 "documents_required": len(a.get("required_documents", [])),
+            }
+            for a in apps
+        ],
+    }
+
+
+@router.get("/applications/lookup")
+async def lookup_applications_by_contact(contact: str):
+    """
+    Find applications by email or phone number.
+    GET /api/consular/applications/lookup?contact=user@example.com
+    GET /api/consular/applications/lookup?contact=+27811234567
+    """
+    import re as _re
+    db = await get_database()
+    contact = contact.strip()
+    is_email = bool(_re.match(r'.+@.+\..+', contact))
+    field = "form_data.email" if is_email else "form_data.phone"
+    cursor = db.applications.find(
+        {field: {"$regex": _re.escape(contact), "$options": "i"}},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(20)
+    apps = await cursor.to_list(length=20)
+    if not apps:
+        raise HTTPException(status_code=404, detail=f"No applications found for '{contact}'.")
+    return {
+        "contact": contact,
+        "total": len(apps),
+        "applications": [
+            {
+                "tracking_id":        a["tracking_id"],
+                "service":            a["service"],
+                "service_name":       a["service_name"],
+                "status":             a["status"],
+                "created_at":         a["created_at"],
+                "submitted_at":       a.get("submitted_at"),
+                "form_data":          a.get("form_data", {}),
+                "documents_uploaded": sum(1 for d in a.get("documents", []) if d.get("status") == "uploaded"),
+                "documents_required": len(a.get("required_documents", [])),
+                "documents":          a.get("documents", []),
             }
             for a in apps
         ],

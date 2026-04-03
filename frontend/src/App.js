@@ -11,6 +11,7 @@ import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import LocalAdminLogin from "@/pages/LocalAdminLogin";
 import LocalAdminDashboard from "@/pages/LocalAdminDashboard";
 import ConsularBot from "@/pages/ConsularBot";
+import ICSWhatsAppBot from "@/pages/ICSWhatsAppBot";
 import FormReview from "@/pages/FormReview";
 import ChatWidget from "@/components/ChatWidget";
 import AdminDashboardPage from "@/pages/AdminDashboardPage";
@@ -30,6 +31,7 @@ function App() {
                 <Route path="/admin/login" element={<LocalAdminLogin />} />
                 <Route path="/admin/dashboard" element={<LocalAdminDashboard />} />
                 <Route path="/consular" element={<ConsularBot />} />
+                <Route path="/whatsapp" element={<ICSWhatsAppBot />} />
                 <Route path="/consular/review" element={<FormReview />} />
                 <Route path="/widget" element={<ChatWidget />} />
                 <Route path="/widget-demo" element={<WidgetDemo />} />

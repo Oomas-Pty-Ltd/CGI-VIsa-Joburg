@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import json
 import logging
 import re
+import sys
 from typing import List, Dict, Optional, Set
 from urllib.parse import urljoin, urlparse
 import asyncio
@@ -16,15 +17,33 @@ logger = logging.getLogger(__name__)
 # FETCH LAYER CONTROL
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Playwright availability flag — set to False on first ImportError
-_playwright_available: Optional[bool] = None
+# On Windows, asyncio uses ProactorEventLoop which cannot spawn subprocesses
+# inside an already-running loop — Playwright always fails with NotImplementedError.
+# Set the flag to False immediately so the probe is skipped entirely and no
+# "Task exception was never retrieved" noise appears in the logs.
+_playwright_available: Optional[bool] = False if sys.platform == "win32" else None
 
 # ── Failed URL store ──────────────────────────────────────────────────────────
 # Tracks URLs that failed permanently so we never retry within the cooldown.
 # Schema: {url: {"reason": str, "failed_at": datetime, "attempts": int}}
-_failed_urls: Dict[str, Dict] = {}
 _FAILED_URL_COOLDOWN_HOURS = 6   # don't retry a failed URL for 6 hours
 _FAILED_URL_MAX_ATTEMPTS   = 3   # mark permanent after 3 consecutive failures
+
+# CGI Joburg returns HTTP 403 for all automated requests (WAF/Cloudflare).
+# Pre-seed the failure store so these are never attempted on startup.
+_CGI_BLOCKED_URLS = [
+    "https://www.cgijoburg.gov.in/",
+    "https://www.cgijoburg.gov.in/page/passport-services/",
+    "https://www.cgijoburg.gov.in/page/visa-services/",
+    "https://www.cgijoburg.gov.in/page/oci-services/",
+    "https://www.cgijoburg.gov.in/page/fee-schedule/",
+    "https://www.cgijoburg.gov.in/page/contact-us/",
+    "https://www.cgijoburg.gov.in/page/emergency-services/",
+]
+_failed_urls: Dict[str, Dict] = {
+    url: {"reason": "HTTP 403 (permanent — WAF blocked)", "failed_at": datetime.now(timezone.utc), "attempts": _FAILED_URL_MAX_ATTEMPTS}
+    for url in _CGI_BLOCKED_URLS
+}
 
 # ── Scan frequency limiter ────────────────────────────────────────────────────
 # Prevents hammering the same URL more than once per interval.

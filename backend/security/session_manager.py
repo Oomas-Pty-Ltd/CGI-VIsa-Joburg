@@ -196,7 +196,28 @@ class SessionManager:
             session = await self.get_session(session_id, validate_channel=channel)
             if session:
                 return session
-        
+
+        # Look up most recent active session for this channel + user
+        db = await get_database()
+        existing = await db.chat_sessions.find_one(
+            {
+                "channel": channel,
+                "user_identifier": user_identifier,
+                "is_active": True,
+            },
+            {"_id": 0},
+            sort=[("created_at", -1)],
+        )
+        if existing and not self.is_session_expired(existing.get("created_at", "")):
+            # Update last_activity and merge any new metadata
+            update: Dict[str, Any] = {"last_activity": datetime.now(timezone.utc).isoformat()}
+            if metadata:
+                for k, v in metadata.items():
+                    update[f"metadata.{k}"] = v
+            await db.chat_sessions.update_one({"id": existing["id"]}, {"$set": update})
+            existing.update(update)
+            return existing
+
         # Create new session
         return await self.create_session(channel, user_identifier, metadata)
     

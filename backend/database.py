@@ -86,6 +86,13 @@ async def create_indexes():
         await db.whatsapp_sessions.create_index("session_id")
         await db.whatsapp_sessions.create_index("last_message_at")
         
+        # ICS WABA indexes
+        await db.ics_whatsapp_sessions.create_index("phone_number", unique=True)
+        await db.ics_whatsapp_sessions.create_index("updated_at")
+        await db.ics_whatsapp_messages.create_index("phone_number")
+        await db.ics_whatsapp_messages.create_index("timestamp")
+        await db.ics_whatsapp_messages.create_index("ics_mid", sparse=True)
+
         # Rate limit indexes (for persistence when Redis is available)
         await db.rate_limits.create_index("key", unique=True)
         await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)  # TTL index

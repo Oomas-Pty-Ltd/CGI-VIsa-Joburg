@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square, Eye, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -117,6 +117,43 @@ const BotMessage = ({ content }) => (
   </ReactMarkdown>
 );
 
+// ── Document card rendered inside chat for uploaded docs ─────────────────────
+const DocumentCard = ({ doc, onView, onReplace, onRemove }) => (
+  <div className="flex flex-col gap-2 mt-1">
+    <div
+      className="relative w-40 h-28 rounded-lg overflow-hidden border border-gray-200 cursor-pointer group shadow-sm"
+      onClick={onView}
+    >
+      {doc.isPdf ? (
+        <div className="flex flex-col items-center justify-center w-full h-full bg-red-50 text-red-500 gap-1">
+          <FileText size={32} />
+          <span className="text-xs font-medium">PDF</span>
+        </div>
+      ) : (
+        <img src={doc.dataUrl} alt={doc.name} className="w-full h-full object-cover" />
+      )}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        <Eye size={22} className="text-white" />
+      </div>
+    </div>
+    <p className="text-xs text-gray-500 truncate max-w-[160px]">{doc.name}</p>
+    <div className="flex gap-2">
+      <button
+        onClick={onReplace}
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
+      >
+        <RefreshCw size={12} /> Replace
+      </button>
+      <button
+        onClick={onRemove}
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100 transition"
+      >
+        <Trash2 size={12} /> Remove
+      </button>
+    </div>
+  </div>
+);
+
 const STEPS = [
   { id: 1, label: "Register", value: "register" },
   { id: 2, label: "Upload", value: "upload" },
@@ -154,6 +191,10 @@ export default function ConsularBot() {
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
   
+  const [docModal, setDocModal] = useState(null); // { doc, msgIndex }
+  const replaceInputRef = useRef(null);
+  const replacingMsgIndexRef = useRef(null);
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -242,6 +283,71 @@ export default function ConsularBot() {
       }
     };
   }, [cameraStream]);
+
+  // Notify backend that a document was uploaded so the flow advances
+  const sendDocumentToBackend = useCallback(async (imageBase64) => {
+    setIsTyping(true);
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+    try {
+      const res = await fetch(`${API}/consular/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "Document uploaded",
+          image_base64: imageBase64,
+          session_id: sessionIdRef.current,
+          user_id: "guest",
+          enable_voice: false,
+          language: selectedLanguage,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.session_id && evt.session_id !== sessionIdRef.current) {
+              sessionIdRef.current = evt.session_id;
+              setSessionId(evt.session_id);
+              localStorage.setItem("consular_session_id", evt.session_id);
+            }
+            if (evt.chunk) {
+              fullText += evt.chunk;
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: "assistant", content: fullText };
+                return updated;
+              });
+            }
+            if (evt.done) {
+              if (enableVoiceRef.current && fullText) speakText(fullText);
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "assistant", content: "Document received. Please continue." };
+        return updated;
+      });
+    } finally {
+      setIsTyping(false);
+    }
+  }, [selectedLanguage]);
 
   const handleSend = async (overrideText) => {
     if (isTyping) return;
@@ -668,37 +774,27 @@ export default function ConsularBot() {
     // Get image as base64
     const imageBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
     
-    toast.success("Document captured! Processing...");
     stopCamera();
-    
-    // Send to backend for processing
-    try {
-      const response = await axios.post(`${API}/consular/document-scan`, {
-        image_base64: imageBase64,
-        document_type: 'passport',
-        session_id: sessionId
-      });
-      
-      if (response.data.success) {
-        toast.success('Document processed! Data extracted.');
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `📄 **Document Scanned Successfully!**\n\n${response.data.extracted_data}` }
-        ]);
+    toast.success("Document captured!");
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        type: "document",
+        content: "📄 **Document captured.** You can continue filling the form.",
+        docData: { id: Date.now(), name: "Captured document", dataUrl: `data:image/jpeg;base64,${imageBase64}`, isPdf: false }
       }
-    } catch (error) {
-      console.error("Document scan error:", error);
-      toast.error('Document processing failed. Please try again.');
-    }
-  }, [sessionId, stopCamera]);
+    ]);
+    sendDocumentToBackend(imageBase64);
+  }, [sessionId, stopCamera, sendDocumentToBackend]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file format. Please upload JPG, PNG, or PDF only.');
+      toast.error('Invalid file format. Please upload JPG, PNG, WEBP, GIF, or PDF.');
       return;
     }
 
@@ -707,32 +803,66 @@ export default function ConsularBot() {
       return;
     }
 
-    toast.success(`Document "${file.name}" uploaded successfully!`);
-    
     const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = reader.result.split(',')[1];
-      
-      try {
-        const response = await axios.post(`${API}/consular/document-scan`, {
-          image_base64: base64,
-          document_type: 'passport',
-          session_id: sessionId
-        });
-        
-        if (response.data.success) {
-          toast.success('Document processed! Data extracted and translated.');
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `📄 **Document Scanned!**\n\n${response.data.extracted_data}` }
-          ]);
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const base64 = dataUrl.split(',')[1];
+      const isPdf = file.type === 'application/pdf';
+      toast.success('Document uploaded!');
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          type: "document",
+          content: `📄 **Document received:** ${file.name}. You can continue filling the form.`,
+          docData: { id: Date.now(), name: file.name, dataUrl, isPdf }
         }
-      } catch (error) {
-        toast.error('Document processing failed. Please try again.');
-      }
+      ]);
+      sendDocumentToBackend(base64);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
+  };
+
+  // ── Doc actions ────────────────────────────────────────────────────────────
+  const handleDocReplace = (msgIndex) => {
+    replacingMsgIndexRef.current = msgIndex;
+    replaceInputRef.current?.click();
+  };
+
+  const handleReplaceFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Invalid file format. Please upload JPG, PNG, WEBP, GIF, or PDF.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const isPdf = file.type === 'application/pdf';
+      const idx = replacingMsgIndexRef.current;
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          content: `📄 **Document updated:** ${file.name}. You can continue filling the form.`,
+          docData: { id: Date.now(), name: file.name, dataUrl, isPdf }
+        };
+        return updated;
+      });
+      setDocModal(null);
+      toast.success('Document replaced!');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleDocRemove = (msgIndex) => {
+    setMessages((prev) => prev.filter((_, i) => i !== msgIndex));
+    setDocModal(null);
+    toast.success('Document removed.');
   };
 
   const currentStepIndex = STEPS.findIndex((s) => s.value === currentStep);
@@ -1016,6 +1146,16 @@ export default function ConsularBot() {
                           <BotMessage content={msg.content} />
                         </div>
                       </div>
+                    ) : msg.type === "document" ? (
+                      <div className="bg-white border border-gray-200 text-[#1A2E40] rounded-2xl rounded-bl-sm shadow-sm px-4 py-3 max-w-[88%]">
+                        <BotMessage content={msg.content} />
+                        <DocumentCard
+                          doc={msg.docData}
+                          onView={() => setDocModal({ doc: msg.docData, msgIndex: index })}
+                          onReplace={() => handleDocReplace(index)}
+                          onRemove={() => handleDocRemove(index)}
+                        />
+                      </div>
                     ) : (
                       <div
                         className={`max-w-[88%] px-4 py-3 rounded-2xl ${
@@ -1062,11 +1202,15 @@ export default function ConsularBot() {
                     { label: "❌ No, cancel",   value: "no"  },
                   ] :
                   currentStep === "paused" ? [
-                    { label: "▶️ Continue",  value: "continue" },
-                    { label: "🗑️ Discard",   value: "discard"  },
+                    { label: "▶️ Continue",       value: "continue" },
+                    { label: "🗑️ Discard & Search", value: "discard"  },
                   ] :
                   currentStep === "docs_pending" ? [
-                    { label: "📤 Submit application", value: "submit" },
+                    { label: "📤 Submit application",  value: "submit"  },
+                    { label: "🗑️ Discard application", value: "discard" },
+                  ] :
+                  (currentStep === "collecting" || currentStep === "docs_uploading") ? [
+                    { label: "🗑️ Discard application", value: "discard" },
                   ] : null;
 
                 const chips = quickReplies || null;
@@ -1258,6 +1402,64 @@ export default function ConsularBot() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Document Lightbox Modal */}
+      {docModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setDocModal(null)}
+        >
+          <div
+            className="relative bg-white rounded-xl shadow-2xl max-w-2xl w-full p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setDocModal(null)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-800"
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <p className="text-sm font-semibold text-[#1A2E40] mb-3 pr-6 truncate">{docModal.doc.name}</p>
+            {docModal.doc.isPdf ? (
+              <div className="flex flex-col items-center justify-center h-48 bg-red-50 rounded-lg text-red-500 gap-2">
+                <FileText size={48} />
+                <span className="text-sm font-medium">PDF Document</span>
+                <span className="text-xs text-gray-400">{docModal.doc.name}</span>
+              </div>
+            ) : (
+              <img
+                src={docModal.doc.dataUrl}
+                alt={docModal.doc.name}
+                className="w-full rounded-lg max-h-[60vh] object-contain"
+              />
+            )}
+            <div className="flex gap-3 mt-4 justify-end">
+              <button
+                onClick={() => { handleDocReplace(docModal.msgIndex); }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 transition"
+              >
+                <RefreshCw size={14} /> Replace
+              </button>
+              <button
+                onClick={() => handleDocRemove(docModal.msgIndex)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-500 text-white text-sm hover:bg-red-600 transition"
+              >
+                <Trash2 size={14} /> Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden input for replacing a document */}
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,application/pdf"
+        className="hidden"
+        onChange={handleReplaceFileChange}
+      />
     </div>
   );
 }

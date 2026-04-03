@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -20,6 +20,7 @@ from super_admin_routes import router as super_admin_router
 from local_admin_routes import router as local_admin_router
 from consular_routes import router as consular_router
 from whatsapp_routes import router as whatsapp_router
+from ics_whatsapp_routes import router as ics_whatsapp_router
 from facebook_routes import router as facebook_router
 from template_routes import router as template_router
 from monitoring_routes import router as monitoring_router
@@ -84,7 +85,10 @@ async def lifespan(app: FastAPI):
         # Initialize knowledge base
         await knowledge_service.initialize()
         logger.info("Knowledge base initialized")
-
+        
+        # Check WhatsApp/ICS WABA configuration
+        _check_whatsapp_config()
+        
         # Pre-warm the scraper cache so the first user chat request is instant
         from knowledge_scraper import get_realtime_knowledge
         asyncio.create_task(get_realtime_knowledge())
@@ -126,6 +130,29 @@ api_router = APIRouter(prefix="/api")
 async def health_check():
     return {"status": "healthy", "service": "seva-setu-bot"}
 
+# ICS WABA sends webhook calls to the root path /?replytype=...&customernumber=...
+# This catches those and forwards them to the proper ICS handler.
+@app.get("/")
+async def root_ics_or_info(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    replytype: str = Query(default=""),
+    customernumber: str = Query(default=""),
+    replymessage: str = Query(default=""),
+    timestamp: Optional[str] = Query(default=None),
+    wabanumber: Optional[str] = Query(default=""),
+    mid: Optional[str] = Query(default=None),
+    smsgid: Optional[str] = Query(default=None),
+):
+    if customernumber:
+        # ICS WABA incoming webhook — delegate to the proper handler
+        from ics_whatsapp_routes import ics_incoming_webhook
+        return await ics_incoming_webhook(
+            request, background_tasks, replytype, customernumber,
+            replymessage, timestamp, wabanumber,
+        )
+    return {"message": "Seva Setu Bot API", "status": "running"}
+
 async def init_super_admin():
     """Initialize super admin if not exists"""
     try:
@@ -147,9 +174,110 @@ async def init_super_admin():
     except Exception as e:
         logger.error(f"Failed to initialize super admin: {e}")
 
+def _check_whatsapp_config():
+    """Validate WhatsApp/ICS WABA configuration at startup"""
+    ics_user = os.environ.get('ICS_WABA_USER', '').strip()
+    ics_pass = os.environ.get('ICS_WABA_PASS', '').strip()
+    ics_from = os.environ.get('ICS_WABA_FROM', '').strip()
+    
+    if not ics_user or not ics_pass or not ics_from:
+        logger.warning("⚠️  [WHATSAPP CONFIG] ICS WABA not fully configured:")
+        if not ics_user:
+            logger.warning("   • ICS_WABA_USER is missing")
+        if not ics_pass:
+            logger.warning("   • ICS_WABA_PASS is missing")
+        if not ics_from:
+            logger.warning("   • ICS_WABA_FROM is missing")
+        logger.warning("   WhatsApp messages will NOT be sent. Set these in .env to enable.")
+    else:
+        logger.info(f"✓ [WHATSAPP CONFIG] ICS WABA configured: user={ics_user}, from={ics_from}")
+    
+    # Also check Meta/WA Simple config
+    meta_token = os.environ.get('META_ACCESS_TOKEN', '').strip()
+    if meta_token:
+        logger.info(f"✓ [META_CONFIG] Meta WhatsApp token configured (length={len(meta_token)})")
+    else:
+        logger.debug("ℹ [META_CONFIG] Meta WhatsApp token not set (optional if using ICS WABA)")
+
 @api_router.get("/")
-async def root():
+@api_router.head("/")
+async def root(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    replytype: str = Query(default=""),
+    customernumber: str = Query(default=""),
+    replymessage: str = Query(default=""),
+    timestamp: Optional[str] = Query(default=None),
+    wabanumber: Optional[str] = Query(default=""),
+    # delivery status params (ICS delivery callbacks)
+    qStatus: Optional[str] = Query(default=None),
+    qMobile: Optional[str] = Query(default=None),
+    qMsgRef: Optional[str] = Query(default=None),
+    qDTime: Optional[str] = Query(default=None),
+    SMSMSGID: Optional[str] = Query(default=None),
+    NOTES: Optional[str] = Query(default=None),
+):
+    if customernumber:
+        # ICS WABA incoming message webhook
+        from ics_whatsapp_routes import ics_incoming_webhook
+        return await ics_incoming_webhook(
+            request, background_tasks, replytype, customernumber,
+            replymessage, timestamp, wabanumber,
+        )
+    if qMsgRef and qStatus:
+        # ICS WABA delivery status callback
+        from ics_whatsapp_routes import ics_delivery_callback
+        return await ics_delivery_callback(
+            request, qStatus, qMobile, qMsgRef, qDTime, SMSMSGID, None, NOTES,
+        )
     return {"message": "Seva Setu Bot API", "status": "running"}
+
+# Webhook endpoint for SEV-SETU delivery status callbacks
+# Alias for /api/ with webhook-style naming convention
+@api_router.get("/webhook/sevasetu-delivery")
+@api_router.post("/webhook/sevasetu-delivery")
+@api_router.head("/webhook/sevasetu-delivery")
+async def sevasetu_delivery_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    qStatus: Optional[str] = Query(default=None),
+    qMobile: Optional[str] = Query(default=None),
+    qMsgRef: Optional[str] = Query(default=None),
+    qDTime: Optional[str] = Query(default=None),
+    SMSMSGID: Optional[str] = Query(default=None),
+    NOTES: Optional[str] = Query(default=None),
+):
+    """
+    SEV-SETU API delivery status webhook endpoint.
+    Receives delivery status updates from the SEV-SETU platform.
+    
+    Supports both GET and POST methods with query parameters.
+    Routes to the ICS delivery callback handler.
+    
+    Query Parameters:
+        qStatus: Delivery status (DELIVERED, FAILED, PENDING, BOUNCED)
+        qMobile: Phone number that received message
+        qMsgRef: Message reference ID
+        qDTime: Delivery timestamp (ISO format)
+        SMSMSGID: SMS message ID
+        NOTES: Additional notes about delivery
+    """
+    logger.info(f"SEV-SETU delivery webhook received: status={qStatus}, msg_ref={qMsgRef}")
+    
+    if request.method == "HEAD":
+        # HEAD requests should return successful response without body
+        return {"status": "received"}
+    
+    if qMsgRef and qStatus:
+        # Route to ICS delivery callback handler
+        from ics_whatsapp_routes import ics_delivery_callback
+        return await ics_delivery_callback(
+            request, qStatus, qMobile, qMsgRef, qDTime, SMSMSGID, None, NOTES,
+        )
+    
+    # Invalid request - missing required parameters
+    logger.warning(f"Invalid delivery webhook request: missing qStatus or qMsgRef")
+    return {"error": "Missing required parameters: qStatus and qMsgRef"}
 
 from user_routes import router as user_router
 
@@ -158,6 +286,7 @@ api_router.include_router(super_admin_router)
 api_router.include_router(local_admin_router)
 api_router.include_router(consular_router)
 api_router.include_router(whatsapp_router)
+api_router.include_router(ics_whatsapp_router)
 api_router.include_router(facebook_router)
 api_router.include_router(template_router)
 api_router.include_router(monitoring_router)

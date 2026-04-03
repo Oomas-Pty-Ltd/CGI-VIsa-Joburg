@@ -16,6 +16,7 @@ Mid-flow question pause:
 ====================================================================
 """
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -262,7 +263,7 @@ CONTACT_INFO = (
 _APPLY_KW    = {"apply", "register", "start", "begin", "application", "करना", "चाहिए", "लगाना", "apply now"}
 _YES_KW      = {"yes", "yeah", "ok", "okay", "sure", "confirm", "proceed", "हाँ", "हां", "ha", "yep", "y"}
 _NO_KW       = {"no", "nope", "cancel", "नहीं", "nahi", "n"}
-_DISCARD_KW  = {"discard", "cancel", "stop", "quit", "exit", "छोड़", "बंद", "abort"}
+_DISCARD_KW  = {"discard", "cancel", "stop", "quit", "exit", "छोड़", "बंद", "abort", "back", "go back", "main menu"}
 _CONTINUE_KW = {"continue", "resume", "जारी", "चालू", "go on", "yes continue"}
 
 
@@ -274,8 +275,15 @@ def _contains(msg: str, kw_set):
     return bool(_words(msg) & kw_set) or any(k in msg.lower() for k in kw_set)
 
 
+_TRACKING_RE  = re.compile(r'\b[A-Z]{2,20}-\d{8}-[A-Z0-9]{4,10}\b', re.IGNORECASE)
+_LOOKUP_KW    = {"track", "status", "my application", "find my", "check my", "where is my", "application status"}
+
 def is_apply_intent(msg: str) -> bool:
     return _contains(msg, _APPLY_KW)
+
+def is_tracking_query(msg: str) -> bool:
+    """True if message contains a tracking ID."""
+    return bool(_TRACKING_RE.search(msg))
 
 
 def is_yes(msg: str) -> bool:
@@ -300,9 +308,26 @@ def is_question(msg: str) -> bool:
     if "?" in msg:
         return True
     low = msg.lower()
-    q_starts = ["what", "how", "when", "where", "why", "can ", "is ", "are ", "do ", "does ",
-                "kya", "क्या", "कैसे", "कब", "कहाँ", "कहां"]
+    q_starts = [
+        "what", "how", "when", "where", "why", "can ", "is ", "are ", "do ", "does ",
+        "show", "tell", "search", "find", "explain", "describe", "give me", "i need",
+        "i want to know", "lookup", "look up", "info", "information", "details",
+        "kya", "क्या", "कैसे", "कब", "कहाँ", "कहां",
+    ]
     return any(low.startswith(w) for w in q_starts)
+
+
+def _is_info_query(msg: str) -> bool:
+    """Detect info/search queries that don't start with question words but clearly seek info."""
+    low = msg.lower()
+    info_phrases = [
+        "visa fee", "visa fees", "passport fee", "passport fees", "oci fee", "oci fees",
+        "pcc fee", "attestation fee", "how much", "fee schedule", "cost of", "price of",
+        "office address", "office hours", "contact number", "phone number",
+        "tell me about", "show me", "search for", "find info", "get info",
+        "about visa", "about passport", "about oci", "about pcc",
+    ]
+    return any(p in low for p in info_phrases)
 
 
 _SERVICE_PATTERNS: Dict[str, list] = {
@@ -501,7 +526,7 @@ def _doc_upload_prompt(service_key: str, doc_index: int) -> str:
     return (
         f"📎 **Document {doc_index+1} of {total}** — Please upload:\n\n"
         f"**{doc}**\n\n"
-        f"Use the 📎 attachment button to upload the file or image.\n"
+        f"Use the **Upload** button or **Camera** button below.\n"
         f"Type **skip** to skip this document, or **discard** to cancel the entire application."
     )
 
@@ -631,6 +656,58 @@ async def process_flow(
         - needs_llm : True if LLM should generate/augment the response
         - new_step  : step label for ChatResponse
     """
+    # ------------------------------------------------------------------
+    # TRACKING ID LOOKUP — intercept before any state logic
+    # Pattern: SERVICENAME-YYYYMMDD-XXXXXXX (e.g. VISA-20260324-571A82)
+    # ------------------------------------------------------------------
+    def _fmt_dt(iso: str) -> str:
+        """Format ISO datetime string as 'YYYY-MM-DD HH:MM'."""
+        if not iso:
+            return "—"
+        try:
+            return iso[:16].replace("T", " ")
+        except Exception:
+            return iso[:10]
+
+    _tid_match = re.search(r'\b([A-Z]{2,20}-\d{8}-[A-Z0-9]{4,10})\b', message.upper())
+    if _tid_match:
+        tid = _tid_match.group(1)
+        db = await get_database()
+        app = await db.applications.find_one({"tracking_id": tid}, {"_id": 0})
+        if app:
+            svc_name  = app.get("service_name", app.get("service", "").title())
+            status    = app.get("status", "unknown").replace("_", " ").title()
+            created   = _fmt_dt(app.get("created_at", ""))
+            updated   = _fmt_dt(app.get("updated_at", ""))
+            form_data = app.get("form_data", {})
+            name      = form_data.get("full_name", "—")
+            response  = (
+                f"🔖 **Application Status**\n\n"
+                f"| Field | Details |\n"
+                f"|---|---|\n"
+                f"| **Tracking ID** | `{tid}` |\n"
+                f"| **Service** | {svc_name} |\n"
+                f"| **Applicant** | {name} |\n"
+                f"| **Status** | {status} |\n"
+                f"| **Submitted** | {created} |\n"
+                f"| **Last Updated** | {updated} |\n\n"
+            )
+            if status.lower() == "submitted":
+                response += "✅ Your application has been received. You will be contacted at the details provided.\n\n"
+            elif status.lower() in ("discarded", "cancelled"):
+                response += "❌ This application was cancelled.\n\n"
+            else:
+                response += f"⏳ Your application is currently being processed.\n\n"
+            response += f"For follow-up:\n{CONTACT_INFO}"
+            return (response, False, "tracking")
+        else:
+            return (
+                f"❌ No application found with tracking ID **`{tid}`**.\n\n"
+                f"Please check the ID and try again, or contact us:\n{CONTACT_INFO}",
+                False, "tracking"
+            )
+
+
     flow    = preloaded_flow if preloaded_flow is not None else await _get_flow(session_id)
     state   = flow.get("state", "idle")
     service = flow.get("service")
@@ -722,7 +799,7 @@ async def process_flow(
                 await _update_application(app_id, {"status": "discarded"})
             await _clear_flow(session_id)
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
-        if is_question(message):
+        if is_question(message) or _is_info_query(message):
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -750,7 +827,7 @@ async def process_flow(
             await _clear_flow(session_id)
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
 
-        if is_question(message) and not has_image:
+        if (is_question(message) or _is_info_query(message)) and not has_image:
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -800,7 +877,7 @@ async def process_flow(
 
             await _save_flow(session_id, flow)
             # Acknowledge upload and ask for next
-            ack = "✅ Document uploaded and scanned." if has_image else "⚠️ Document skipped."
+            ack = "✅ Document uploaded." if has_image else "⚠️ Document skipped."
             return (
                 f"{ack}\n\n" + _doc_upload_prompt(service, di),
                 False, "docs_uploading"
@@ -815,7 +892,7 @@ async def process_flow(
     if state == "collecting":
         fields = SERVICES[service]["fields"]
 
-        if is_question(message) and not _looks_like_answer(message, fields[fi]["key"]):
+        if (is_question(message) or _is_info_query(message)) and not _looks_like_answer(message, fields[fi]["key"]):
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -1029,12 +1106,26 @@ def _validate_field(key: str, value: str) -> Optional[str]:
             return "Phone number is too long. Please enter a valid phone number."
         return None
 
-    # --- Travel dates (flexible range format) ---
+    # --- Travel dates (DD/MM/YYYY – DD/MM/YYYY) ---
     if key == "travel_dates":
-        if len(v) < 5:
-            return "Please enter your intended travel dates (e.g. 01/06/2026 – 20/06/2026)."
-        if not re.search(r"\d", v):
-            return "Please include actual dates for your travel (e.g. 01/06/2026 – 20/06/2026)."
+        # Normalise separators: en-dash, em-dash, hyphen → "-"
+        normalised = re.sub(r"[–—]", "-", v)
+        # Extract all date-like tokens (must be DD/MM/YYYY — 4-digit year required)
+        date_pattern = r"(\d{1,2})/(\d{1,2})/(\d{4})"
+        matches = re.findall(date_pattern, normalised)
+        if len(matches) < 2:
+            # Check if user used a 2-digit year (e.g. 10/05/25) to give a clear hint
+            if re.search(r"\d{1,2}/\d{1,2}/\d{2}\b", normalised):
+                return "Please use a **4-digit year** for your travel dates (e.g. 01/06/2026 – 20/06/2026)."
+            return "Please enter your intended travel dates in **DD/MM/YYYY – DD/MM/YYYY** format (e.g. 01/06/2026 – 20/06/2026)."
+        parsed = []
+        for day_s, mon_s, yr_s in matches[:2]:
+            try:
+                parsed.append(date(int(yr_s), int(mon_s), int(day_s)))
+            except ValueError:
+                return "One or more travel dates are not valid. Please re-enter (e.g. 01/06/2026 – 20/06/2026)."
+        if parsed[1] <= parsed[0]:
+            return "The return date must be **after** the departure date. Please re-enter your travel dates."
         return None
 
     # --- Generic non-empty check for all remaining fields ---
