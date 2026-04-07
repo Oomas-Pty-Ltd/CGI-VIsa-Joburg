@@ -324,25 +324,28 @@ STRUCTURED_RESPONSES = {
         "content": """**OCI (Overseas Citizen of India):**
 
 **What is OCI?**
-Lifelong visa for foreign nationals of Indian origin.
+Multi-purpose, multi-entry life-long visa to India.
 
-**Benefits:**
-• Multiple entry, lifelong visa
-• No registration required
-• Work in India (with conditions)
+**Eligibility:**
+• Persons who were citizens of India on or after 26 Jan 1950
+• Persons whose parents or grandparents were Indian citizens
+• Spouse of Indian citizen or OCI holder (married for ≥2 years)
+• Minor children of Indian citizens
 
-**Fees:**
-• Adult: R1,500
-• Minor: R750
+**How to Apply:**
+1. Apply online at ociservices.gov.in
+2. Submit documents in person at the Consulate
+3. Book appointment via cons.jburg@mea.gov.in
 
-**Processing:** 6-8 weeks
+**Fees:** As per MEA notification
 
 **Requirements:**
-• Current passport
-• Proof of Indian origin
-• Old Indian passport/birth certificate
-• Passport photos""",
-        "source": "CGI Johannesburg Official"
+• Current foreign passport (original + copies of all pages)
+• Proof of Indian origin (old Indian passport / parent's Indian passport / Indian birth certificate)
+• South African ID / permanent residence / work permit
+• Recent passport-size photographs
+• Marriage certificate (if applying as spouse)""",
+        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
     },
     
     "office_info": {

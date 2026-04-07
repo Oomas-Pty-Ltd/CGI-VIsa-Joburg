@@ -29,21 +29,7 @@ _playwright_available: Optional[bool] = False if sys.platform == "win32" else No
 _FAILED_URL_COOLDOWN_HOURS = 6   # don't retry a failed URL for 6 hours
 _FAILED_URL_MAX_ATTEMPTS   = 3   # mark permanent after 3 consecutive failures
 
-# CGI Joburg returns HTTP 403 for all automated requests (WAF/Cloudflare).
-# Pre-seed the failure store so these are never attempted on startup.
-_CGI_BLOCKED_URLS = [
-    "https://www.cgijoburg.gov.in/",
-    "https://www.cgijoburg.gov.in/page/passport-services/",
-    "https://www.cgijoburg.gov.in/page/visa-services/",
-    "https://www.cgijoburg.gov.in/page/oci-services/",
-    "https://www.cgijoburg.gov.in/page/fee-schedule/",
-    "https://www.cgijoburg.gov.in/page/contact-us/",
-    "https://www.cgijoburg.gov.in/page/emergency-services/",
-]
-_failed_urls: Dict[str, Dict] = {
-    url: {"reason": "HTTP 403 (permanent — WAF blocked)", "failed_at": datetime.now(timezone.utc), "attempts": _FAILED_URL_MAX_ATTEMPTS}
-    for url in _CGI_BLOCKED_URLS
-}
+_failed_urls: Dict[str, Dict] = {}
 
 # ── Scan frequency limiter ────────────────────────────────────────────────────
 # Prevents hammering the same URL more than once per interval.
@@ -168,13 +154,18 @@ async def _fetch_with_httpx(url: str) -> str:
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
+        "Referer": "https://www.cgijoburg.gov.in/",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
     }
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, verify=False) as client:
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, verify=False) as client:
         response = await client.get(url, headers=headers)
         if response.status_code == 200:
             return response.text
-        if response.status_code in (403, 404):
-            raise Exception(f"HTTP {response.status_code} (permanent)")
+        if response.status_code == 404:
+            raise Exception(f"HTTP 404 (permanent)")
+        if response.status_code == 403:
+            raise Exception(f"HTTP 403 — WAF blocked")
         raise Exception(f"HTTP {response.status_code}")
 
 
@@ -241,7 +232,6 @@ async def _fetch_with_retry(url: str, retries: int = 1) -> str:
 
 OFFICIAL_SOURCES = [
     "https://www.cgijoburg.gov.in/",
-    "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"
 ]
 
 # Sub-pages to crawl on CGI Joburg for richer service data
@@ -251,27 +241,37 @@ CGI_SUB_PAGES = [
     "https://www.cgijoburg.gov.in/page/oci-services/",
     "https://www.cgijoburg.gov.in/page/fee-schedule/",
     "https://www.cgijoburg.gov.in/page/contact-us/",
-    "https://www.cgijoburg.gov.in/page/emergency-services/",
+    "https://www.cgijoburg.gov.in/page/emergency-contact/",
+    "https://www.cgijoburg.gov.in/page/police-clearance-certificate/",
+    "https://www.cgijoburg.gov.in/page/services-rendered-at-the-consulate/",
 ]
 
 EXCEPTION_EMAIL = "mayurakole@example.com"
 
+# Source: www.cgijoburg.gov.in (compiled April 2026)
 CONTACT_FALLBACK = {
-    "phone_main":        "(+27) 11 581 9800",
-    "phone_consular":    "(+27) 11 482 1368 (Consular Enquiries)",
-    "fax":               "(+27) 11 482 4648 / 8492",
-    "emergency_contact": "(+27) 11 581 9800",
-    "email":             "cons.joburg@mea.gov.in",
+    "phone_main":        "+27 11-4828484 / +27 11-4828485 / +27 11-4828486",
+    "phone_consular":    "+27 11 581 9800",
+    "fax":               "+27 11 482 4648 / +27 11 482 8492",
+    "emergency_contact": "+27 11 581 9800",
+    "email":             "ccom.jburg@mea.gov.in",
+    "email_consular":    "cons.jburg@mea.gov.in",
     "address": (
         "Consulate General of India, Johannesburg | "
-        "1 Eton Road, Corner Jan Smuts Avenue & Eton Road, "
-        "Parktown 2193, Johannesburg, South Africa"
+        "No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), "
+        "Park Town 2193, PO Box 6805, Johannesburg 2000, South Africa"
     ),
     "website":    "https://www.cgijoburg.gov.in",
-    "vfs_address": "VFS Global Visa Application Centre, Johannesburg",
-    "vfs_website": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
-    "office_hours": "Monday–Friday: 09:00–17:00 | Consular services: 09:00–12:00 (by appointment)",
-    "vfs_hours":    "Monday–Friday: 08:00–15:00 (appointment mandatory)",
+    "vfs_address": (
+        "Indian Visa and Consular Application Centre, "
+        "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, "
+        "Boundary Road, Park Town, Johannesburg – 2198"
+    ),
+    "vfs_phone":  "012 425 3007 / 011 484 0327",
+    "vfs_email":  "Info.inza@vfshelpline.com",
+    "vfs_website": "https://services.vfsglobal.com/zaf/en/ind/",
+    "office_hours": "Monday–Friday: 08:30–17:00 (Lunch: 13:00–13:30)",
+    "vfs_hours":    "Submission: 08:00–15:00 | Collection: 11:00–16:00",
 }
 
 
@@ -366,8 +366,387 @@ async def _fetch_page_text(url: str) -> str:
         return ""
 
 
+def _get_cgi_pdf_content() -> str:
+    """
+    Full content of the CGI Johannesburg official website, sourced from
+    www.cgijoburg.gov.in (compiled April 2026).
+    Used as fallback when the live website cannot be reached.
+    """
+    return """
+[CONSULATE GENERAL OF INDIA, JOHANNESBURG — OFFICIAL INFORMATION]
+Source: www.cgijoburg.gov.in | Compiled: April 2026
+
+=== 1. CONTACT & WORKING HOURS ===
+Name: Consulate General of India, Johannesburg
+Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, PO Box 6805, Johannesburg 2000, South Africa
+Office Hours: Monday to Friday: 08:30 to 17:00 (Lunch: 13:00 to 13:30)
+Telephone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
+Facsimile: +27 11 482 4648 / +27 11 482 8492
+Fax (CG): +27 11 482 3640
+Email: ccom.jburg@mea.gov.in
+Consular Services Email: cons.jburg@mea.gov.in
+Website: www.cgijoburg.gov.in
+Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
+Acting Consul General: Mr. Harish Kumar
+Twitter/X: @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg | YouTube: @Indiainjoburg
+
+=== 2. CONSULAR SERVICES OVERVIEW ===
+Passport Services: Renewal, reissue, lost/stolen/damaged passport, new passport for minors born in South Africa, change of personal particulars.
+Visa Services: Regular visa and e-Visa for foreign nationals wishing to visit India.
+OCI Services: Fresh OCI card, miscellaneous OCI services, PIO to OCI conversion.
+Police Clearance Certificate: Issued for Indian nationals residing in South Africa.
+Birth Registration: Registration of births of children born in South Africa to Indian nationals.
+Document Attestation: Attestation of academic degrees, general power of attorney, documents for Indian and foreign nationals.
+Emergency Travel Document: Issued in cases of lost/stolen passport for emergency travel.
+NOC Services: NOC for South African citizenship, NOC for child passport in India.
+Non-Impediment Letter: For Indian nationals seeking to marry abroad.
+Registration of Indians: Registration of NRIs/PIOs/OCIs residing in South Africa.
+Indians in Distress: Consular assistance for Indian nationals in distress.
+Tracing the Roots: Programme for persons of Indian origin to trace their ancestral roots in India.
+Trade & Commerce: Advisory services, bilateral trade facilitation.
+NOTE: Most passport and visa services are processed through VFS Global. Applicants must submit applications at the VFS Global Centre, not directly at the Consulate.
+
+=== 3. PASSPORT SERVICES FOR INDIAN NATIONALS ===
+All passport services are outsourced to VFS Global. Applicants must complete online applications and submit at VFS Global Johannesburg.
+
+VFS Global Office (Passport/PCC/Consular):
+Address: Indian Visa and Consular Application Centre, 2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, Johannesburg - 2198
+Telephone: 012 425 3007 / 011 484 0327
+Email: Info.inza@vfshelpline.com
+Website: https://services.vfsglobal.com/zaf/en/ind/
+Submission Hours: 08:00 to 15:00
+Collection Hours: 11:00 to 16:00
+Processing Time: Up to one month (provided all documents are in order and security status is clear)
+
+RE-ISSUE OF PASSPORT ON EXPIRY:
+- Completed online application from https://embassy.passportindia.gov.in/
+- 3 passport-sized photographs (5cm x 5cm, coloured, white background)
+- Original passport (to be returned after verification)
+- Proof of residential address in South Africa
+- Fee: Rand 2,280 for 36-page passport (incl. ICWF fee of Rand 30); Rand 2,655 for 60-page
+
+RE-ISSUE FOR LOST/STOLEN PASSPORT:
+- Online application form duly completed
+- Original FIR/Police Report for lost/stolen passport
+- 3 passport-sized photographs
+- Proof of Indian citizenship (if original passport not available)
+- Proof of residential address in South Africa
+- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page (incl. ICWF of Rand 30)
+- Processing time: Up to one month
+
+RE-ISSUE FOR DAMAGED PASSPORT:
+- Online application form
+- Original damaged passport
+- 3 passport-sized photographs
+- Proof of residential address
+- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page (incl. ICWF of Rand 30)
+
+ISSUE OF PASSPORT TO MINOR CHILD BORN IN SOUTH AFRICA:
+- Completed online application
+- 3 passport-sized photographs
+- Birth registration at the Consulate
+- Birth certificate issued by South African Home Department and local hospital
+- Both parents to sign the form at the declaration column
+- For infants: thumb impression in the box on Page 1 and Page 2 after Serial No. 26
+- Fee: Rand 780 (incl. ICWF of Rand 30); Five-year validity passport issued
+
+RE-ISSUE ON CHANGE OF NAME/PASSPORT PARTICULARS:
+- Online application + documentary evidence of name change (gazette, court order, marriage certificate)
+- Original passport, 3 passport-sized photographs, Proof of residential address
+- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page
+
+RE-ISSUE ON EXHAUSTION OF PAGES:
+- Online application, Original passport, 3 photographs, Proof of residential address
+- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page
+
+GENERAL NOTES:
+- Payment by EFT or Credit/Debit Card. Original proof of payment required; photocopies not accepted.
+- Online application at: https://embassy.passportindia.gov.in/
+- Applications must be submitted in person at VFS Global. No direct submissions at the Consulate.
+- Original documents are returned after verification at VFS.
+- Applicants may be called for interview if required by the Consulate.
+
+=== 4. PASSPORT & CONSULAR FEES SCHEDULE ===
+(Revised fees as on April 1, 2023. All fees include ICWF component of Rand 30)
+
+PASSPORT FEES:
+Re-issue on expiry: 36-page ZAR 2,280 | 60-page ZAR 2,655
+Re-issue (lost/stolen): 36-page ZAR 2,280 | 60-page ZAR 2,655
+Re-issue (damaged): 36-page ZAR 2,280 | 60-page ZAR 2,655
+Re-issue (change of name/particulars): 36-page ZAR 2,280 | 60-page ZAR 2,655
+Re-issue (exhaustion of pages): 36-page ZAR 2,280 | 60-page ZAR 2,655
+Minor child (new passport): ZAR 780 (N/A for 60-page)
+Emergency Travel Document: ZAR 780
+
+OCI & MISCELLANEOUS CONSULAR FEES:
+Fresh OCI Card (Adult): As per MEA notification
+Fresh OCI Card (Minor): As per MEA notification
+OCI Miscellaneous Service: Gratis (free) for qualifying updates
+PIO to OCI Conversion: As per MEA notification
+Police Clearance Certificate: As per VFS schedule
+Attestation of Documents: As per schedule
+Birth Registration: Gratis (free)
+Non-Impediment Letter: As per schedule
+NOC for South African Citizenship: As per schedule
+Emergency Travel Document: ZAR 780
+
+ICWF: A fee of Rand 30 is included in all consular, passport and visa services (Gazette of India Notification No. 704 G.S.R. 1027(E) dated 16/08/2017, effective from 01.06.2019).
+
+PAYMENT METHODS:
+- EFT (Electronic Funds Transfer) — Original proof of payment required
+- Credit Card / Debit Card at VFS Global or the Consulate
+- Photocopy, faxed copy or scanned copy of payment proof NOT acceptable
+
+=== 5. VISA SERVICES FOR FOREIGN NATIONALS ===
+GENERAL VISA GUIDELINES:
+- All foreign nationals, including children, require a visa to enter India.
+- Applications submitted online at https://indianvisaonline.gov.in/ — no manual forms accepted.
+- South African nationals are issued visas GRATIS (free of charge) to visit India.
+- Biometric data is captured at VFS at time of application submission.
+- Passport must be valid for a minimum of six months from the date of departure from India.
+- Passport must have at least 2 blank pages. Consulate cannot waive this requirement.
+- South African nationals holding diplomatic and official passports are exempted from visa for up to 90 days (bilateral agreement).
+- The Government of India does not allow Thuraya/Iridium satellite phones in India for security reasons.
+- No requirement for HIV/AIDS test for visiting India.
+
+REGULAR VISA — VFS ADDRESS (VISA APPLICATIONS):
+Apply Online: https://indianvisaonline.gov.in/visa/index.html
+VFS Address: 1st Floor Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, Johannesburg
+VFS Phone: 012 425 3007 / 011 484 0327
+VFS Email: Info.inza@vfshelpline.com
+Biometrics: Mandatory for all regular visa applicants (w.e.f. 17 July 2017)
+Important: No visa applications accepted directly at the Consulate. All through VFS only.
+
+VISA TYPES ISSUED: Tourist, Business, Employment, Student, Medical, Research, Journalist, Conference, Transit, Entry (X) Visa, Medical Attendant, Missionary/Religious Worker
+
+Foreigners other than South African Nationals: Foreign nationals from third countries residing in South Africa should contact the Consulate for specific requirements.
+Pakistan Nationals and Persons of Pakistan Origin: Special procedures apply. Contact the Consulate directly.
+
+=== 6. E-VISA INFORMATION ===
+South African nationals are eligible for e-Visa on a GRATIS basis (no visa fee charged).
+Apply online at: https://indianvisaonline.gov.in/evisa/tvoa.html
+Apply minimum 5 working days in advance from the date of departure.
+
+E-VISA SUB-CATEGORIES:
+e-Tourist Visa: 30 days / 1 year / 5 years — Double/Multiple entry. Tourism, casual visit to meet friends/relatives.
+e-Business Visa: 1 year (Multiple entry) — Business-related visits.
+e-Medical Visa: 60 days (Triple entry) — For medical treatment in India.
+e-Medical Attendant Visa: 60 days (Triple entry) — Max 2 attendants per e-Medical Visa.
+e-Conference Visa: 30 days — For attending conferences/seminars. Can club with e-Tourist activities only.
+
+E-VISA RULES:
+- e-Visa is linked to specific ports of entry. Must arrive/depart through designated airports/seaports.
+- Available for entry through 30+ designated international airports and 5 designated seaports.
+- Only two e-Medical Attendant Visas will be granted against one e-Medical Visa.
+
+=== 7. OCI (OVERSEAS CITIZEN OF INDIA) SERVICES ===
+The OCI scheme allows persons of Indian origin (other than Pakistan and Bangladesh nationals) to be registered as Overseas Citizens of India. OCI cards provide a multi-purpose, multi-entry life-long visa for India.
+
+ELIGIBILITY:
+- A person who was a citizen of India at any time since 26 January 1950 or was eligible to become a citizen of India on 26 January 1950.
+- A person who is a citizen of another country but whose parents/grandparents/great-grandparents were citizens of India.
+- The spouse of foreign origin of a citizen of India or OCI cardholder (marriage registered and subsisting for not less than 2 years).
+- Minor children where both parents are Indian citizens, or one parent is Indian citizen.
+
+OCI APPLICATION PROCEDURE:
+- Register online at: https://ociservices.gov.in/
+- Submit computer-generated application form (bearing registration number), photo, and signatures.
+- For minors: only thumb impression (no signature).
+- Two photos: 51mm x 51mm — one pasted on form, one attached separately.
+- Submit form with all required documents to the Consulate (appointment required).
+- Appointment: Email cons.jburg@mea.gov.in for OCI appointment.
+
+DOCUMENTS REQUIRED (FRESH OCI):
+- Proof of present citizenship (current foreign passport)
+- Proof of renunciation of Indian citizenship / surrender certificate
+- Proof of Indian origin (Indian passport, school certificate, birth certificate, land records)
+- For spouse of Indian citizen: marriage certificate and copy of spouse's Indian passport
+- Self-attested copy of marriage certificate and copy of foreign passport of spouse (if applicable)
+- Proof of residential address in South Africa (utility bill, lease agreement, property papers)
+- Proof of payment
+- Any other document as specified by the Consular Officer
+
+MISCELLANEOUS OCI SERVICES (RE-ISSUANCE REQUIRED FOR):
+- Issuance of new passport (once after completing 20 years of age)
+- Change of personal particulars (name, father's name, nationality, etc.)
+- Loss or damage of OCI registration certificate
+- Gratis services: updating new passport details (each time up to age 20 and once after age 50), change of address/occupation/contact details
+
+IMPORTANT OCI RESTRICTIONS:
+- OCI card does NOT entitle holder to undertake missionary work, mountaineering, or research without prior permission from Government of India.
+- Fees are not refunded if OCI is not granted.
+- Husband and wife must each claim OCI on strength of their own parents/grandparents — not each other.
+- Foreign military personnel (serving or retired) of Indian origin are NOT eligible for OCI.
+- OCI registration may be cancelled if obtained by fraud or if holder shows disaffection towards the Constitution of India.
+
+PIO TO OCI CONVERSION: PIO card holders should visit https://ociservices.gov.in/ to apply for conversion. PIO card remains valid until its expiry or conversion.
+
+=== 8. POLICE CLEARANCE CERTIFICATE (PCC) ===
+PCC is required for immigration, change of nationality, employment abroad, or longer stay in another country.
+
+FOR INDIAN NATIONALS:
+- PCC service is outsourced to VFS Global.
+- Apply online at: https://portal5.passportindia.gov.in
+- Select CGI Johannesburg and submit at VFS Global Johannesburg.
+- Applicants in Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg.
+- VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
+
+FOR FOREIGN NATIONALS:
+- Foreign nationals requiring PCC from Indian authorities should apply at the nearest Indian Mission/Post.
+- Required documents and procedures are available at the VFS Global portal.
+
+=== 9. SERVICES RENDERED AT THE CONSULATE ===
+CHILD BIRTH REGISTRATION:
+- Registration of children born in South Africa to Indian nationals.
+- Required: Birth certificate from South African Home Department and local hospital.
+- Service is gratis (free of charge).
+- Registered birth certificate used for minor passport applications.
+
+ATTESTATION OF ACADEMIC DEGREES (INDIAN NATIONALS):
+- Indian documents must first be apostilled by MEA (Ministry of External Affairs, India).
+- MEA Apostille link: http://www.mea.gov.in/apostille.htm
+
+ATTESTATION OF GENERAL POWER OF ATTORNEY (GPA/PoA):
+- Original documents and self-attested copies required. Fee as per consular schedule.
+
+ATTESTATION OF DOCUMENTS FOR FOREIGN NATIONALS:
+- Foreign nationals requiring attestation of Indian documents for use in South Africa.
+
+EMERGENCY TRAVEL DOCUMENT:
+- Issued when a valid Indian passport is not available due to loss/theft/damage.
+- Valid for single journey to India only.
+- Required: Police report, proof of identity, 2 photographs, proof of travel.
+- Fee: ZAR 780 (including ICWF).
+
+NOC FOR CHILD PASSPORT IN INDIA:
+- Required when one parent applies for a child's passport in India.
+- The other parent (in South Africa) can obtain NOC from the Consulate.
+- Required: Passport copies of both parents, child's birth certificate, application form.
+
+NON-IMPEDIMENT LETTER:
+- Issued to Indian nationals who wish to marry a foreign national.
+- Certifies applicant is not married and is free to marry.
+- Required: Indian passport, proof of address, application form.
+
+REGISTRATION OF NRIs/PIOs/OCIs:
+- Indian nationals in South Africa are encouraged to register with the Consulate.
+- Helps in emergencies, disaster situations, and for consular assistance.
+
+TRANSLATION OF INDIAN DRIVING LICENCE:
+- The Consulate provides certified translation of Indian driving licences for use in South Africa.
+
+TRACING THE ROOTS PROGRAMME:
+- Programme for persons of Indian origin to trace their ancestral roots in India.
+- MEA facilitates visits to villages/districts of origin. Contact the Consulate for details.
+
+OPEN HOUSE TO ADDRESS GRIEVANCES:
+- The Consulate periodically holds consular open house sessions.
+- Upcoming dates announced on website and social media.
+- Applicants can meet Consular Officers and get guidance on pending matters.
+
+ONE AND THE SAME CERTIFICATE:
+- Issued when a difference in name spelling exists across documents.
+- Self-attested copy of all documents showing name variations required.
+
+=== 10. FREQUENTLY ASKED QUESTIONS (FAQ) ===
+Q: How do I apply for a new/renewal/lost/damaged passport?
+A: Complete online application at https://embassy.passportindia.gov.in/ and submit at VFS Centre with prior appointment. See: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/
+
+Q: What is the timeframe for reissue of passport?
+A: Approximately 3-4 weeks, provided all relevant documents are in place and approved by concerned authorities in India.
+
+Q: What is the definition of a damaged passport?
+A: Spill over of ink/water mark, scribbling, thread out, torn paper, missing data page, or spine damage.
+
+Q: How can I apply for PCC (Police Clearance Certificate)?
+A: PCC service is outsourced to VFS. Apply at https://portal5.passportindia.gov.in. Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
+
+Q: How can I get my Indian documents attested?
+A: Indian documents must first be apostilled by MEA. See: http://www.mea.gov.in/apostille.htm
+
+Q: My spouse is a foreign national. Is my spouse entitled to an OCI card?
+A: Yes, provided the marriage has been registered and subsisted continuously for not less than two years.
+
+Q: Are foreign military personnel of Indian origin eligible for OCI?
+A: No. Foreign military personnel, whether in service or retired, are NOT entitled to an OCI card.
+
+Q: What should I do if I find a mistake in my passport?
+A: Visit the Consulate immediately and return the passport for rectification. Re-apply for reissue if the error was on your original application form.
+
+Q: What is the difference between minor and major name change?
+A: Minor change: spelling discrepancy that does not result in a total phonetic change (e.g., Rakesh vs Rakash). Major change: a complete change of name, or change that is phonetically different.
+
+Q: How do I apply for an emergency visa?
+A: Apply online at www.indianvisaonline.gov.in, submit in person at VFS Global Johannesburg with required documents. VFS accepts emergency visa applications on working days and weekends/holidays with prior appointment. Contact: Tel: 012 4253007.
+
+Q: Can a person apply for OCI on the basis of spouse's eligibility?
+A: No. Husband and wife must each claim OCI on the strength of their own parents/grandparents.
+
+Q: How do I check the status of my Indian passport or PCC application?
+A: Passport: https://www.passportindia.gov.in/AppOnlineProject/welcomeLink | PCC: https://portal5.passportindia.gov.in
+
+=== 11. TRADE & COMMERCE — INDIA–SOUTH AFRICA BILATERAL RELATIONS ===
+India and South Africa established diplomatic relations in 1993. Both are members of BRICS and G20.
+South Africa population: over 64 million | Area: 1.22 million sq km | Financial capital: Johannesburg.
+GDP composition: Services 62.75% | Industry 24.46%. Growth rate (2024): ~1.0%.
+Key resources: World's largest producer of platinum, vanadium, chromium, and manganese.
+Indian firms have invested approximately USD 10 billion in South Africa.
+More than 150 Indian companies operating in South Africa including TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma (Ranbaxy), TCS, WIPRO, Zensar, TechMahindra.
+Indian companies employ approximately 18,000 South Africans.
+Investment: USD 8–9 billion overall. South Africa seen as platform for broader African engagement via Johannesburg.
+Key bilateral sectors: IT, Mining, Infrastructure, Automobiles, Pharmaceuticals, Agriculture, Heavy Machinery.
+Double Taxation Avoidance Agreement (DTAA) entered into force on 28 November 1997 (Notification No. GSR 198(E), dated 21-04-1998).
+Services for Indian Companies: Trade advisory, business meeting facilitation, partner identification, export/import guidance, exhibition support.
+Services for South African Companies: Market entry advisory for India, introduction to Indian counterparts, investment/regulatory information, support for Buyer-Seller Meets (BSM).
+
+=== 12. BANKING DETAILS & TIMINGS ===
+Bank Details: Available at https://www.cgijoburg.gov.in/bank-details-and-timings.php
+Payment Methods: EFT, Credit Card, Debit Card. Original proof of payment required.
+ICWF Fee: ZAR 30 included in all consular/passport/visa fees.
+Office Hours: Monday to Friday: 08:30 to 17:00 | Lunch Break: 13:00 to 13:30
+VFS Submission: 08:00 to 15:00 | VFS Collection: 11:00 to 16:00
+Holidays: https://www.cgijoburg.gov.in/holiday-at-the-consulate-general.php
+
+=== 13. LATEST NEWS & EVENTS (as of April 2026) ===
+11 Mar 2026: ACG Mr. Harish Kumar inaugurates the 11th Agritec South Africa with MEC: Agriculture Ms. Vuyiswa Ramokgopa.
+27 Jan 2026: India–South Africa A.I. Dialogue brings together 100+ participants in A.I., in preparation for India A.I. Impact Summit.
+29 Jan 2026: The Consulate hosts the 77th Republic Day evening reception.
+26 Jan 2026: The Post celebrates India's 77th Republic Day with Flag Unfurling at Chancery.
+30 Jan 2026: The Post hosts a Hindi Poetry and Costume contest on Vishwa Hindi Diwas.
+25 Dec 2025: ACG Mr. Harish Kumar celebrated the spirit of Christmas at St. Thomas Indian Orthodox Church, Midrand.
+24 Dec 2025: ACG Mr. Harish Kumar and the Consulate team visited the children of Leratong Joy for One Foundation.
+23 Oct 2025: Commercial Representative Shri Harish Kumar addresses Delegates at JCCI Annual Conference 2025.
+08 Oct 2025: CG Shri Mahesh Kumar welcomes Shri Harivansh Narayan Singh, Chairman of the Rajya Sabha.
+05 Oct 2025: Speaker of Delhi Legislative Assembly, Shri Vijender Gupta, planted a sapling under Ek Ped Maa Ke Naam.
+Recent Press Releases: India–South Africa A.I. Dialogue (Jan 2026), Launch of Study in India Portal & e-Student Visa (Sep 2025), Viksit Bharat Run (Sep 2025), All-party Indian Parliamentary delegation visit led by Hon. Ms. Supriya Sule (May 2025), Digitization of Disembarkation Card for Foreign Nationals Visiting India.
+Upcoming Notices: Tender for renovation of rooms (Apr 01, 2026), Tender for Security Services (Nov 11, 2025), Tender for Boundary Wall Reconstruction (Nov 01, 2025), Tender for IT Equipment (Sep 19, 2025), 88th Edition of Know India Programme (KIP), 61st IHGF Delhi Fair (Spring 2026), SEPC Buyer-Seller Meet in Johannesburg (09–10 Mar 2026).
+
+=== 14. IMPORTANT LINKS & CONTACTS ===
+Consulate Website: www.cgijoburg.gov.in
+Passport Application (Online): https://embassy.passportindia.gov.in/
+Regular Visa Application: https://indianvisaonline.gov.in/visa/index.html
+E-Visa Application: https://indianvisaonline.gov.in/evisa/tvoa.html
+OCI Services: https://ociservices.gov.in/
+PCC Application: https://portal5.passportindia.gov.in
+VFS Global (SA): https://services.vfsglobal.com/zaf/en/ind/
+VFS Johannesburg: 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 4253007
+MEA Apostille: http://www.mea.gov.in/apostille.htm
+Consulate Email: ccom.jburg@mea.gov.in
+Consular Services Email: cons.jburg@mea.gov.in
+Pravasi Bharatiya Sahayata Kendra: Toll Free (India only): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in
+Office of Protector General of Emigrants: pge@mea.gov.in | diroe1@mea.gov.in
+Passport Status Check: https://www.passportindia.gov.in/AppOnlineProject/welcomeLink
+PCC Status Check: https://portal5.passportindia.gov.in
+Ministry of External Affairs: www.mea.gov.in
+High Commission of India, Pretoria: www.hcipretoria.gov.in
+""".strip()
+
+
 async def scrape_cgi_joburg() -> Dict:
-    """Scrape CGI Joburg homepage + key sub-pages concurrently."""
+    """
+    Scrape CGI Joburg homepage + key sub-pages concurrently.
+    Falls back to full PDF-sourced static content if the website is unreachable.
+    """
     try:
         # Fetch homepage + all sub-pages concurrently
         all_urls = ["https://www.cgijoburg.gov.in/"] + CGI_SUB_PAGES
@@ -379,37 +758,56 @@ async def scrape_cgi_joburg() -> Dict:
         # Combine all page text, labelled by URL, skip failures
         combined_parts = []
         contact_html = None
+        pages_ok = 0
         for url, result in zip(all_urls, results):
             if isinstance(result, Exception) or not result:
                 continue
+            pages_ok += 1
             page_name = url.rstrip("/").split("/")[-1] or "home"
             combined_parts.append(f"[Page: {page_name}]\n{result}")
-            # Reuse already-fetched homepage HTML — don't fetch again
             if url == "https://www.cgijoburg.gov.in/":
                 contact_html = result
 
-        page_content = "\n\n".join(combined_parts)
+        # If live scrape returned content, use it
+        if combined_parts:
+            page_content = "\n\n".join(combined_parts)
+            live_contact = CONTACT_FALLBACK.copy()
+            if contact_html:
+                try:
+                    soup = BeautifulSoup(contact_html, "html.parser")
+                    live_contact = _extract_contact_details(soup)
+                except Exception:
+                    pass
+            return {
+                "source": "cgijoburg.gov.in (live)",
+                "scraped_at": datetime.now(timezone.utc).isoformat(),
+                "status": "live_scraped",
+                "pages_crawled": pages_ok,
+                "page_content": page_content,
+                **live_contact,
+            }
 
-        # Extract live contact details from already-fetched homepage HTML
-        live_contact = CONTACT_FALLBACK.copy()
-        if contact_html:
-            try:
-                soup = BeautifulSoup(contact_html, "html.parser")
-                live_contact = _extract_contact_details(soup)
-            except Exception:
-                pass
-
+        # Website unreachable — use full PDF-sourced content
+        logger.info("[SCRAPE] cgijoburg.gov.in unreachable — using PDF static content")
         return {
-            "source": "cgijoburg.gov.in",
+            "source": "cgijoburg.gov.in (PDF static — April 2026)",
             "scraped_at": datetime.now(timezone.utc).isoformat(),
-            "status": "live_scraped",
-            "pages_crawled": len([r for r in results if not isinstance(r, Exception) and r]),
-            "page_content": page_content,
-            **live_contact,
+            "status": "pdf_static",
+            "pages_crawled": 0,
+            "page_content": _get_cgi_pdf_content(),
+            **CONTACT_FALLBACK,
         }
+
     except Exception as e:
         await send_exception_email("CGI Joburg Scraping Failed", str(e))
-        return {"source": "cgijoburg.gov.in", "status": "failed", "page_content": "", "pages_crawled": 0, **CONTACT_FALLBACK}
+        return {
+            "source": "cgijoburg.gov.in (PDF static — April 2026)",
+            "status": "pdf_static",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "pages_crawled": 0,
+            "page_content": _get_cgi_pdf_content(),
+            **CONTACT_FALLBACK,
+        }
 
 
 async def scrape_vfs_global() -> Dict:
@@ -466,48 +864,44 @@ async def scrape_vfs_global() -> Dict:
 
 
 def _get_vfs_static_content() -> str:
-    """Return well-structured VFS information as fallback when live scraping fails."""
-    return """[VFS Global - India Visa Application Centre, Johannesburg]
-Location: VFS Global, Johannesburg (appointment mandatory)
-Website: https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/
-Office Hours: Monday–Friday 08:00–15:00
-Appointment: Book online at visa.vfsglobal.com
+    """VFS Global information from cgijoburg.gov.in (compiled April 2026)."""
+    return """[VFS Global — India Visa & Consular Application Centre, Johannesburg]
+Source: www.cgijoburg.gov.in
 
-Services offered at VFS Johannesburg:
-- Tourist Visa (short-term, up to 90 days)
-- Business Visa
-- Employment Visa
-- Student Visa
-- Medical Visa
-- Conference Visa
-- OCI Card application and re-issue
-- Passport submission (new and renewal)
+PASSPORT / PCC / CONSULAR SERVICES (VFS):
+Address: 2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, Johannesburg - 2198
+Telephone: 012 425 3007 / 011 484 0327
+Email: Info.inza@vfshelpline.com
+Website: https://services.vfsglobal.com/zaf/en/ind/
+Submission Hours: 08:00 to 15:00 | Collection Hours: 11:00 to 16:00
+Processing Time: Up to one month (passport)
+
+VISA APPLICATIONS (VFS):
+Address: 1st Floor Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, Johannesburg
+Telephone: 012 425 3007 / 011 484 0327
+Email: Info.inza@vfshelpline.com
+Biometrics: Mandatory for all regular visa applicants
+
+SERVICES AT VFS:
+- Passport submission (reissue on expiry/lost/stolen/damaged/name change/pages exhaustion)
+- New passport for minor child born in South Africa
+- Visa applications (all types)
 - Police Clearance Certificate (PCC)
-- Document Attestation / Apostille
+- Document attestation
 
-Visa Application Requirements:
-- Completed online application form (indianvisaonline.gov.in)
-- Valid passport (6 months validity minimum)
-- Recent passport-size photographs (51mm x 51mm, white background)
-- Proof of residence in South Africa
-- Bank statements (last 3 months)
-- Return flight booking
-- Hotel/accommodation proof
-- Travel insurance
+VISA FEES (Source: cgijoburg.gov.in):
+- South African nationals: GRATIS (free of charge) for all visa types
+- South African diplomatic/official passport holders: Exempt from visa up to 90 days
+- Other foreign nationals: Contact the Consulate
 
-Processing Times:
-- Standard visa: 5–7 working days
-- Urgent processing: 2–3 working days (additional fee applies)
-- OCI card: 60–90 working days
+PASSPORT FEES (Source: cgijoburg.gov.in):
+- 36-page passport re-issue: ZAR 2,280 (incl. ICWF ZAR 30)
+- 60-page passport re-issue: ZAR 2,655 (incl. ICWF ZAR 30)
+- Minor child new passport: ZAR 780
+- Emergency Travel Document: ZAR 780
 
-Fees (approximate, subject to change):
-- Tourist Visa: ZAR 1,750
-- Business Visa: ZAR 2,100
-- OCI Card: ZAR 3,500
-- Passport Renewal: ZAR 2,400
-
-Contact VFS: +27 (0) 11 804 2442
-VFS Email: info.ind@vfsglobal.com"""
+VFS Reference for PCC: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
+VFS Reference for Passport: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/"""
 
 
 _knowledge_cache: Optional[Dict] = None
@@ -542,7 +936,7 @@ async def _probe_playwright() -> None:
 
 
 async def _do_scrape() -> Dict:
-    """Run both scrapers concurrently and return combined knowledge."""
+    """Scrape CGI Joburg (primary source) + VFS (auxiliary) and return combined knowledge."""
     await _probe_playwright()   # set the flag once before parallel fetches
     cgi_data, vfs_data = await asyncio.gather(
         scrape_cgi_joburg(),
@@ -555,9 +949,12 @@ async def _do_scrape() -> Dict:
         **CONTACT_FALLBACK,
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
-            "vfs": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
-            "passport_seva": "https://portal2.passportindia.gov.in/",
-            "e_visa": "https://indianvisaonline.gov.in/",
+            "passport_application": "https://embassy.passportindia.gov.in/",
+            "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
+            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
+            "oci_services": "https://ociservices.gov.in/",
+            "pcc_application": "https://portal5.passportindia.gov.in",
+            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
         },
     }
 
@@ -649,105 +1046,116 @@ async def send_exception_email(subject: str, error_details: str):
 
 
 def get_fallback_knowledge() -> Dict:
-    """Comprehensive fallback knowledge base when scraping fails."""
+    """Comprehensive fallback knowledge base when scraping fails.
+    Source: www.cgijoburg.gov.in (compiled April 2026)
+    """
     return {
         "last_updated": datetime.now(timezone.utc).isoformat(),
-        "source": "Fallback - Official Information (cached)",
-        "emergency_contact": "(+27) 11 581 9800",
-        "email": "cons.joburg@mea.gov.in",
+        "source": "Fallback - Official Information (www.cgijoburg.gov.in)",
+        "emergency_contact": "+27 11 581 9800",
+        "email": "ccom.jburg@mea.gov.in",
+        "email_consular": "cons.jburg@mea.gov.in",
         "services": {
             "passport": {
-                "new_passport": "Apply online at passportindia.gov.in, submit documents at VFS Johannesburg",
-                "renewal": "Online application required, valid for 10 years for adults",
-                "tatkal": "Urgent passport processing available (extra fee applies, 1–3 working days)",
+                "description": "All passport services processed through VFS Global — not directly at Consulate",
+                "apply_online": "https://embassy.passportindia.gov.in/",
+                "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
+                "vfs_phone": "012 425 3007 / 011 484 0327",
+                "submission_hours": "08:00–15:00 | Collection: 11:00–16:00",
+                "processing_time": "Up to one month (if all documents are in order)",
                 "documents_required": [
-                    "Online application receipt (passportindia.gov.in)",
-                    "Current passport (original + copy, for renewal)",
-                    "Proof of Indian citizenship",
-                    "Proof of residence in South Africa",
-                    "Photographs: 51mm x 51mm, white background, no glasses",
-                    "Fees paid receipt"
+                    "Completed online application (embassy.passportindia.gov.in)",
+                    "3 passport-sized photos (5cm x 5cm, coloured, white background)",
+                    "Original current passport",
+                    "Proof of residential address in South Africa",
+                    "Original proof of payment (no photocopies)"
                 ],
-                "processing_time": "Standard: 7–10 working days | Tatkal: 1–3 working days",
-                "fees_zar": "New passport: ZAR 2,400 | Renewal: ZAR 2,400 | Tatkal surcharge: ZAR 800"
+                "fees_zar": "36-page: ZAR 2,280 | 60-page: ZAR 2,655 | Minor child/Emergency: ZAR 780 (all include ICWF ZAR 30)",
+                "lost_stolen_extra": "Original FIR/Police Report required for lost/stolen passport"
             },
             "visa": {
-                "tourist_visa": "Apply online at indianvisaonline.gov.in, submit at VFS Johannesburg",
-                "business_visa": "Letter from SA company + invitation from Indian company required",
-                "e_visa": "Available at indianvisaonline.gov.in — instant approval for 60-day stay",
-                "student_visa": "Admission letter from Indian institution required",
-                "medical_visa": "Letter from Indian hospital required",
-                "processing_time": "Standard: 5–7 working days | Urgent: 2–3 working days",
-                "visa_fees": (
-                    "Tourist Visa fee: ZAR 1,750 | "
-                    "Business Visa fee: ZAR 2,100 | "
-                    "Student Visa fee: ZAR 1,500 | "
-                    "Medical Visa fee: ZAR 1,750 | "
-                    "Urgent/Express processing fee: additional ZAR 500"
-                ),
-                "fees_note": "Visa fees are paid at VFS Global — fees subject to change, verify at visa.vfsglobal.com",
-                "documents_required": [
-                    "Completed online application form",
-                    "Valid passport (6+ months validity)",
-                    "2 passport photographs",
-                    "Bank statements (3 months)",
-                    "Return flight booking",
-                    "Hotel/accommodation proof",
-                    "Travel insurance"
-                ]
+                "south_african_nationals": "South African nationals receive Indian visa GRATIS (free of charge)",
+                "apply_online": "https://indianvisaonline.gov.in/visa/index.html",
+                "vfs_address": "1st Floor, Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, JHB",
+                "biometrics": "Mandatory for all regular visa applicants",
+                "important": "No visa applications accepted directly at the Consulate — all through VFS only",
+                "passport_validity": "Must be valid for minimum 6 months from date of departure from India",
+                "blank_pages": "Passport must have at least 2 blank pages",
+                "visa_types": "Tourist, Business, Employment, Student, Medical, Research, Journalist, Conference, Transit, Entry (X), Medical Attendant, Missionary/Religious Worker",
+                "e_visa_apply": "https://indianvisaonline.gov.in/evisa/tvoa.html",
+                "e_visa_note": "Apply minimum 5 working days before departure; available at 30+ airports and 5 seaports"
             },
             "oci": {
-                "description": "Overseas Citizen of India card — lifelong multiple-entry visa",
-                "eligibility": "Person of Indian Origin (PIO), spouse of Indian citizen/OCI holder",
-                "application": "Apply online at ociservices.gov.in, submit at VFS Johannesburg",
-                "validity": "Lifelong — re-issue required at age 20 and 50",
-                "benefits": "Multiple-entry, multi-purpose lifelong visa; parity with NRI on most financial matters",
-                "processing_time": "60–90 working days",
-                "fees_zar": "ZAR 3,500 (new) | ZAR 2,000 (re-issue)",
+                "description": "Multi-purpose, multi-entry, life-long visa for persons of Indian origin",
+                "apply_online": "https://ociservices.gov.in/",
+                "submit_to": "Consulate General of India, Johannesburg (appointment required)",
+                "appointment": "Email cons.jburg@mea.gov.in for OCI appointment",
+                "eligibility": "Indian citizen since 26 Jan 1950, or parent/grandparent/great-grandparent was Indian citizen, or spouse of Indian citizen/OCI holder (married ≥2 years)",
+                "not_eligible": "Pakistan/Bangladesh nationals; foreign military personnel (serving or retired)",
+                "fees_zar": "As per MEA notification — contact Consulate for current rates",
                 "documents_required": [
-                    "Renunciation certificate (if applicable)",
-                    "South African ID/PR document",
-                    "Proof of Indian origin",
-                    "Current passport",
-                    "Birth certificate"
+                    "Proof of present citizenship (current foreign passport)",
+                    "Proof of renunciation of Indian citizenship / surrender certificate",
+                    "Proof of Indian origin (old Indian passport, birth certificate, school certificate)",
+                    "Proof of residential address in SA",
+                    "2 photos (51mm x 51mm)"
                 ]
             },
             "pcc": {
-                "description": "Police Clearance Certificate for Indian nationals in South Africa",
-                "processing_time": "10–15 working days",
-                "fees_zar": "ZAR 600",
-                "documents_required": [
-                    "Passport copy",
-                    "Proof of residence in South Africa",
-                    "Application form (from consulate)"
-                ]
+                "description": "Police Clearance Certificate — required for immigration, change of nationality, employment abroad",
+                "apply_online": "https://portal5.passportindia.gov.in",
+                "submit_to": "VFS Global Johannesburg (select CGI Johannesburg)",
+                "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
+                "jurisdiction": "Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg"
             },
             "attestation": {
-                "description": "Document attestation, apostille, affidavit, power of attorney",
-                "processing_time": "3–5 working days",
-                "fees_zar": "Attestation per document: ZAR 500 | Apostille: ZAR 700",
+                "description": "Attestation of academic degrees, GPA/PoA, and documents for Indian and foreign nationals",
+                "indian_documents": "Indian documents must first be apostilled by MEA India — http://www.mea.gov.in/apostille.htm",
+                "gpa_poa": "Original documents and self-attested copies required",
+                "fees_zar": "As per consular schedule"
+            },
+            "birth_registration": {
+                "description": "Registration of births of children born in South Africa to Indian nationals",
+                "fee": "Gratis (free of charge)",
                 "documents_required": [
-                    "Original document",
-                    "Notarised copy",
-                    "Passport copy",
-                    "Application form"
+                    "Birth certificate from South African Home Department",
+                    "Birth certificate from local hospital",
+                    "Indian passport(s) of parent(s)"
+                ]
+            },
+            "emergency_travel": {
+                "description": "Emergency Travel Document for single journey to India when passport is lost/stolen/damaged",
+                "fees_zar": "ZAR 780 (includes ICWF)",
+                "documents_required": [
+                    "Police report",
+                    "Proof of identity",
+                    "2 photographs",
+                    "Proof of travel booking"
                 ]
             }
         },
         "vfs_locations": {
-            "johannesburg": {
-                "address": "VFS Global, Johannesburg",
-                "timings": "Monday–Friday: 08:00–15:00",
-                "appointment": "Mandatory — book at visa.vfsglobal.com",
-                "phone": "+27 (0) 11 804 2442"
+            "johannesburg_passport": {
+                "address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
+                "timings": "Submission: 08:00–15:00 | Collection: 11:00–16:00",
+                "phone": "012 425 3007 / 011 484 0327",
+                "email": "Info.inza@vfshelpline.com"
+            },
+            "johannesburg_visa": {
+                "address": "1st Floor, Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, JHB",
+                "phone": "012 425 3007 / 011 484 0327"
             }
         },
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
-            "vfs": "https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/",
-            "passport_seva": "https://portal2.passportindia.gov.in/",
-            "e_visa": "https://indianvisaonline.gov.in/",
-            "oci_services": "https://ociservices.gov.in/"
+            "passport_application": "https://embassy.passportindia.gov.in/",
+            "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
+            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
+            "oci_services": "https://ociservices.gov.in/",
+            "pcc_application": "https://portal5.passportindia.gov.in",
+            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
+            "mea_apostille": "http://www.mea.gov.in/apostille.htm",
+            "passport_status": "https://www.passportindia.gov.in/AppOnlineProject/welcomeLink"
         }
     }
 
@@ -1073,15 +1481,15 @@ def _search_knowledge_sync(query: str, knowledge_base: Dict) -> str:
     vfs_status  = vfs.get("status", "unknown")
 
     contact_block = (
-        f"CONTACT & LOCATION:\n"
-        f"- Phone: {CONTACT_FALLBACK['emergency_contact']}\n"
-        f"- Email: {CONTACT_FALLBACK['email']}\n"
+        f"CONTACT & LOCATION (Source: www.cgijoburg.gov.in):\n"
+        f"- Phone: {CONTACT_FALLBACK['phone_main']} / {CONTACT_FALLBACK['phone_consular']}\n"
+        f"- Email: {CONTACT_FALLBACK['email']} | Consular: {CONTACT_FALLBACK['email_consular']}\n"
         f"- Address: {CONTACT_FALLBACK['address']}\n"
         f"- Office Hours: {CONTACT_FALLBACK['office_hours']}\n"
-        f"- VFS Address: {CONTACT_FALLBACK['vfs_address']}\n"
+        f"- VFS (Passport/PCC): {CONTACT_FALLBACK['vfs_address']}\n"
+        f"- VFS Phone: {CONTACT_FALLBACK['vfs_phone']} | Email: {CONTACT_FALLBACK['vfs_email']}\n"
         f"- VFS Hours: {CONTACT_FALLBACK['vfs_hours']}\n"
-        f"- Consulate Website: {CONTACT_FALLBACK['website']}\n"
-        f"- VFS Website: {CONTACT_FALLBACK['vfs_website']}"
+        f"- Consulate Website: {CONTACT_FALLBACK['website']}"
     )
 
     keywords = _extract_keywords(query)

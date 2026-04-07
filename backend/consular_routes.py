@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, AsyncGenerator
 import asyncio
+import re
 import uuid
 import json
 from datetime import datetime, timezone
@@ -42,6 +43,8 @@ from services.escalation_service import (
 )
 from services.knowledge_service import knowledge_service
 from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query
+from services.pdf_service import generate_application_pdf
+from fastapi.responses import Response as FastAPIResponse
 
 load_dotenv()
 
@@ -343,10 +346,10 @@ OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
 {context_info}
 
 FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
-  📞 (+27) 11 581 9800  |  📧 cons.joburg@mea.gov.in
-  🏢 1 Eton Road, Parktown 2193, Johannesburg
-  🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
-  VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
+  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
+  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/"""
 
         api_key = os.environ.get('EMERGENT_LLM_KEY')
         chat_instance = LlmChat(
@@ -443,9 +446,12 @@ async def chat_stream(request: ChatRequest):
     intent_result  = classify_intent(sanitized_message)
     deterministic  = get_deterministic_response(intent_result)
 
-    async def _stream_deterministic(text: str, sid: str, step: str) -> AsyncGenerator:
+    async def _stream_deterministic(text: str, sid: str, step: str, pdf_url: str = None) -> AsyncGenerator:
         yield f"data: {json.dumps({'chunk': text})}\n\n"
-        yield f"data: {json.dumps({'done': True, 'session_id': sid, 'step': step})}\n\n"
+        done_event = {'done': True, 'session_id': sid, 'step': step}
+        if pdf_url:
+            done_event['pdf_url'] = pdf_url
+        yield f"data: {json.dumps(done_event)}\n\n"
 
     # Only use deterministic shortcut for pure greetings / FAQs with NO active
     # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
@@ -484,14 +490,26 @@ async def chat_stream(request: ChatRequest):
     )
     current_state = current_flow.get("state", "idle")
 
-    # Mark as uploaded (no scan)
+    # ── Virus scan + mark as uploaded ────────────────────────────────
     image_doc_data = None
-    if current_state == "docs_uploading" and request.image_base64:
-        image_doc_data = {
-            "filename": "uploaded_doc",
-            "file_id": str(uuid.uuid4()),
-            "status": "uploaded",
-        }
+    if request.image_base64:
+        from virus_scanner import scan_base64 as _virus_scan_b64
+        _scan = await _virus_scan_b64(request.image_base64, "uploaded_doc")
+        if not _scan["clean"]:
+            threat = _scan.get("threat", "unknown threat")
+            logger.warning("[SECURITY] Virus scan blocked upload in chat/stream: %s", threat)
+            async def _virus_blocked():
+                import json as _json
+                yield f"data: {_json.dumps({'chunk': f'🚫 **Security Alert:** This file was flagged as a threat ({threat}) and cannot be processed. Please upload a different document.'})}\n\n"
+                yield f"data: {_json.dumps({'done': True, 'session_id': session_id, 'step': 'error'})}\n\n"
+            return StreamingResponse(_virus_blocked(), media_type="text/event-stream")
+
+        if current_state == "docs_uploading":
+            image_doc_data = {
+                "filename": "uploaded_doc",
+                "file_id": str(uuid.uuid4()),
+                "status": "uploaded",
+            }
 
     active_service = detect_service(sanitized_message) or current_flow.get("service")
     scraped_summary = extract_service_content(active_service, knowledge_base) if active_service else ""
@@ -514,8 +532,13 @@ async def chat_stream(request: ChatRequest):
         full_text = flow_response
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
         asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
+        pdf_url = None
+        if current_step == "submitted":
+            _tid_match = re.search(r"`([A-Z]+-\d{8}-[A-Z0-9]+)`", full_text)
+            if _tid_match:
+                pdf_url = f"/api/consular/download-pdf/{_tid_match.group(1)}"
         return StreamingResponse(
-            _stream_deterministic(full_text, session_id, current_step),
+            _stream_deterministic(full_text, session_id, current_step, pdf_url=pdf_url),
             media_type="text/event-stream"
         )
 
@@ -542,10 +565,10 @@ OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
 {context_info}
 
 FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
-  📞 (+27) 11 581 9800  |  📧 cons.joburg@mea.gov.in
-  🏢 1 Eton Road, Parktown 2193, Johannesburg
-  🕐 Mon–Fri 09:00–17:00 | Consular services 09:00–12:00 (by appointment)
-  VFS Global — Mon–Fri 08:00–15:00 (appointment mandatory) — visa.vfsglobal.com"""
+  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
+  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/"""
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     chat_instance = LlmChat(
@@ -599,9 +622,23 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
 @router.post("/document-scan")
 async def document_scan(request: DocumentScanRequest):
     db = await get_database()
-    
+
+    # ── TC 3.1 — Virus / malware scan before any processing ──────────
+    from virus_scanner import scan_base64 as _virus_scan_b64
+    _scan = await _virus_scan_b64(request.image_base64, f"document_scan/{request.document_type}")
+    if not _scan["clean"]:
+        threat = _scan.get("threat", "unknown threat")
+        logger.warning("[SECURITY] Virus scan blocked document-scan upload: %s", threat)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"🚫 Security Alert: This file was flagged as a threat ({threat}) "
+                "and cannot be processed. Please upload a different document."
+            ),
+        )
+
     api_key = os.environ.get('EMERGENT_LLM_KEY')
-    
+
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=str(uuid.uuid4()),
@@ -651,22 +688,68 @@ Be accurate and thorough."""
     try:
         extracted_data = await chat_instance.send_message(user_message)
 
+        # ── TC 3.2 / 3.3 — Parse OCR JSON and store doc_context in session flow ──
+        doc_context: dict = {}
+        try:
+            import re as _re
+            _json_str = extracted_data
+            # Strip markdown code fences if LLM wrapped the JSON
+            _fence = _re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", _json_str)
+            if _fence:
+                _json_str = _fence.group(1)
+            _parsed = json.loads(_json_str)
+            doc_context = _parsed.get("extracted_fields", {})
+        except Exception:
+            pass  # Non-JSON response — doc_context stays empty; raw text still stored
+
+        # Persist: raw extracted text + structured doc_context into session
+        _update: dict = {
+            "extracted_data":        extracted_data,
+            "document_type":         request.document_type,
+            "extraction_timestamp":  datetime.now(timezone.utc).isoformat(),
+        }
+        if doc_context:
+            # Merge into the flow's doc_context so auto-fill can use it (TC 3.4)
+            _update["flow.doc_context"] = doc_context
+
         await db.chat_sessions.update_one(
             {"id": request.session_id},
-            {
-                "$set": {
-                    "extracted_data": extracted_data,
-                    "document_type": request.document_type,
-                    "extraction_timestamp": datetime.now(timezone.utc).isoformat()
-                }
-            }
+            {"$set": _update},
+        )
+
+        # Build a human-readable confirmation for the user (TC 3.2)
+        _confirm_lines = []
+        _field_labels = {
+            "full_name":       "Name",
+            "date_of_birth":   "Date of Birth",
+            "document_number": "Document Number",
+            "nationality":     "Nationality",
+            "address":         "Address",
+            "place_of_birth":  "Place of Birth",
+            "issue_date":      "Issue Date",
+            "expiry_date":     "Expiry Date",
+        }
+        for k, label in _field_labels.items():
+            v = doc_context.get(k)
+            if v and str(v).strip().lower() not in ("", "n/a", "null", "none", "unknown"):
+                _confirm_lines.append(f"  • **{label}:** {v}")
+        _confirm_msg = (
+            "✅ Document scanned successfully. Here are the details we extracted:\n\n"
+            + "\n".join(_confirm_lines)
+            + "\n\nThese details will be used to pre-fill your application form."
+            if _confirm_lines
+            else "✅ Document scanned. We'll use the extracted data to assist with your application."
         )
 
         return {
             "success": True,
             "extracted_data": extracted_data,
+            "doc_context": doc_context,
+            "confirmation_message": _confirm_msg,
             "message": "Document processed successfully. Data extracted and translated to English for form filling."
         }
+    except HTTPException:
+        raise
     except Exception as e:
         err = str(e)
         if "unsupported image" in err.lower() or "invalid_image_format" in err.lower():
@@ -679,6 +762,118 @@ Be accurate and thorough."""
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Document scan failed. Please try again."
         )
+
+@router.get("/generate-pdf")
+async def generate_pdf(session_id: str):
+    """
+    TC 4.1 — Generate an editable AcroForm PDF preview of the applicant's form.
+
+    Called by the frontend when the user is in docs_pending state.
+    Returns the PDF as a binary file download.
+    """
+    db = await get_database()
+
+    # Load session and flow
+    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    flow = session.get("flow", {})
+    service_key  = flow.get("service")
+    form_data    = flow.get("data", {})
+    tracking_id  = flow.get("tracking_id", "UNKNOWN")
+    uploaded_docs = flow.get("uploaded_docs", [])
+
+    if not service_key or service_key not in SERVICES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No active application found for this session.",
+        )
+
+    service_name = SERVICES[service_key]["name"]
+
+    try:
+        loop = asyncio.get_event_loop()
+        pdf_bytes = await loop.run_in_executor(
+            None,
+            lambda: generate_application_pdf(
+                service_name=service_name,
+                form_data=form_data,
+                tracking_id=tracking_id,
+                uploaded_docs=uploaded_docs,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"PDF generation error: {sanitize_logs(str(e))}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF generation failed. Please try again.",
+        )
+
+    safe_name = service_name.lower().replace(" ", "_")
+    filename = f"application_preview_{safe_name}_{tracking_id}.pdf"
+
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/download-pdf/{tracking_id}")
+async def download_pdf_by_tracking(tracking_id: str):
+    """
+    Generate and download the submitted application PDF using tracking ID.
+    Called automatically after submission (session flow may already be cleared).
+    """
+    db = await get_database()
+
+    app = await db.applications.find_one({"tracking_id": tracking_id.upper()}, {"_id": 0})
+    if not app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
+
+    service_key   = app.get("service")
+    form_data     = app.get("form_data", {})
+    uploaded_docs = [
+        {"name": d.get("name", "Document"), "status": d.get("status", "uploaded")}
+        for d in app.get("documents", [])
+    ]
+
+    if not service_key or service_key not in SERVICES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Service information not available for this application.",
+        )
+
+    service_name = SERVICES[service_key]["name"]
+
+    try:
+        loop = asyncio.get_event_loop()
+        pdf_bytes = await loop.run_in_executor(
+            None,
+            lambda: generate_application_pdf(
+                service_name=service_name,
+                form_data=form_data,
+                tracking_id=tracking_id.upper(),
+                uploaded_docs=uploaded_docs,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"PDF generation error: {sanitize_logs(str(e))}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF generation failed. Please try again.",
+        )
+
+    safe_name = service_name.lower().replace(" ", "_")
+    filename = f"application_{safe_name}_{tracking_id.upper()}.pdf"
+
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @router.post("/form-submit")
 async def form_submit(form: FormData):
@@ -832,15 +1027,15 @@ LANGUAGE: Always respond in English only.
 EXAMPLE GOOD RESPONSES:
 
 User: "What is OCI?"
-You: "OCI (Overseas Citizen of India) is a lifelong visa for foreign nationals of Indian origin. It allows unlimited travel to India without needing separate visas."
+You: "OCI (Overseas Citizen of India) provides a multi-purpose, multi-entry life-long visa to India. Eligible persons include those who were citizens of India on or after 26 Jan 1950, or whose parents/grandparents were Indian citizens, or spouses of Indian citizens/OCI holders (married ≥2 years), or minor children of Indian citizens. Apply online at ociservices.gov.in and submit documents at the Consulate (appointment via cons.jburg@mea.gov.in). Fees as per MEA notification."
 
 User: "How to renew passport?"
 You: "**Passport Renewal Steps:**
 1. Book appointment on passportindia.gov.in
 2. Fill online application form
 3. Visit with: old passport, photos, address proof
-4. Pay fee (R800-1200)
-Processing: 4-6 weeks"
+4. Pay fee (ZAR 2,280 for 36-page / ZAR 2,655 for 60-page / ZAR 780 for minor/ETD)
+Processing: as per Consulate schedule"
 
 User: "Office timings?"
 You: "**CGI Johannesburg Hours:**

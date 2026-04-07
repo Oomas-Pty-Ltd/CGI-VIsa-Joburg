@@ -132,6 +132,7 @@ async def health_check():
 
 # ICS WABA sends webhook calls to the root path /?replytype=...&customernumber=...
 # This catches those and forwards them to the proper ICS handler.
+# Also handles delivery status callbacks at /?qStatus=...&qMsgRef=...
 @app.get("/")
 async def root_ics_or_info(
     request: Request,
@@ -143,7 +144,14 @@ async def root_ics_or_info(
     wabanumber: Optional[str] = Query(default=""),
     mid: Optional[str] = Query(default=None),
     smsgid: Optional[str] = Query(default=None),
+    qStatus: Optional[str] = Query(default=None),
+    qMobile: Optional[str] = Query(default=None),
+    qMsgRef: Optional[str] = Query(default=None),
+    qDTime: Optional[str] = Query(default=None),
+    SMSMSGID: Optional[str] = Query(default=None),
+    NOTES: Optional[str] = Query(default=None),
 ):
+    logger.info("[ROOT /] raw_url=%s", str(request.url))
     if customernumber:
         # ICS WABA incoming webhook — delegate to the proper handler
         from ics_whatsapp_routes import ics_incoming_webhook
@@ -151,26 +159,37 @@ async def root_ics_or_info(
             request, background_tasks, replytype, customernumber,
             replymessage, timestamp, wabanumber,
         )
+    if qMsgRef and qStatus:
+        # ICS WABA delivery status callback
+        from ics_whatsapp_routes import ics_delivery_callback
+        return await ics_delivery_callback(
+            request, qStatus, qMobile, qMsgRef, qDTime, SMSMSGID, None, NOTES,
+        )
     return {"message": "Seva Setu Bot API", "status": "running"}
 
 async def init_super_admin():
-    """Initialize super admin if not exists"""
+    """Initialize super admin, always syncing password from env vars."""
     try:
         super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'superadmin@sarthak.ai')
         super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin@2025')
-        
+        hashed = bcrypt.hashpw(super_admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
         existing = await db.super_admins.find_one({"email": super_admin_email})
         if not existing:
-            hashed = bcrypt.hashpw(super_admin_password.encode('utf-8'), bcrypt.gensalt())
             await db.super_admins.insert_one({
                 "id": str(uuid.uuid4()),
                 "email": super_admin_email,
-                "password": hashed.decode('utf-8'),
+                "password": hashed,
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             logger.info(f"Super admin created: {super_admin_email}")
         else:
-            logger.info(f"Super admin already exists: {super_admin_email}")
+            # Always update password so env-var changes take effect on restart
+            await db.super_admins.update_one(
+                {"email": super_admin_email},
+                {"$set": {"password": hashed}}
+            )
+            logger.info(f"Super admin password synced: {super_admin_email}")
     except Exception as e:
         logger.error(f"Failed to initialize super admin: {e}")
 
@@ -217,6 +236,7 @@ async def root(
     SMSMSGID: Optional[str] = Query(default=None),
     NOTES: Optional[str] = Query(default=None),
 ):
+    logger.info("[ROOT /api/] raw_url=%s", str(request.url))
     if customernumber:
         # ICS WABA incoming message webhook
         from ics_whatsapp_routes import ics_incoming_webhook

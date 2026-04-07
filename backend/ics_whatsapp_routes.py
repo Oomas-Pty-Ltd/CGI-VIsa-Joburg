@@ -263,10 +263,10 @@ async def _llm_response(user_message: str, session_id: str, context: str = "") -
     system_prompt = f"""You are Seva Setu, the official WhatsApp assistant for the Consulate General of India, Johannesburg.
 
 OFFICE:
-- Address: 1 Eton Road, Corner Jan Smuts Avenue, Parktown 2193, Johannesburg
-- Phone: +27 11 581 9800 | Emergency: +27 11 581 9800 (24/7)
-- Email: cons.joburg@mea.gov.in | Web: https://www.cgijoburg.gov.in
-- Hours: Mon–Fri 09:00–17:00 | Consular services: 09:00–12:00 (appointment required)
+- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
+- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI) | Web: https://www.cgijoburg.gov.in
+- Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30) | VFS submission: 08:00–15:00
 
 SERVICES: Passport, Indian Visa (via VFS Global), OCI, PCC, Marriage/Birth Registration, Attestation, Renunciation.
 {("OFFICIAL WEBSITE INFORMATION (live):\n" + context) if context else ""}
@@ -326,6 +326,62 @@ async def _get_flow_safe(phone: str) -> dict:
     except Exception as e:
         logger.debug(f"Could not fetch flow state for {phone}: {e}")
         return {"state": "idle", "service": None}
+
+
+# =====================================================================
+# PHONE NORMALISATION
+# =====================================================================
+def _normalize_phone(raw: str, waba_number: str = "") -> str:
+    """
+    Normalise an incoming customernumber to digits-only E.164 (no leading +).
+
+    Safe transforms:
+      1. Leading '+'          : +27726413058    → 27726413058
+      2. Punctuation/spaces   : +27 72-641 3058 → 27726413058
+      3. SA local with 0      : 0726413058      → 27726413058  (ONLY SA uses 0xx 10-digit)
+      4. SA local without 0   : 726413058       → 27726413058  (9-digit SA mobile)
+      5. Duplicate India CC   : 9191XXXXXXXXXX  → 91XXXXXXXXXX (known ICS India bug)
+
+    ICS SA-mangling fix (requires waba_number context):
+      ICS bug: strips leading '2' from SA E.164, prepends '91'
+        27726413058 → 917726413058
+      Reversal: strip '91', prepend '2'; accept only if result starts with '27'.
+      Only applied when waba_number is a South African number (starts with '27').
+    """
+    # Strip whitespace and leading +
+    phone = raw.strip().lstrip("+")
+    # Remove formatting characters
+    phone = re.sub(r"[\s\-\(\)\.]+", "", phone)
+
+    # ICS SA-mangling fix: 91XXXXXXXXXX → 27XXXXXXXXX
+    # ICS strips the leading '2' from SA numbers (27...) and prepends '91',
+    # producing a 12-digit number like 917726413058 instead of 27726413058.
+    # Only correct this when the WABA itself is South African (starts with '27'),
+    # to avoid mis-converting genuine Indian customer numbers.
+    waba = re.sub(r"[\s\-\(\)\.]+", "", waba_number.strip().lstrip("+"))
+    if (
+        waba.startswith("27")
+        and re.match(r"^91\d{10}$", phone)
+    ):
+        candidate = "2" + phone[2:]   # strip "91", prepend "2"
+        if candidate.startswith("27"):
+            logger.info(
+                "[PHONE NORM] ICS SA-mangle corrected: %s → %s",
+                phone, candidate,
+            )
+            phone = candidate
+            return phone
+
+    # SA local with leading 0: 0XXXXXXXXX (10 digits) → 27XXXXXXXXX
+    if re.match(r"^0[6-8]\d{8}$", phone):
+        phone = "27" + phone[1:]
+    # SA local without 0: 9-digit number starting with SA mobile prefix (6x/7x/8x)
+    elif re.match(r"^[6-8]\d{8}$", phone):
+        phone = "27" + phone
+    # Fix duplicate India country code: 9191<10 digits> → 91<10 digits>
+    elif re.match(r"^9191\d{10}$", phone):
+        phone = phone[2:]
+    return phone
 
 
 # =====================================================================
@@ -556,8 +612,51 @@ async def _handle_message(
     except Exception as exc:
         logger.warning("Knowledge base fetch failed: %s", exc)
 
-    # ── RUN process_flow() — same engine as web bot ───────────────────
+    # ── TC 3.1 — Virus scan for media attachments ────────────────────
     has_doc = reply_type in ("IMAGE", "DOCUMENT") and bool(media_id)
+    if has_doc:
+        # Attempt to download media bytes for scanning.
+        # ICS WABA delivers media via media_id; download if possible.
+        _media_bytes: bytes | None = None
+        try:
+            import httpx as _httpx
+            _dl_url = f"https://media.sendmsg.in/download/{media_id}"
+            _dl_headers = {}
+            _ics_user = os.environ.get("ICS_WABA_USER", "")
+            _ics_pass = os.environ.get("ICS_WABA_PASS", "")
+            if _ics_user and _ics_pass:
+                import base64 as _b64
+                _cred = _b64.b64encode(f"{_ics_user}:{_ics_pass}".encode()).decode()
+                _dl_headers["Authorization"] = f"Basic {_cred}"
+            async with _httpx.AsyncClient(timeout=8.0) as _client:
+                _resp = await _client.get(_dl_url, headers=_dl_headers)
+                if _resp.status_code == 200:
+                    _media_bytes = _resp.content
+        except Exception as _exc:
+            logger.warning("[VIRUS_SCAN] Could not download media %s for scan: %s", media_id, _exc)
+
+        if _media_bytes:
+            from virus_scanner import scan_bytes as _virus_scan
+            _scan = await _virus_scan(_media_bytes, f"wa_{reply_type.lower()}_{media_id}")
+            if not _scan["clean"]:
+                threat = _scan.get("threat", "unknown threat")
+                logger.warning(
+                    "[SECURITY] Virus scan blocked WhatsApp media from %s: %s", phone, threat
+                )
+                await ics_waba.send_text(
+                    phone,
+                    f"🚫 *Security Alert:* The file you sent was flagged as a threat "
+                    f"({threat}) and cannot be processed. Please send a different document.",
+                    from_override=waba_number,
+                )
+                await _log_message(
+                    phone, "outbound",
+                    "Security alert: virus detected in uploaded media.",
+                    {"step": "virus_blocked", "threat": threat},
+                    db,
+                )
+                return
+
     image_doc_data = {"filename": "whatsapp_doc", "file_id": media_id, "status": "uploaded"} if has_doc else None
 
     flow_response, needs_llm, step = await process_flow(
@@ -714,18 +813,30 @@ async def ics_incoming_webhook(
     Incoming user message webhook — called by ICS WABA.
     ICS sends: replytype, customernumber, replymessage, timestamp, wabanumber
     """
-    phone       = customernumber.strip()
     waba_number = (wabanumber or "").strip()
+    phone       = _normalize_phone(customernumber, waba_number)
     raw_reply   = unquote_plus(replymessage)
     reply_type  = replytype.upper()
+
+    # ── Log full raw payload ──────────────────────────────────────────
+    logger.info(
+        "[ICS INCOMING PAYLOAD] raw_url=%s | replytype=%s | customernumber=%s | "
+        "replymessage=%s | timestamp=%s | wabanumber=%s",
+        str(request.url),
+        replytype,
+        sanitize_logs(customernumber),
+        sanitize_logs(replymessage[:200]),
+        timestamp,
+        wabanumber,
+    )
 
     if not phone:
         logger.warning("ICS webhook: empty customernumber — ignoring")
         return PlainTextResponse("OK", status_code=200)
 
     logger.info(
-        "ICS WABA incoming | phone=%s type=%s msg=%s",
-        sanitize_logs(phone), reply_type, sanitize_logs(raw_reply[:80]),
+        "[ICS INCOMING] phone=%s type=%s waba=%s msg=%s",
+        sanitize_logs(phone), reply_type, wabanumber, sanitize_logs(raw_reply[:200]),
     )
 
     try:
@@ -741,17 +852,18 @@ async def ics_incoming_webhook(
 async def ics_incoming_webhook_post(request: Request, background_tasks: BackgroundTasks):
     """POST variant of the incoming webhook."""
     params      = dict(request.query_params)
-    phone       = params.get("customernumber", "").strip()
     waba_number = params.get("wabanumber", "").strip()
+    phone       = _normalize_phone(params.get("customernumber", ""), waba_number)
     raw_reply   = unquote_plus(params.get("replymessage", ""))
     reply_type  = params.get("replytype", "TEXT").upper()
 
     if not phone:
         try:
             body = await request.json()
-            phone      = body.get("customernumber", "")
-            raw_reply  = body.get("replymessage", "")
-            reply_type = body.get("replytype", "TEXT").upper()
+            waba_number = body.get("wabanumber", waba_number)
+            phone       = _normalize_phone(body.get("customernumber", ""), waba_number)
+            raw_reply   = body.get("replymessage", "")
+            reply_type  = body.get("replytype", "TEXT").upper()
         except Exception:
             pass
 
@@ -784,10 +896,19 @@ async def ics_delivery_callback(
       <your-ngrok>/api/ics-whatsapp/delivery?qStatus=%STATUS&qMobile=%MOBILENO
         &qMsgRef=%MESSAGEID&qDTime=%DATETIME&SMSMSGID=%SMSMSGID&NOTES=%NOTES
     """
+    # ── Log full raw DLR payload ──────────────────────────────────────
+    logger.info(
+        "[ICS DLR PAYLOAD] raw_url=%s | qStatus=%s | qMobile=%s | qMsgRef=%s | "
+        "qDTime=%s | SMSMSGID=%s | SENDERID=%s | NOTES=%s",
+        str(request.url),
+        qStatus, sanitize_logs(qMobile or ""), qMsgRef,
+        qDTime, SMSMSGID, SENDERID, NOTES,
+    )
+
     if qMsgRef and qStatus:
         try:
             db = await get_database()
-            await db.ics_whatsapp_messages.update_one(
+            result = await db.ics_whatsapp_messages.update_one(
                 {"ics_mid": qMsgRef},
                 {"$set": {
                     "delivery_status":    qStatus,
@@ -799,9 +920,15 @@ async def ics_delivery_callback(
                 }},
                 upsert=False,
             )
-            logger.info("ICS delivery: msg=%s status=%s phone=%s", qMsgRef, qStatus, sanitize_logs(qMobile or ""))
+            logger.info(
+                "[ICS DLR] msg_ref=%s status=%s phone=%s matched=%d modified=%d",
+                qMsgRef, qStatus, sanitize_logs(qMobile or ""),
+                result.matched_count, result.modified_count,
+            )
         except Exception as exc:
             logger.error("ICS delivery callback error: %s", exc)
+    else:
+        logger.warning("[ICS DLR] Missing qMsgRef or qStatus — payload ignored")
 
     return PlainTextResponse("OK", status_code=200)
 
@@ -865,7 +992,7 @@ async def simulate_incoming_message(req: SimulateRequest, background_tasks: Back
     Runs the full bot logic (_handle_message) in the background exactly as if
     the message arrived via the real ICS webhook.
     """
-    phone = req.phone.strip()
+    phone = _normalize_phone(req.phone, req.waba_number or "")
     if not phone:
         return {"success": False, "error": "phone is required"}
 

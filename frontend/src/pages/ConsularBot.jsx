@@ -435,6 +435,11 @@ export default function ConsularBot() {
               localStorage.removeItem("consular_session_id");
               sessionIdRef.current = null;
               setSessionId(null);
+              if (evt.pdf_url) {
+                setTimeout(() => {
+                  window.open(`${process.env.REACT_APP_BACKEND_URL}${evt.pdf_url}`, "_blank");
+                }, 800);
+              }
             }
             // Speak the completed response if voice is enabled
             if (enableVoiceRef.current && fullText) {
@@ -1206,6 +1211,16 @@ export default function ConsularBot() {
                     { label: "🗑️ Discard & Search", value: "discard"  },
                   ] :
                   currentStep === "docs_pending" ? [
+                    {
+                      label: "📄 Preview PDF",
+                      value: "__preview_pdf__",
+                      action: () => {
+                        const sid = sessionIdRef.current;
+                        if (sid) {
+                          window.open(`${process.env.REACT_APP_BACKEND_URL}/api/consular/generate-pdf?session_id=${encodeURIComponent(sid)}`, "_blank");
+                        }
+                      },
+                    },
                     { label: "📤 Submit application",  value: "submit"  },
                     { label: "🗑️ Discard application", value: "discard" },
                   ] :
@@ -1221,8 +1236,8 @@ export default function ConsularBot() {
                     {chips.map((chip) => (
                       <button
                         key={chip.value}
-                        onClick={() => handleSend(chip.value)}
-                        disabled={isTyping}
+                        onClick={() => chip.action ? chip.action() : handleSend(chip.value)}
+                        disabled={isTyping && !chip.action}
                         className="text-xs px-3 py-1.5 rounded-full border border-[#E06F2C] text-[#E06F2C] hover:bg-[#E06F2C] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {chip.label}

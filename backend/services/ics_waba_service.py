@@ -31,7 +31,9 @@ class ICSWABAService:
         self.pw   = ICS_PASS
         self.from_ = ICS_FROM
         self.enabled = bool(self.user and self.pw and self.from_)
-        self._interactive_unsupported = False
+        # ICS production account returns 500 for interactive (list/buttons) messages.
+        # Set True here to skip the interactive attempt and go straight to plain-text fallback.
+        self._interactive_unsupported = bool(os.environ.get("ICS_DISABLE_INTERACTIVE", "true").lower() != "false")
         if not self.enabled:
             logger.warning(
                 "ICS WABA not configured. Set ICS_WABA_USER, ICS_WABA_PASS, ICS_WABA_FROM in .env"
@@ -48,14 +50,22 @@ class ICSWABAService:
             return {"status": "mock", "mid": "mock_mid", "warning": "ICS WABA not configured"}
         import json as _json
         logger.info("[ICS SEND] POST %s | to=%s", url, payload.get("sessiondata", {}).get("to", "unknown"))
-        logger.debug("[ICS PAYLOAD] %s", _json.dumps(payload))
+        logger.info("[ICS PAYLOAD] %s", _json.dumps(payload, default=str))
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(url, json=payload)
-                logger.info("[ICS RESPONSE] status=%s, response_size=%d bytes", resp.status_code, len(resp.text))
+                logger.info(
+                    "[ICS RESPONSE] status=%s | size=%d bytes | body=%s",
+                    resp.status_code, len(resp.text), resp.text[:500],
+                )
                 resp.raise_for_status()
                 result = resp.json()
-                logger.info("[ICS SUCCESS] mid=%s", result.get("mid", "no_mid"))
+                logger.info(
+                    "[ICS SUCCESS] to=%s | mid=%s | full_response=%s",
+                    payload.get("sessiondata", {}).get("to", "unknown"),
+                    result.get("mid", "no_mid"),
+                    result,
+                )
                 return result
         except httpx.HTTPStatusError as exc:
             error_msg = f"ICS API HTTP {exc.response.status_code}: {exc.response.text[:200]}"

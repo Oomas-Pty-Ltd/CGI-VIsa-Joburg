@@ -59,12 +59,13 @@ SERVICES: Dict[str, Dict] = {
         "name": "Indian Visa",
         "description": (
             "Indian visas for South African and other foreign nationals are processed through "
-            "VFS Global Visa Application Centre, Johannesburg (not directly at the consulate). "
-            "Common visa categories include Tourist, Business, Medical, Student, and e-Visa. "
-            "Tourist and Business e-Visas can be applied online at indianvisaonline.gov.in. "
-            "For other categories, apply in person at VFS Global. "
-            "Processing time: 3–5 business days. VFS hours: Mon–Fri 08:00–15:00 (appointment mandatory). "
-            "Visit: https://visa.vfsglobal.com/one-pager/india/south-africa/johannesburg/"
+            "VFS Global Visa Application Centre, Johannesburg (not directly at the Consulate). "
+            "South African nationals receive Indian visas GRATIS (free of charge). "
+            "Apply online at https://indianvisaonline.gov.in/ — no manual forms accepted. "
+            "For e-Visa, apply at https://indianvisaonline.gov.in/evisa/tvoa.html (min. 5 working days before travel). "
+            "Biometrics mandatory at VFS for regular visa applicants. "
+            "VFS Visa Centre: 1st Floor, Rivonia Village Office Block, cnr Rivonia Blvd & Mutual Rd, Rivonia, JHB. "
+            "VFS hours: Mon–Fri 08:00–15:00. No visa applications accepted at the Consulate directly."
         ),
         "documents": [
             "Valid foreign passport (at least 6 months validity remaining)",
@@ -88,12 +89,12 @@ SERVICES: Dict[str, Dict] = {
     "oci": {
         "name": "OCI (Overseas Citizen of India)",
         "description": (
-            "OCI (Overseas Citizen of India) is a lifelong visa for foreign nationals of Indian origin "
-            "and their spouses. It grants multiple-entry, multi-purpose lifelong visa to India, "
-            "exemption from registering with the Foreigners Regional Registration Office (FRRO), "
-            "and parity with NRIs in most financial and educational matters. "
-            "Apply online at ociservices.gov.in and submit documents in person at the consulate. "
-            "Processing time: 8–10 weeks. Applicable fee must be paid online."
+            "OCI (Overseas Citizen of India) provides a multi-purpose, multi-entry life-long visa to India. "
+            "Eligibility: persons who were citizens of India on or after 26 Jan 1950, or whose parents/grandparents "
+            "were Indian citizens, or who are spouses of Indian citizens/OCI holders (married for ≥2 years), "
+            "or minor children of Indian citizens. "
+            "Apply online at ociservices.gov.in, then submit documents in person at the Consulate "
+            "(appointment via cons.jburg@mea.gov.in). Fees as per MEA notification."
         ),
         "documents": [
             "Foreign passport — original + copies of all pages",
@@ -114,12 +115,13 @@ SERVICES: Dict[str, Dict] = {
     "pcc": {
         "name": "Police Clearance Certificate (PCC)",
         "description": (
-            "A Police Clearance Certificate (PCC) is an official document issued by the Indian consulate "
-            "confirming that the applicant has no criminal record in India. "
-            "It is commonly required for immigration, employment abroad, or residency applications. "
-            "The PCC is issued for Indian passport holders currently residing in South Africa. "
-            "Apply in person at the consulate. Processing time: 3–5 business days. "
-            "Consulate hours: Mon–Fri 09:00–12:00 (by appointment only)."
+            "A Police Clearance Certificate (PCC) is required by Indian nationals for immigration, "
+            "change of nationality, employment abroad, or longer stay in another country. "
+            "PCC service is outsourced to VFS Global — do NOT apply at the Consulate directly. "
+            "Apply online at https://portal5.passportindia.gov.in, select CGI Johannesburg, "
+            "and submit at VFS Global Johannesburg (2nd Floor, Harrow Court 1, Isle of Houghton, Park Town). "
+            "VFS submission hours: 08:00–15:00, Mon–Fri. "
+            "VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/"
         ),
         "documents": [
             "Valid Indian passport — original + photocopy",
@@ -167,12 +169,11 @@ SERVICES: Dict[str, Dict] = {
     "birth": {
         "name": "Birth Certificate Registration",
         "description": (
-            "Indian nationals residing in South Africa can register the birth of their child born abroad "
+            "Indian nationals residing in South Africa can register the birth of their child born in South Africa "
             "at the Consulate General of India, Johannesburg. "
-            "Registration is required to obtain an Indian passport for the child. "
-            "Both parents must appear in person with the child. "
-            "Processing time: 3–5 business days. "
-            "Note: The child must also be registered with South African Home Affairs."
+            "This service is Gratis (free of charge). "
+            "Registration is required before applying for an Indian passport for the child. "
+            "Required: birth certificate from South African Home Department and local hospital."
         ),
         "documents": [
             "South African birth certificate of the child — original + photocopy",
@@ -196,12 +197,13 @@ SERVICES: Dict[str, Dict] = {
     "attestation": {
         "name": "Document Attestation / Apostille",
         "description": (
-            "The Consulate General of India, Johannesburg provides attestation services for Indian documents "
-            "that need to be used in South Africa, and for South African documents that need to be used in India. "
-            "Common documents: educational certificates, affidavits, power of attorney, commercial documents. "
-            "For documents to be used in India, an Apostille is issued by the South African government first, "
-            "then the consulate countersigns. "
-            "Processing time: 3–5 business days. Walk-in accepted for attestation services."
+            "The Consulate General of India, Johannesburg provides attestation of academic degrees, "
+            "general power of attorney (GPA/PoA), and other documents for Indian and foreign nationals. "
+            "For Indian documents: must first be apostilled by MEA (Ministry of External Affairs, India) — "
+            "see http://www.mea.gov.in/apostille.htm. "
+            "For GPA/PoA: bring original documents and self-attested copies. "
+            "For foreign nationals: attestation of Indian documents for use in South Africa. "
+            "Fee as per consular schedule. Contact the Consulate for appointment."
         ),
         "documents": [
             "Original document(s) to be attested — with photocopies",
@@ -226,7 +228,7 @@ SERVICES: Dict[str, Dict] = {
             "are required by law to renounce their Indian citizenship and surrender their Indian passport. "
             "The renunciation certificate is issued by the Consulate General of India, Johannesburg. "
             "After renunciation, an OCI card can be applied for to maintain ties with India. "
-            "Processing time: 4–6 weeks. Apply in person at the consulate with prior appointment."
+            "Contact the Consulate for appointment: cons.jburg@mea.gov.in or +27 11-4828484 / +27 11 581 9800."
         ),
         "documents": [
             "Indian passport — original (to be surrendered)",
@@ -249,10 +251,10 @@ SERVICES: Dict[str, Dict] = {
 }
 
 CONTACT_INFO = (
-    "📞 **(+27) 11 581 9800**\n"
-    "📧 cons.joburg@mea.gov.in\n"
-    "🏢 1 Eton Road, Corner Jan Smuts Avenue & Eton Road, Parktown 2193, Johannesburg\n"
-    "🕐 Mon–Fri 09:00–17:00 | Consular services: 09:00–12:00 (by appointment)\n"
+    "📞 **+27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800**\n"
+    "📧 ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
+    "🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+    "🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
     "🌐 https://www.cgijoburg.gov.in"
 )
 
@@ -432,6 +434,9 @@ _EMPTY_FLOW = {
     "paused_question":     None,
     "paused_field_index":  None,
     "paused_in_state":     None,     # state to resume into after pause
+    # IDP: extracted fields from scanned documents (TC 3.3 / 3.4)
+    "doc_context":         {},       # {full_name, date_of_birth, document_number, ...}
+    "prefill_pending":     None,     # {field_key, value} — waiting for user confirm/correct
 }
 
 
@@ -597,8 +602,93 @@ def _docs_complete_prompt(service_key: str, uploaded: List[Dict], tracking_id: s
         + "\n".join(lines)
         + skip_note
         + f"\n\n🔖 **Tracking ID:** `{tracking_id}`\n\n"
+        + "📄 **Review your application before submitting:**\n"
+        + "  • Click **Preview PDF** to download an editable preview of your form.\n"
+        + "  • To correct any field, type: `correct field name: new value`\n"
+        + "    *(e.g. `correct name: John Smith` or `correct dob: 15/08/1990`)*\n\n"
         + "Type **submit** to finalise and submit your application, or **discard** to cancel."
     )
+
+
+# ── Field correction helpers (TC 4.2) ─────────────────────────────────────────
+
+_CORRECT_RE = re.compile(
+    r"^\s*(?:correct|update|change|edit|fix|modify)\s+(.+?)\s*:\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+# Common aliases users may type instead of the exact field key
+_FIELD_ALIASES: Dict[str, str] = {
+    "name":              "full_name",
+    "full name":         "full_name",
+    "dob":               "dob",
+    "date of birth":     "dob",
+    "birthday":          "dob",
+    "birth date":        "dob",
+    "passport":          "passport_number",
+    "passport number":   "passport_number",
+    "passport no":       "passport_number",
+    "passport num":      "passport_number",
+    "phone":             "phone",
+    "mobile":            "phone",
+    "contact":           "phone",
+    "email":             "email",
+    "mail":              "email",
+    "address":           "address",
+    "nationality":       "nationality",
+    "purpose":           "purpose",
+    "travel dates":      "travel_dates",
+    "travel":            "travel_dates",
+    "doc type":          "doc_type",
+    "document type":     "doc_type",
+    "child name":        "child_name",
+    "child":             "child_name",
+    "father":            "father_name",
+    "mother":            "mother_name",
+    "spouse":            "spouse_name",
+    "spouse name":       "spouse_name",
+    "marriage date":     "marriage_date",
+    "marriage place":    "marriage_place",
+    "place of marriage": "marriage_place",
+    "birth place":       "birth_place",
+    "place of birth":    "birth_place",
+    "indian passport":   "indian_passport",
+    "new passport":      "new_passport",
+    "new citizenship":   "new_citizenship",
+    "father passport":   "father_passport",
+    "indian connection": "indian_connection",
+    "connection":        "indian_connection",
+}
+
+
+def _match_field_key(service_key: str, user_label: str) -> Optional[str]:
+    """
+    Map a free-text label (e.g. 'name', 'date of birth') to the exact
+    form field key defined in SERVICES[service_key]['fields'].
+    Returns None if no match found.
+    """
+    fields = SERVICES[service_key]["fields"]
+    field_keys = {f["key"] for f in fields}
+    low = user_label.lower().strip()
+
+    # 1. Direct key match (user typed the exact key)
+    normalised = low.replace(" ", "_")
+    if normalised in field_keys:
+        return normalised
+
+    # 2. Alias lookup
+    alias = _FIELD_ALIASES.get(low)
+    if alias and alias in field_keys:
+        return alias
+
+    # 3. Substring match against key words or question text
+    for f in fields:
+        key_words = f["key"].replace("_", " ")
+        q_words   = f["question"].lower()
+        if low in key_words or low in q_words:
+            return f["key"]
+
+    return None
 
 
 # =====================================================================
@@ -635,6 +725,66 @@ async def _search_and_format(question: str, knowledge_base: Optional[Dict]) -> s
         return await hybrid_search(question, knowledge_base)
     except Exception:
         return ""
+
+
+# =====================================================================
+# AUTO-FILL HELPERS  (TC 3.4)
+# =====================================================================
+
+# Maps doc_context keys (from OCR) to one or more form field keys.
+# The OCR endpoint returns English-translated fields in this shape.
+_DOC_CTX_TO_FORM: Dict[str, List[str]] = {
+    "full_name":       ["full_name", "child_name", "father_name", "mother_name", "spouse_name"],
+    "date_of_birth":   ["dob"],
+    "document_number": ["passport_number", "indian_passport", "new_passport", "father_passport"],
+    "nationality":     ["nationality"],
+    "address":         ["address"],
+    "place_of_birth":  ["birth_place"],
+}
+
+# Values that mean "nothing useful was extracted"
+_EMPTY_VALUES = {"", "n/a", "null", "none", "unknown", "not available", "not found"}
+
+
+def _get_prefill(service_key: str, field_index: int, doc_context: Dict) -> Optional[str]:
+    """
+    Return a pre-filled value from doc_context for fields[field_index], or None.
+    Converts OCR date format (YYYY-MM-DD) → form format (DD/MM/YYYY) automatically.
+    """
+    if not doc_context:
+        return None
+    fields = SERVICES[service_key]["fields"]
+    if field_index >= len(fields):
+        return None
+    field_key = fields[field_index]["key"]
+
+    for ctx_key, form_keys in _DOC_CTX_TO_FORM.items():
+        if field_key not in form_keys:
+            continue
+        raw = doc_context.get(ctx_key)
+        if not raw or str(raw).lower().strip() in _EMPTY_VALUES:
+            continue
+        value = str(raw).strip()
+        # Auto-convert ISO date → DD/MM/YYYY
+        if field_key == "dob" and re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+            y, m, d = value.split("-")
+            value = f"{d}/{m}/{y}"
+        return value
+
+    return None
+
+
+def _prefill_prompt(service_key: str, field_index: int, prefilled_value: str) -> str:
+    """Question shown when a field has a pre-filled value from a scanned document."""
+    fields = SERVICES[service_key]["fields"]
+    total  = len(fields)
+    label  = fields[field_index]["key"].replace("_", " ").title()
+    return (
+        f"**Step {field_index + 1} of {total}** — "
+        f"📋 From your uploaded document we found:\n\n"
+        f"**{label}:** {prefilled_value}\n\n"
+        f"Reply **yes** to confirm, or type the correct value."
+    )
 
 
 async def process_flow(
@@ -775,9 +925,46 @@ async def process_flow(
     # STATE: docs_pending  (all docs processed, waiting for submit)
     # ------------------------------------------------------------------
     if state == "docs_pending":
+        tracking_id = flow.get("tracking_id", "")
+        svc_name    = SERVICES[service]["name"]
+
+        # ── TC 4.2 — Field correction: "correct field: value" ────────
+        _corr = _CORRECT_RE.match(message)
+        if _corr:
+            user_label = _corr.group(1).strip()
+            new_value  = _corr.group(2).strip()
+            field_key  = _match_field_key(service, user_label)
+            if field_key:
+                validation_error = _validate_field(field_key, new_value)
+                if validation_error:
+                    return (
+                        f"⚠️ {validation_error}\n\nPlease try again.",
+                        False, "docs_pending",
+                    )
+                flow["data"][field_key] = new_value
+                if app_id:
+                    await _update_application(app_id, {"form_data": flow["data"]})
+                await _save_flow(session_id, flow)
+                display_label = field_key.replace("_", " ").title()
+                return (
+                    f"✅ **{display_label}** updated to: **{new_value}**\n\n"
+                    f"Any other corrections? Or type **submit** to finalise.\n"
+                    f"🔖 Tracking ID: `{tracking_id}`",
+                    False, "docs_pending",
+                )
+            else:
+                return (
+                    f"I couldn't find a field named **\"{user_label}\"** in your {svc_name} application.\n\n"
+                    f"Try using the exact field name, e.g.:\n"
+                    + "\n".join(
+                        f"  • `correct {f['key'].replace('_', ' ')}: <value>`"
+                        for f in SERVICES[service]["fields"]
+                    ),
+                    False, "docs_pending",
+                )
+
+        # ── TC 4.3 — Final submission ─────────────────────────────────
         if "submit" in message.lower():
-            svc_name    = SERVICES[service]["name"]
-            tracking_id = flow.get("tracking_id", "")
             if app_id:
                 await _update_application(app_id, {
                     "status":       "submitted",
@@ -805,11 +992,10 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "docs_pending"
             await _save_flow(session_id, flow)
-            svc_name = SERVICES[service]["name"]
             return (_pause_prompt(svc_name, message), False, "paused")
-        tracking_id = flow.get("tracking_id", "")
         return (
             f"Please type **submit** to complete your application, or **discard** to cancel.\n"
+            f"To correct a field: `correct field name: new value`\n"
             f"🔖 Tracking ID: `{tracking_id}`",
             False, "docs_pending"
         )
@@ -890,8 +1076,62 @@ async def process_flow(
     # STATE: collecting  (step-by-step data collection)
     # ------------------------------------------------------------------
     if state == "collecting":
-        fields = SERVICES[service]["fields"]
+        fields      = SERVICES[service]["fields"]
+        doc_context = flow.get("doc_context", {})
 
+        # ── Resolve a pending pre-fill confirm (TC 3.4) ───────────────
+        prefill_pending = flow.get("prefill_pending")
+        if prefill_pending and prefill_pending.get("field_key") == fields[fi]["key"]:
+            prefilled_value = prefill_pending["value"]
+
+            if is_discard(message):
+                if app_id:
+                    await _update_application(app_id, {"status": "discarded"})
+                await _clear_flow(session_id)
+                return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
+
+            if is_yes(message):
+                # Accept the OCR-extracted value
+                accepted_value = prefilled_value
+            else:
+                # User typed their own value — validate it
+                validation_error = _validate_field(fields[fi]["key"], message.strip())
+                if validation_error:
+                    return (
+                        f"⚠️ {validation_error}\n\n"
+                        + _prefill_prompt(service, fi, prefilled_value),
+                        False, "collecting",
+                    )
+                accepted_value = message.strip()
+
+            flow["prefill_pending"]            = None
+            flow["data"][fields[fi]["key"]]    = accepted_value
+            fi += 1
+            flow["field_index"] = fi
+            if app_id:
+                await _update_application(app_id, {"form_data": flow["data"]})
+
+            if fi >= len(fields):
+                flow["state"]         = "docs_uploading"
+                flow["doc_index"]     = 0
+                flow["uploaded_docs"] = []
+                await _save_flow(session_id, flow)
+                return (
+                    _summary(service, flow["data"]) + "\n\n" + _doc_upload_prompt(service, 0),
+                    False, "docs_uploading",
+                )
+
+            # Check doc_context for the NEXT field before asking
+            next_prefill = _get_prefill(service, fi, doc_context)
+            if next_prefill:
+                flow["prefill_pending"] = {"field_key": fields[fi]["key"], "value": next_prefill}
+                await _save_flow(session_id, flow)
+                return (_prefill_prompt(service, fi, next_prefill), False, "collecting")
+
+            await _save_flow(session_id, flow)
+            return (_field_question(service, fi), False, "collecting")
+
+        # ── Normal collecting flow ────────────────────────────────────
         if (is_question(message) or _is_info_query(message)) and not _looks_like_answer(message, fields[fi]["key"]):
             flow["state"]             = "paused"
             flow["paused_question"]   = message
@@ -936,6 +1176,13 @@ async def process_flow(
                 False, "docs_uploading"
             )
 
+        # Check doc_context for the NEXT field before asking (TC 3.4)
+        next_prefill = _get_prefill(service, fi, doc_context)
+        if next_prefill:
+            flow["prefill_pending"] = {"field_key": fields[fi]["key"], "value": next_prefill}
+            await _save_flow(session_id, flow)
+            return (_prefill_prompt(service, fi, next_prefill), False, "collecting")
+
         await _save_flow(session_id, flow)
         return (_field_question(service, fi), False, "collecting")
 
@@ -950,6 +1197,21 @@ async def process_flow(
             flow["data"]           = {}
             flow["application_id"] = app_id
             flow["tracking_id"]    = tracking_id
+
+            # Check doc_context for the FIRST field (TC 3.4 auto-fill)
+            doc_context = flow.get("doc_context", {})
+            first_prefill = _get_prefill(service, 0, doc_context)
+            if first_prefill:
+                fields = SERVICES[service]["fields"]
+                flow["prefill_pending"] = {"field_key": fields[0]["key"], "value": first_prefill}
+                await _save_flow(session_id, flow)
+                return (
+                    f"Great! Let's begin your **{SERVICES[service]['name']}** application.\n"
+                    f"🔖 Your tracking ID: `{tracking_id}`\n\n"
+                    + _prefill_prompt(service, 0, first_prefill),
+                    False, "collecting",
+                )
+
             await _save_flow(session_id, flow)
             return (
                 f"Great! Let's begin your **{SERVICES[service]['name']}** application.\n"
