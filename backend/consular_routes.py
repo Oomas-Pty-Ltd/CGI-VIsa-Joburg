@@ -49,6 +49,10 @@ from fastapi.responses import Response as FastAPIResponse
 
 load_dotenv()
 
+# When False the application/form-filling flow is hidden from users.
+# Set APPLICATION_FLOW_ENABLED=true in .env to re-enable it.
+_FLOW_ENABLED: bool = os.getenv("APPLICATION_FLOW_ENABLED", "true").lower() == "true"
+
 router = APIRouter(prefix="/consular", tags=["consular"])
 import logging
 import io
@@ -229,13 +233,14 @@ async def chat(request: ChatRequest, http_request: Request):
         final_response += "\n\n---\nIs this sufficient information, or do you need more details?"
 
         # TC 1.3 — if this is a core service, invite them to start the application
-        matched_service = _INTENT_TO_SERVICE.get(intent_result.category)
-        if matched_service and matched_service in SERVICES:
-            svc_name = SERVICES[matched_service]["name"]
-            final_response += (
-                f"\n\n**Are you interested in starting the application process for {svc_name}?** "
-                f"Type **apply** to begin."
-            )
+        if _FLOW_ENABLED:
+            matched_service = _INTENT_TO_SERVICE.get(intent_result.category)
+            if matched_service and matched_service in SERVICES:
+                svc_name = SERVICES[matched_service]["name"]
+                final_response += (
+                    f"\n\n**Are you interested in starting the application process for {svc_name}?** "
+                    f"Type **apply** to begin."
+                )
 
         # Store messages
         await session_manager.add_message(session['id'], "user", request.message)
@@ -306,23 +311,22 @@ async def chat(request: ChatRequest, http_request: Request):
         scraped_summary = "\n".join(relevant[:15])
 
     # ── Application flow state machine ────────────────────────────────
-    flow_response, needs_llm, current_step = await process_flow(
-        session_id, sanitized_message,
-        has_image=bool(request.image_base64),
-        image_doc_data=image_doc_data,
-        user_id=user_id,
-        scraped_summary=scraped_summary,
-        knowledge_base=knowledge_base,
-        preloaded_flow=current_flow,   # reuse what we already fetched
-    )
+    if _FLOW_ENABLED:
+        flow_response, needs_llm, current_step = await process_flow(
+            session_id, sanitized_message,
+            has_image=bool(request.image_base64),
+            image_doc_data=image_doc_data,
+            user_id=user_id,
+            scraped_summary=scraped_summary,
+            knowledge_base=knowledge_base,
+            preloaded_flow=current_flow,
+        )
+    else:
+        flow_response, needs_llm, current_step = None, True, "idle"
 
     if flow_response is not None and not needs_llm:
-        # Pure state-machine response — no LLM needed
         bot_response = flow_response
     elif flow_response is not None and current_step == "info_shown":
-        # Service info page is already fully formatted by _service_info_page():
-        # it contains static description + live scraped summary + required docs + apply CTA.
-        # No need to send it through the LLM — use it directly.
         bot_response = flow_response
     else:
         # LLM needed (info query, question during pause, etc.)
@@ -348,10 +352,10 @@ RESPONSE STYLE:
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
 {svc_docs_hint}
-OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
+OFFICIAL DATA (sourced from cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents):
 {context_info}
 
-FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
+FALLBACK RULE: If the information is not in the data above, say so briefly and direct the user to:
   📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
   🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
   🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
@@ -389,12 +393,11 @@ FALLBACK RULE: If the information is not in the scraped data, say so briefly and
                 detail=f"AI service error: {str(e)}"
             )
 
-        # Append flow guidance suffix only when the current message is about a specific service
-        # Never pull service from session history — that caused every response to show "apply for visa"
-        flow_service = detect_service(sanitized_message)
-        suffix = flow_suffix(current_step, flow_service)
-        if suffix:
-            bot_response += suffix
+        if _FLOW_ENABLED:
+            flow_service = detect_service(sanitized_message)
+            suffix = flow_suffix(current_step, flow_service)
+            if suffix:
+                bot_response += suffix
     
     # Generate voice response if requested
     audio_base64 = None
@@ -517,24 +520,24 @@ async def chat_stream(request: ChatRequest):
                 "status": "uploaded",
             }
 
-    active_service = detect_service(sanitized_message) or current_flow.get("service")
+    active_service = detect_service(sanitized_message) if _FLOW_ENABLED else None
     scraped_summary = extract_service_content(active_service, knowledge_base, user_query=sanitized_message) if active_service else ""
 
-    flow_response, needs_llm, current_step = await process_flow(
-        session_id, sanitized_message,
-        has_image=bool(request.image_base64),
-        image_doc_data=image_doc_data,
-        user_id=user_id,
-        scraped_summary=scraped_summary,
-        knowledge_base=knowledge_base,
-        preloaded_flow=current_flow,
-    )
+    if _FLOW_ENABLED:
+        flow_response, needs_llm, current_step = await process_flow(
+            session_id, sanitized_message,
+            has_image=bool(request.image_base64),
+            image_doc_data=image_doc_data,
+            user_id=user_id,
+            scraped_summary=scraped_summary,
+            knowledge_base=knowledge_base,
+            preloaded_flow=current_flow,
+        )
+    else:
+        flow_response, needs_llm, current_step = None, True, "idle"
 
     # ── Non-LLM flow response ─────────────────────────────────────────
-    # Do NOT append flow_suffix here — flow_response already contains
-    # the complete prompt (e.g. consent_prompt ends with "Reply yes/no").
-    # flow_suffix is only for LLM responses that need a nudge back into flow.
-    if flow_response is not None and not needs_llm:
+    if _FLOW_ENABLED and flow_response is not None and not needs_llm:
         full_text = flow_response
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
         asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
@@ -549,16 +552,11 @@ async def chat_stream(request: ChatRequest):
         )
 
     # ── Build LLM context ─────────────────────────────────────────────
-    # Knowledge scraper (context_info) is PRIMARY. For service info requests
-    # (step="info_shown"), merge structured service page as additional context.
     llm_context = context_info or ""
-    if current_step == "info_shown" and flow_response:
-        if llm_context:
-            llm_context = llm_context + "\n\n---\n\n" + flow_response
-        else:
-            llm_context = flow_response
+    if _FLOW_ENABLED and current_step == "info_shown" and flow_response:
+        llm_context = (llm_context + "\n\n---\n\n" + flow_response) if llm_context else flow_response
 
-    detected_svc = detect_service(sanitized_message)
+    detected_svc = detect_service(sanitized_message) if _FLOW_ENABLED else None
     svc_docs_hint = ""
     if detected_svc and detected_svc in SERVICES:
         svc = SERVICES[detected_svc]
@@ -568,9 +566,10 @@ async def chat_stream(request: ChatRequest):
     system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 
 CRITICAL — DATA SOURCE RULE:
-Answer ONLY using the OFFICIAL DATA provided below (sourced from www.cgijoburg.gov.in and vfsglobal.com).
-Do NOT use your general training knowledge. Do NOT invent, guess, or add information not present in the official data.
-If the answer is not in the official data, say so and direct the user to contact the Consulate directly.
+Answer ONLY using the OFFICIAL DATA provided below.
+The data comes from: www.cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents (FAQs, events, notices).
+Do NOT use general training knowledge. Do NOT invent or add information not in the data below.
+If the answer is not in the data, say so and direct the user to contact the Consulate directly.
 
 LANGUAGE: Always respond in English only.
 
@@ -581,19 +580,19 @@ RESPONSE STYLE:
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
 
-KEY CONSULATE FACTS (from www.cgijoburg.gov.in — always use these for contact/location questions):
+KEY CONSULATE FACTS (always use these for contact/location questions):
 - Acting Consul General: Mr. Harish Kumar
 - Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
 - Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
 - Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
 - Website: www.cgijoburg.gov.in
 - Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
+- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces
 - VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
 - VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
 - VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
 {svc_docs_hint}
-OFFICIAL DATA (Source: www.cgijoburg.gov.in | www.vfsglobal.com | Compiled April 2026):
+OFFICIAL DATA (cgijoburg.gov.in | vfsglobal.com | uploaded documents):
 {llm_context}
 
 IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
@@ -632,11 +631,12 @@ IF NOT IN OFFICIAL DATA: Say "This information is not available in our current r
             yield f"data: {json.dumps({'error': 'AI service error, please try again.'})}\n\n"
             return
 
-        flow_service = detect_service(sanitized_message)
-        suffix = flow_suffix(current_step, flow_service)
-        if suffix:
-            full_text += suffix
-            yield f"data: {json.dumps({'chunk': suffix})}\n\n"
+        if _FLOW_ENABLED:
+            flow_service = detect_service(sanitized_message)
+            suffix = flow_suffix(current_step, flow_service)
+            if suffix:
+                full_text += suffix
+                yield f"data: {json.dumps({'chunk': suffix})}\n\n"
 
         yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'step': current_step})}\n\n"
 

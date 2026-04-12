@@ -211,6 +211,9 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
         logger.warning(f"[HYBRID L1] MongoDB search failed: {e}")
 
     # ── Layer 2: in-memory scraped cache ─────────────────────────────
+    # Only web-scraped content is scanned here. Uploaded PDF docs are
+    # handled exclusively at Layer 1 (MongoDB relevance scoring) so they
+    # are never injected into unrelated queries via keyword leakage.
     cgi_content = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
     vfs_content = knowledge_base.get("vfs_global", {}).get("page_content", "")
     combined    = cgi_content + "\n" + vfs_content

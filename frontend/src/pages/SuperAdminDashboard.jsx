@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Building2, Plus, Settings, TrendingUp, LogOut,
   MessageSquare, Shield, Download, ChevronLeft, ChevronRight,
-  X, RefreshCw, Copy, Check
+  X, RefreshCw, Copy, Check, BookOpen, Upload, Trash2, FileText,
+  Calendar, Clock, AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -43,6 +44,7 @@ const TABS = [
   { key: "dashboard", label: "Dashboard", icon: TrendingUp },
   { key: "conversations", label: "Conversations", icon: MessageSquare },
   { key: "audit-logs", label: "Audit Logs", icon: Shield },
+  { key: "knowledge", label: "Knowledge Base", icon: BookOpen },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -498,6 +500,440 @@ function AuditLogsTab({ companies, token }) {
   );
 }
 
+// ─── Knowledge Base tab ───────────────────────────────────────────────────────
+
+const EVENT_STATUS_STYLES = {
+  past:    { bg: "bg-gray-100 text-gray-600",    icon: Clock,         label: "Past" },
+  present: { bg: "bg-green-100 text-green-700",  icon: AlertCircle,   label: "Live" },
+  future:  { bg: "bg-blue-100 text-blue-700",    icon: Calendar,      label: "Upcoming" },
+  general: { bg: "bg-orange-100 text-orange-700", icon: FileText,     label: "General" },
+};
+
+function EventBadge({ status }) {
+  const cfg = EVENT_STATUS_STYLES[status] || EVENT_STATUS_STYLES.general;
+  const Icon = cfg.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg}`}>
+      <Icon className="w-3 h-3" />
+      {cfg.label}
+    </span>
+  );
+}
+
+function KnowledgeTab({ token }) {
+  /* ── upload state ── */
+  const [file, setFile]           = useState(null);
+  const [docTitle, setDocTitle]   = useState("");
+  const [category, setCategory]   = useState("general");
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver]   = useState(false);
+  const fileInputRef = useRef(null);
+
+  /* ── entries list state ── */
+  const [entries, setEntries]         = useState([]);
+  const [total, setTotal]             = useState(0);
+  const [page, setPage]               = useState(1);
+  const [loadingList, setLoadingList] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [pdfFiles, setPdfFiles]       = useState([]);
+  const [filterFile, setFilterFile]   = useState("");
+
+  /* ── entry preview ── */
+  const [preview, setPreview] = useState(null);
+
+  const limit = 50;
+
+  const CATEGORIES = [
+    "general","visa","passport","oci","pcc","fees","emergency","services","event","announcement","other"
+  ];
+
+  const fetchEntries = useCallback(async () => {
+    setLoadingList(true);
+    try {
+      const params = new URLSearchParams({ page, limit });
+      if (filterStatus)   params.set("event_status",  filterStatus);
+      if (filterCategory) params.set("category",      filterCategory);
+      if (filterFile)     params.set("pdf_filename",  filterFile);
+      const [entriesRes, filesRes] = await Promise.all([
+        fetch(`${API}/super-admin/knowledge/entries?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API}/super-admin/knowledge/pdf-files`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      const entData  = await entriesRes.json();
+      const fileData = await filesRes.json();
+      setEntries(entData.entries || []);
+      setTotal(entData.total   || 0);
+      setPdfFiles(fileData.files || []);
+    } catch {
+      toast.error("Failed to load knowledge entries");
+    } finally {
+      setLoadingList(false);
+    }
+  }, [page, filterStatus, filterCategory, filterFile, token]);
+
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  /* ── upload handler ── */
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!file) { toast.error("Please select a PDF file."); return; }
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file",     file);
+      form.append("title",    docTitle);
+      form.append("category", category);
+      const res  = await fetch(`${API}/super-admin/knowledge/upload-pdf`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+      const ocrNote = data.ocr_used ? " via OCR" : "";
+      const modeNote = data.faq_mode ? " as FAQ pairs" : "";
+      toast.success(`PDF processed — ${data.sections_created} entries created${modeNote}${ocrNote}.`);
+      setFile(null);
+      setDocTitle("");
+      setCategory("general");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      fetchEntries();
+    } catch (err) {
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  /* ── delete handler ── */
+  const handleDelete = async (entryId, entryTitle) => {
+    if (!window.confirm(`Delete entry: "${entryTitle}"?`)) return;
+    try {
+      const res = await fetch(`${API}/super-admin/knowledge/entries/${entryId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Entry deleted.");
+      fetchEntries();
+    } catch {
+      toast.error("Failed to delete entry.");
+    }
+  };
+
+  /* ── drag-and-drop ── */
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const dropped = e.dataTransfer.files[0];
+    if (dropped && dropped.type === "application/pdf") {
+      setFile(dropped);
+      if (!docTitle) setDocTitle(dropped.name.replace(/\.pdf$/i, "").replace(/_/g, " "));
+    } else {
+      toast.error("Only PDF files are accepted.");
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+
+      {/* ── Upload card ── */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-xl font-bold text-[#1A2E40] mb-4 flex items-center gap-2">
+          <Upload className="w-5 h-5 text-[#E06F2C]" />
+          Upload PDF to Knowledge Base
+        </h2>
+
+        <form onSubmit={handleUpload} className="space-y-4">
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              dragOver
+                ? "border-[#E06F2C] bg-orange-50"
+                : file
+                ? "border-green-400 bg-green-50"
+                : "border-gray-300 hover:border-[#E06F2C] hover:bg-orange-50"
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files[0];
+                if (f) {
+                  setFile(f);
+                  if (!docTitle) setDocTitle(f.name.replace(/\.pdf$/i, "").replace(/_/g, " "));
+                }
+              }}
+            />
+            {file ? (
+              <div className="flex items-center justify-center gap-2 text-green-700">
+                <FileText className="w-6 h-6" />
+                <span className="font-medium">{file.name}</span>
+                <span className="text-sm text-gray-500">({(file.size / 1024).toFixed(0)} KB)</span>
+              </div>
+            ) : (
+              <div className="text-gray-500">
+                <Upload className="w-10 h-10 mx-auto mb-2 text-gray-400" />
+                <p className="font-medium">Drag &amp; drop a PDF here, or click to browse</p>
+                <p className="text-sm mt-1">Max 20 MB · PDF only</p>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-sm text-gray-600 mb-1 block">Document Title (optional)</Label>
+              <Input
+                value={docTitle}
+                onChange={(e) => setDocTitle(e.target.value)}
+                placeholder="e.g. Visa Policy Update April 2026"
+              />
+            </div>
+            <div>
+              <Label className="text-sm text-gray-600 mb-1 block">Category</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button
+              type="submit"
+              disabled={uploading || !file}
+              className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+            >
+              {uploading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Processing PDF…
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload &amp; Extract
+                </>
+              )}
+            </Button>
+            {file && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setFile(null); setDocTitle(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          {/* How date-awareness works */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+            <p className="font-semibold mb-1">Date-aware extraction</p>
+            <p>
+              Dates found in the PDF are automatically parsed. Each section is labelled:
+              <span className="mx-1 px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-xs font-medium">Past</span> — historical info shown as occurred,
+              <span className="mx-1 px-1.5 py-0.5 rounded bg-green-200 text-green-800 text-xs font-medium">Live</span> — today,
+              <span className="mx-1 px-1.5 py-0.5 rounded bg-blue-200 text-blue-800 text-xs font-medium">Upcoming</span> — future events,
+              <span className="mx-1 px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 text-xs font-medium">General</span> — no date detected.
+              The bot uses this context to answer questions accurately.
+            </p>
+          </div>
+        </form>
+      </div>
+
+      {/* ── Entries list ── */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-[#1A2E40] flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-[#E06F2C]" />
+            Uploaded Knowledge Entries
+            {total > 0 && <span className="text-sm font-normal text-gray-500">({total} total)</span>}
+          </h2>
+          <Button variant="outline" size="sm" onClick={fetchEntries} className="h-8">
+            <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+          </Button>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-3 mb-5">
+          <div>
+            <Label className="text-xs text-gray-500 mb-1 block">Date Status</Label>
+            <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-36 h-9 text-sm"><SelectValue placeholder="All statuses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="past">Past</SelectItem>
+                <SelectItem value="present">Live / Today</SelectItem>
+                <SelectItem value="future">Upcoming</SelectItem>
+                <SelectItem value="general">General</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-gray-500 mb-1 block">Category</Label>
+            <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-36 h-9 text-sm"><SelectValue placeholder="All categories" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {pdfFiles.length > 0 && (
+            <div>
+              <Label className="text-xs text-gray-500 mb-1 block">PDF File</Label>
+              <Select value={filterFile} onValueChange={(v) => { setFilterFile(v === "all" ? "" : v); setPage(1); }}>
+                <SelectTrigger className="w-52 h-9 text-sm"><SelectValue placeholder="All files" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All files</SelectItem>
+                  {pdfFiles.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+              <tr>
+                <th className="px-4 py-3 text-left">Title</th>
+                <th className="px-4 py-3 text-left">Category</th>
+                <th className="px-4 py-3 text-left">Date Status</th>
+                <th className="px-4 py-3 text-left">Date Range</th>
+                <th className="px-4 py-3 text-left">Source PDF</th>
+                <th className="px-4 py-3 text-left">Added</th>
+                <th className="px-4 py-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingList && (
+                <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
+              )}
+              {!loadingList && entries.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-gray-400">
+                    <BookOpen className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                    No entries yet. Upload a PDF to get started.
+                  </td>
+                </tr>
+              )}
+              {!loadingList && entries.map((entry) => (
+                <tr key={entry.id} className="border-t border-gray-100 hover:bg-orange-50 transition-colors">
+                  <td className="px-4 py-3 max-w-[220px]">
+                    <button
+                      className="text-left font-medium text-[#1A2E40] hover:text-[#E06F2C] hover:underline truncate block max-w-full"
+                      title={entry.title}
+                      onClick={() => setPreview(entry)}
+                    >
+                      {entry.title}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                      {entry.category}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <EventBadge status={entry.event_status} />
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {entry.valid_from
+                      ? entry.valid_from === entry.valid_until || !entry.valid_until
+                        ? entry.valid_from
+                        : `${entry.valid_from} → ${entry.valid_until}`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px] truncate" title={entry.pdf_filename}>
+                    {entry.pdf_filename || "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                    {formatDate(entry.created_at)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-red-500 hover:bg-red-50 hover:text-red-700"
+                      onClick={() => handleDelete(entry.id, entry.title)}
+                      title="Delete entry"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <Pagination page={page} total={total} limit={limit} onChange={setPage} />
+      </div>
+
+      {/* ── Entry preview modal ── */}
+      {preview && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPreview(null)}>
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between p-5 border-b gap-4">
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-[#1A2E40] text-lg leading-tight">{preview.title}</h3>
+                <div className="flex items-center gap-2 mt-2">
+                  <EventBadge status={preview.event_status} />
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                    {preview.category}
+                  </span>
+                  {preview.valid_from && (
+                    <span className="text-xs text-gray-500">
+                      {preview.valid_from}{preview.valid_until && preview.valid_until !== preview.valid_from ? ` → ${preview.valid_until}` : ""}
+                    </span>
+                  )}
+                </div>
+                {preview.keywords?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {preview.keywords.map((kw) => (
+                      <span key={kw} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">{kw}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setPreview(null)}><X className="w-5 h-5" /></Button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5">
+              <p className="text-sm text-gray-400 mb-3">Source: {preview.pdf_filename}</p>
+              <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans leading-relaxed">
+                {preview.answer_preview}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 export default function SuperAdminDashboard() {
   const navigate = useNavigate();
@@ -714,6 +1150,14 @@ export default function SuperAdminDashboard() {
             <div className="bg-white rounded-xl shadow-md p-6">
               <AuditLogsTab companies={companies} token={token} />
             </div>
+          </>
+        )}
+
+        {/* ── Knowledge Base tab ── */}
+        {activeTab === "knowledge" && (
+          <>
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Knowledge Base</h1>
+            <KnowledgeTab token={token} />
           </>
         )}
 

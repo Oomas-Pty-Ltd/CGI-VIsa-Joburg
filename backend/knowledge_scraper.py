@@ -933,17 +933,51 @@ async def _probe_playwright() -> None:
         logger.info(f"[FETCH] Playwright unavailable ({type(e).__name__}) — using httpx only")
 
 
+async def _fetch_uploaded_docs_content() -> str:
+    """
+    Fetch all active PDF-uploaded knowledge entries from MongoDB and
+    concatenate their text so the scraper cache includes uploaded documents.
+    Returns empty string if DB is unavailable.
+    """
+    try:
+        from database import get_database
+        db = await get_database()
+        cursor = db.knowledge_base.find(
+            {"source": {"$regex": "^pdf_upload:"}, "status": "active"},
+            {"_id": 0, "title": 1, "answer": 1, "pdf_doc_title": 1}
+        ).sort("created_at", -1).limit(200)
+        entries = await cursor.to_list(length=200)
+        if not entries:
+            return ""
+        parts = []
+        for e in entries:
+            doc_title = e.get("pdf_doc_title") or e.get("title", "")
+            answer = (e.get("answer") or "").strip()
+            if answer:
+                parts.append(f"[Uploaded: {doc_title}]\n{answer}")
+        logger.info(f"[SCRAPE] Loaded {len(parts)} uploaded-doc sections into scraper cache")
+        return "\n\n".join(parts)
+    except Exception as exc:
+        logger.warning(f"[SCRAPE] Could not load uploaded docs: {exc}")
+        return ""
+
+
 async def _do_scrape() -> Dict:
-    """Scrape CGI Joburg (primary source) + VFS (auxiliary) and return combined knowledge."""
+    """Scrape CGI Joburg (primary source) + VFS (auxiliary) + uploaded docs and return combined knowledge."""
     await _probe_playwright()   # set the flag once before parallel fetches
-    cgi_data, vfs_data = await asyncio.gather(
+    cgi_data, vfs_data, uploaded_content = await asyncio.gather(
         scrape_cgi_joburg(),
         scrape_vfs_global(),
+        _fetch_uploaded_docs_content(),
     )
     return {
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "cgi_joburg": cgi_data,
         "vfs_global": vfs_data,
+        "uploaded_docs": {
+            "source": "uploaded_documents",
+            "page_content": uploaded_content,
+        },
         **CONTACT_FALLBACK,
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
@@ -1011,6 +1045,10 @@ async def get_realtime_knowledge() -> Dict:
             "status": "fallback",
             "page_content": "",
         },
+        "uploaded_docs": {
+            "source": "uploaded_documents",
+            "page_content": "",
+        },
         **CONTACT_FALLBACK,
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
@@ -1022,6 +1060,13 @@ async def get_realtime_knowledge() -> Dict:
             "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
         },
     }
+
+
+def invalidate_knowledge_cache():
+    """Force the next call to get_realtime_knowledge() to trigger a fresh scrape."""
+    global _knowledge_cache_time
+    _knowledge_cache_time = None
+    logger.info("[SCRAPE] Knowledge cache invalidated — will refresh on next request")
 
 
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
