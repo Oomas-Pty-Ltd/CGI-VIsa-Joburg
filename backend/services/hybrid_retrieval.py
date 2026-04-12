@@ -65,12 +65,24 @@ def _count_hits(keywords: List[str], content: str) -> int:
 
 
 def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 25) -> List[str]:
+    """Return lines ranked by number of keyword matches (highest first).
+
+    Lines matching more keywords (e.g. both 'lost' and 'passport') float to
+    the top so compound queries return specific content before generic lines.
+    """
     if not content or not keywords:
         return []
-    return [
-        line.strip() for line in content.split("\n")
-        if line.strip() and any(k in line.lower() for k in keywords)
-    ][:max_lines]
+    scored = []
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        low = stripped.lower()
+        count = sum(1 for k in keywords if k in low)
+        if count > 0:
+            scored.append((count, stripped))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [line for _, line in scored][:max_lines]
 
 
 def _format_kb_entries(entries: List[Dict]) -> str:
@@ -206,9 +218,12 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     hits = _count_hits(keywords, combined)
     if hits >= _CACHE_HIT_THRESHOLD:
         logger.debug(f"[HYBRID L2] '{cache_key}' — scraped cache hit ({hits} lines)")
+        # Include the original query phrase so compound terms (e.g. "lost passport")
+        # score higher than lines matching only a single keyword
+        phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
         parts = []
-        cgi_lines = _extract_matching_lines(keywords, cgi_content)
-        vfs_lines = _extract_matching_lines(keywords, vfs_content)
+        cgi_lines = _extract_matching_lines(phrase_kws, cgi_content)
+        vfs_lines = _extract_matching_lines(phrase_kws, vfs_content)
         if cgi_lines:
             parts.append("[CGI Johannesburg — live]\n" + "\n".join(cgi_lines))
         if vfs_lines:

@@ -56,6 +56,7 @@ class AuditEntry(BaseModel):
     user_agent: Optional[str] = None
     resource_type: Optional[str] = None  # document, profile, session, etc.
     resource_id: Optional[str] = None
+    company_id: Optional[str] = None
     old_value: Optional[Dict[str, Any]] = None  # For modifications
     new_value: Optional[Dict[str, Any]] = None  # For modifications
     metadata: Optional[Dict[str, Any]] = None
@@ -108,6 +109,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         resource_type: Optional[str] = None,
         resource_id: Optional[str] = None,
+        company_id: Optional[str] = None,
         old_value: Optional[Dict[str, Any]] = None,
         new_value: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -156,6 +158,7 @@ class AuditService:
             user_agent=user_agent,
             resource_type=resource_type,
             resource_id=resource_id,
+            company_id=company_id,
             old_value=masked_old,
             new_value=masked_new,
             metadata=masked_metadata,

@@ -744,18 +744,22 @@ High Commission of India, Pretoria: www.hcipretoria.gov.in
 
 async def scrape_cgi_joburg() -> Dict:
     """
-    Scrape CGI Joburg homepage + key sub-pages concurrently.
-    Falls back to full PDF-sourced static content if the website is unreachable.
+    Returns CGI Joburg knowledge using PDF static content as the primary base,
+    then appends any additional live content scraped from the website on top.
+    Static PDF (April 2026) is always included — live scrape only adds new info.
     """
+    # ── Step 1: Start with the full PDF static content (always reliable) ──
+    static_content = _get_cgi_pdf_content()
+    logger.info("[SCRAPE] cgijoburg.gov.in — using PDF static content as base")
+
+    # ── Step 2: Attempt live scrape to append any updates ─────────────────
     try:
-        # Fetch homepage + all sub-pages concurrently
         all_urls = ["https://www.cgijoburg.gov.in/"] + CGI_SUB_PAGES
         results = await asyncio.gather(
             *[_fetch_page_text(url) for url in all_urls],
             return_exceptions=True
         )
 
-        # Combine all page text, labelled by URL, skip failures
         combined_parts = []
         contact_html = None
         pages_ok = 0
@@ -768,9 +772,10 @@ async def scrape_cgi_joburg() -> Dict:
             if url == "https://www.cgijoburg.gov.in/":
                 contact_html = result
 
-        # If live scrape returned content, use it
         if combined_parts:
-            page_content = "\n\n".join(combined_parts)
+            # Prepend static PDF, then append live content for latest updates
+            live_content = "\n\n".join(combined_parts)
+            page_content = static_content + "\n\n=== LIVE WEBSITE UPDATE ===\n" + live_content
             live_contact = CONTACT_FALLBACK.copy()
             if contact_html:
                 try:
@@ -778,36 +783,29 @@ async def scrape_cgi_joburg() -> Dict:
                     live_contact = _extract_contact_details(soup)
                 except Exception:
                     pass
+            logger.info("[SCRAPE] cgijoburg.gov.in — appended %d live page(s) on top of PDF static", pages_ok)
             return {
-                "source": "cgijoburg.gov.in (live)",
+                "source": "cgijoburg.gov.in (PDF static + live)",
                 "scraped_at": datetime.now(timezone.utc).isoformat(),
-                "status": "live_scraped",
+                "status": "static_plus_live",
                 "pages_crawled": pages_ok,
                 "page_content": page_content,
                 **live_contact,
             }
 
-        # Website unreachable — use full PDF-sourced content
-        logger.info("[SCRAPE] cgijoburg.gov.in unreachable — using PDF static content")
-        return {
-            "source": "cgijoburg.gov.in (PDF static — April 2026)",
-            "scraped_at": datetime.now(timezone.utc).isoformat(),
-            "status": "pdf_static",
-            "pages_crawled": 0,
-            "page_content": _get_cgi_pdf_content(),
-            **CONTACT_FALLBACK,
-        }
-
     except Exception as e:
-        await send_exception_email("CGI Joburg Scraping Failed", str(e))
-        return {
-            "source": "cgijoburg.gov.in (PDF static — April 2026)",
-            "status": "pdf_static",
-            "scraped_at": datetime.now(timezone.utc).isoformat(),
-            "pages_crawled": 0,
-            "page_content": _get_cgi_pdf_content(),
-            **CONTACT_FALLBACK,
-        }
+        await send_exception_email("CGI Joburg Live Scraping Failed", str(e))
+        logger.warning("[SCRAPE] cgijoburg.gov.in live scrape failed: %s — serving PDF static only", e)
+
+    # Live scrape failed or returned nothing — serve static only
+    return {
+        "source": "cgijoburg.gov.in (PDF static — April 2026)",
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pdf_static",
+        "pages_crawled": 0,
+        "page_content": static_content,
+        **CONTACT_FALLBACK,
+    }
 
 
 async def scrape_vfs_global() -> Dict:
@@ -994,8 +992,36 @@ async def get_realtime_knowledge() -> Dict:
         # Fire-and-forget — never await this
         asyncio.create_task(_refresh_cache_background())
 
-    # Return whatever we have right now; fallback if cache is still empty
-    return _knowledge_cache if _knowledge_cache is not None else get_fallback_knowledge()
+    # Return whatever we have right now; use PDF static content if cache is still empty
+    if _knowledge_cache is not None:
+        return _knowledge_cache
+    # Cold start — return PDF static so hybrid_search has page_content immediately
+    return {
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "source": "cgijoburg.gov.in (PDF static — April 2026)",
+        "status": "pdf_static",
+        "cgi_joburg": {
+            "source": "cgijoburg.gov.in (PDF static — April 2026)",
+            "status": "pdf_static",
+            "page_content": _get_cgi_pdf_content(),
+            **CONTACT_FALLBACK,
+        },
+        "vfs_global": {
+            "source": "vfsglobal.com (fallback)",
+            "status": "fallback",
+            "page_content": "",
+        },
+        **CONTACT_FALLBACK,
+        "official_links": {
+            "consulate": "https://www.cgijoburg.gov.in/",
+            "passport": "https://embassy.passportindia.gov.in/",
+            "visa": "https://indianvisaonline.gov.in/visa/index.html",
+            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
+            "oci_services": "https://ociservices.gov.in/",
+            "pcc_application": "https://portal5.passportindia.gov.in",
+            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
+        },
+    }
 
 
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
@@ -1127,12 +1153,148 @@ def get_fallback_knowledge() -> Dict:
                 "description": "Emergency Travel Document for single journey to India when passport is lost/stolen/damaged",
                 "fees_zar": "ZAR 780 (includes ICWF)",
                 "documents_required": [
-                    "Police report",
+                    "Police report (FIR) if lost or stolen",
                     "Proof of identity",
                     "2 photographs",
                     "Proof of travel booking"
                 ]
+            },
+            "noc_sa_citizenship": {
+                "description": "NOC (No Objection Certificate) for Indian nationals who wish to acquire South African citizenship",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "documents_required": [
+                    "Indian passport (original + copies of all pages)",
+                    "Application form",
+                    "Proof of residential address in South Africa",
+                    "Any supporting document required by the Consulate"
+                ],
+                "fees_zar": "As per consular schedule"
+            },
+            "noc_child_passport": {
+                "description": "NOC for child passport in India — required when one parent (in South Africa) is not present at the passport office in India",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "documents_required": [
+                    "Passport copies of both parents",
+                    "Child's birth certificate",
+                    "Application form"
+                ],
+                "fees_zar": "As per consular schedule"
+            },
+            "non_impediment_letter": {
+                "description": "Non-Impediment Letter issued to Indian nationals who wish to marry a foreign national. Certifies that the applicant is not married and is free to marry.",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "documents_required": [
+                    "Indian passport (original + photocopy)",
+                    "Proof of residential address in South Africa",
+                    "Application form"
+                ],
+                "fees_zar": "As per consular schedule"
+            },
+            "one_and_same_certificate": {
+                "description": "One and the Same Certificate issued when a difference in name spelling exists across documents",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "documents_required": [
+                    "Self-attested copies of all documents showing name variations"
+                ],
+                "fees_zar": "As per consular schedule"
+            },
+            "driving_licence_translation": {
+                "description": "Certified translation of Indian driving licence for use in South Africa",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "documents_required": [
+                    "Original Indian driving licence",
+                    "Photocopy of driving licence",
+                    "Indian passport (original + copy)"
+                ],
+                "fees_zar": "As per consular schedule"
+            },
+            "nri_registration": {
+                "description": "Registration of NRIs/PIOs/OCIs residing in South Africa with the Consulate. Helps in emergencies, disaster situations, and for consular assistance.",
+                "how_to": "Contact the Consulate at ccom.jburg@mea.gov.in or visit in person",
+                "fee": "No fee mentioned — contact Consulate for current procedure"
+            },
+            "tracing_roots": {
+                "description": "Programme for persons of Indian origin to trace their ancestral roots in India. MEA facilitates visits to villages/districts of origin.",
+                "contact": "Consulate General of India, Johannesburg — ccom.jburg@mea.gov.in"
+            },
+            # Keys matching _SERVICE_KEYWORDS for direct fallback lookup
+            "noc": {
+                "description": "NOC (No Objection Certificate) services — for South African citizenship acquisition OR for child passport application in India",
+                "noc_sa_citizenship": "NOC for Indian nationals acquiring South African citizenship. Submit application with Indian passport copies and proof of address.",
+                "noc_child_passport": "NOC for child passport in India when one parent is in South Africa. Required: both parents' passport copies, child's birth certificate.",
+                "submit_to": "Consulate General of India, Johannesburg",
+                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in",
+                "fees_zar": "As per consular schedule"
+            },
+            "non_impediment": {
+                "description": "Non-Impediment Letter issued to Indian nationals who wish to marry a foreign national. Certifies applicant is not currently married and is free to marry.",
+                "documents_required": [
+                    "Indian passport (original + photocopy of all pages)",
+                    "Proof of residential address in South Africa",
+                    "Application form"
+                ],
+                "submit_to": "Consulate General of India, Johannesburg",
+                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in",
+                "fees_zar": "As per consular schedule"
+            },
+            "one_same": {
+                "description": "One and the Same Certificate issued when a difference in name spelling exists across documents (e.g. passport vs degree certificate).",
+                "documents_required": [
+                    "Self-attested copies of all documents showing name variations"
+                ],
+                "submit_to": "Consulate General of India, Johannesburg",
+                "fees_zar": "As per consular schedule"
+            },
+            "driving": {
+                "description": "Certified translation of Indian driving licence for use in South Africa. Provided by the Consulate General.",
+                "documents_required": [
+                    "Original Indian driving licence",
+                    "Photocopy of driving licence",
+                    "Indian passport (original + photocopy)"
+                ],
+                "submit_to": "Consulate General of India, Johannesburg",
+                "fees_zar": "As per consular schedule"
+            },
+            "nri": {
+                "description": "Registration of NRIs/PIOs/OCIs residing in South Africa. Helps in emergencies and for consular assistance.",
+                "how_to": "Contact the Consulate at ccom.jburg@mea.gov.in or visit in person during office hours.",
+                "office_hours": "Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)",
+                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in"
+            },
+            "tracing": {
+                "description": "Tracing the Roots Programme for persons of Indian origin to trace their ancestral roots in India. MEA facilitates visits to villages/districts of origin.",
+                "contact": "Consulate General of India, Johannesburg — ccom.jburg@mea.gov.in | +27 11-4828484"
+            },
+            "trade": {
+                "description": "India–South Africa bilateral trade and commerce. Diplomatic relations established in 1993. Both members of BRICS and G20.",
+                "stats": "150+ Indian companies in SA | USD 10 billion investment | ~18,000 South Africans employed | Key sectors: IT, Mining, Autos, Pharma, Agriculture",
+                "major_companies": "TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma, TCS, WIPRO, Zensar, TechMahindra",
+                "dtaa": "Double Taxation Avoidance Agreement in force since 28 November 1997",
+                "services_for_indian_cos": "Trade advisory, business meetings, partner identification, export/import guidance, exhibition support",
+                "services_for_sa_cos": "Market entry advisory for India, introduction to Indian counterparts, BSM support",
+                "contact": "Commercial Wing, CGI Johannesburg — ccom.jburg@mea.gov.in | +27 11-4828484"
+            },
+            "emergency_contact": {
+                "description": "Emergency consular assistance for Indian nationals in distress in South Africa (Gauteng, North West, Limpopo, Mpumalanga).",
+                "emergency_phone": "+27 11 581 9800 (24/7 emergency)",
+                "main_phone": "+27 11-4828484 / +27 11-4828485 / +27 11-4828486",
+                "email": "ccom.jburg@mea.gov.in",
+                "consular_email": "cons.jburg@mea.gov.in",
+                "pravasi_helpline": "Toll Free (India only): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in",
+                "address": "No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg"
             }
+        },
+        "trade_commerce": {
+            "overview": "India–South Africa diplomatic relations established in 1993. Both members of BRICS and G20.",
+            "south_africa_stats": "Population: 64 million+ | Area: 1.22 million sq km | Financial capital: Johannesburg",
+            "gdp": "Services: 62.75% | Industry: 24.46% | Growth rate (2024): ~1.0%",
+            "key_resources": "World's largest producer of platinum, vanadium, chromium, and manganese",
+            "indian_investment": "USD 10 billion invested in South Africa | 150+ Indian companies | ~18,000 South Africans employed",
+            "major_indian_companies": "TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma (Ranbaxy), TCS, WIPRO, Zensar, TechMahindra",
+            "bilateral_sectors": "IT, Mining, Infrastructure, Automobiles, Pharmaceuticals, Agriculture, Heavy Machinery",
+            "dtaa": "Double Taxation Avoidance Agreement in force since 28 November 1997 (Notification No. GSR 198(E), dated 21-04-1998)",
+            "services_for_indian_companies": "Trade advisory, business meeting facilitation, partner identification, import/export guidance, exhibition support",
+            "services_for_sa_companies": "Market entry advisory for India, introduction to Indian counterparts, investment/regulatory information, BSM support"
         },
         "vfs_locations": {
             "johannesburg_passport": {
@@ -1166,7 +1328,9 @@ _SERVICE_KEYWORDS = {
                     "visa application", "how much visa", "tourist fee", "business fee"],
     "passport":    ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document",
                     "passport seva", "passport fee", "passport fees", "passport cost", "passport charges",
-                    "how much passport"],
+                    "how much passport", "lost passport", "stolen passport", "damaged passport",
+                    "lost", "stolen", "damaged", "reissue", "re-issue", "fir", "police report",
+                    "emergency travel", "emergency document"],
     "oci":         ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin",
                     "ociservices", "oci fee", "oci fees", "oci cost"],
     "pcc":         ["pcc", "police clearance", "clearance certificate", "criminal record", "character certificate",
@@ -1179,6 +1343,23 @@ _SERVICE_KEYWORDS = {
     "renunciation":["renunciation", "renounce", "surrender passport", "citizenship", "give up citizenship"],
     "fees":        ["fees", "fee", "cost", "price", "charges", "how much", "payment", "zar", "rand",
                     "rate", "amount", "tariff"],
+    "noc":         ["noc", "no objection", "no objection certificate", "south african citizenship",
+                    "child passport india", "noc child", "noc citizenship"],
+    "non_impediment": ["non-impediment", "non impediment", "impediment", "free to marry", "marriage letter",
+                       "marry abroad", "marriage abroad"],
+    "one_same":    ["one and the same", "same certificate", "name spelling", "name difference",
+                    "name variation", "name discrepancy"],
+    "driving":     ["driving licence", "driving license", "drive", "licence translation",
+                    "indian driving", "translate licence"],
+    "nri":         ["nri", "nri registration", "register nri", "registration", "register with consulate",
+                    "indian national registration", "pio registration", "oci registration"],
+    "tracing":     ["tracing roots", "trace roots", "ancestral", "roots in india", "indian origin village",
+                    "know india", "kip programme"],
+    "trade":       ["trade", "commerce", "investment", "business india", "india south africa trade",
+                    "brics", "dtaa", "double taxation", "bilateral", "indian companies",
+                    "business meeting", "buyer seller", "bsm"],
+    "emergency_contact": ["emergency", "distress", "stranded", "arrested", "hospital", "accident",
+                          "urgent help", "crisis", "indians in distress", "helpline"],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1235,13 +1416,25 @@ def _count_hits(keywords: List[str], content: str) -> int:
 
 
 def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 25) -> List[str]:
-    """Return lines from content that contain at least one keyword."""
+    """Return lines from content that contain at least one keyword.
+
+    Lines matching more keywords rank higher so compound queries like
+    'lost passport' surface specific content before generic single-keyword lines.
+    """
     if not content or not keywords:
         return []
-    return [
-        line.strip() for line in content.split("\n")
-        if line.strip() and any(k in line.lower() for k in keywords)
-    ][:max_lines]
+    scored = []
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        low = stripped.lower()
+        count = sum(1 for k in keywords if k in low)
+        if count > 0:
+            scored.append((count, stripped))
+    # Stable sort: higher match count first, original order preserved within same score
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [line for _, line in scored][:max_lines]
 
 
 def _discover_relevant_links(homepage_html: str, base_url: str, keywords: List[str]) -> List[str]:
@@ -1366,8 +1559,11 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
     hits = _count_hits(keywords, combined)
     if hits >= _HIT_THRESHOLD:
         logger.debug(f"[SCAN L1] '{cache_key}' — {hits} hits, returning from cache")
-        cgi_lines = _extract_matching_lines(keywords, cgi_content)
-        vfs_lines = _extract_matching_lines(keywords, vfs_content)
+        # Include the original query phrase as an extra keyword so compound terms
+        # like "lost passport" score higher than single-keyword lines
+        phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
+        cgi_lines = _extract_matching_lines(phrase_kws, cgi_content)
+        vfs_lines = _extract_matching_lines(phrase_kws, vfs_content)
         parts = []
         if cgi_lines:
             parts.append("[CGI Johannesburg]\n" + "\n".join(cgi_lines))
@@ -1493,6 +1689,8 @@ def _search_knowledge_sync(query: str, knowledge_base: Dict) -> str:
     )
 
     keywords = _extract_keywords(query)
+    # Include the original query phrase so compound terms rank above single-keyword lines
+    phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
     scraped_at = cgi.get("scraped_at") or knowledge_base.get("last_updated", "")
     sections = [contact_block]
     if scraped_at:
@@ -1503,7 +1701,7 @@ def _search_knowledge_sync(query: str, knowledge_base: Dict) -> str:
         ("VFS GLOBAL",       vfs_content, vfs_status),
     ]:
         if content:
-            lines = _extract_matching_lines(keywords, content, max_lines=30)
+            lines = _extract_matching_lines(phrase_kws, content, max_lines=30)
             if not lines:
                 lines = [l.strip() for l in content.split("\n") if l.strip()][:15]
             sections.append(f"=== {label} (live) ===\n" + "\n".join(lines))
@@ -1521,9 +1719,17 @@ def search_knowledge(query: str, knowledge_base: Dict) -> str:
     return _search_knowledge_sync(query, knowledge_base)
 
 
-def extract_service_content(service_key: str, knowledge_base: Dict) -> str:
-    """Return service-specific lines from scraped content or structured fallback."""
-    kws = _SERVICE_KEYWORDS.get(service_key, [])
+def extract_service_content(service_key: str, knowledge_base: Dict, user_query: str = "") -> str:
+    """Return service-specific lines from scraped content or structured fallback.
+
+    When user_query is provided, the original query phrase is appended as an
+    extra keyword so compound terms (e.g. 'lost passport') rank above generic lines.
+    """
+    kws = list(_SERVICE_KEYWORDS.get(service_key, []))
+    if user_query:
+        phrase = user_query.lower().strip()
+        if phrase and phrase not in kws:
+            kws = kws + [phrase]
 
     cgi_content = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
     vfs_content = knowledge_base.get("vfs_global", {}).get("page_content", "")

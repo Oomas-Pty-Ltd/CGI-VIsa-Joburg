@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from database import get_database
+import config as _config
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +110,13 @@ class SessionManager:
         now = datetime.now(timezone.utc).isoformat()
         expiry = (datetime.now(timezone.utc) + timedelta(hours=self.ttl_hours)).isoformat()
         
+        resolved_company_id = (metadata or {}).get("company_id") or _config.COMPANY_ID
+
         session = {
             "id": session_id,
             "channel": channel,
             "user_identifier": user_identifier,
+            "company_id": resolved_company_id,
             "messages": [],
             "step": "start",
             "created_at": now,
@@ -214,6 +218,13 @@ class SessionManager:
             if metadata:
                 for k, v in metadata.items():
                     update[f"metadata.{k}"] = v
+            # Always ensure company_id is set at top level — use metadata value,
+            # fall back to env COMPANY_ID, but never overwrite a valid existing value with None
+            resolved_cid = (metadata or {}).get("company_id") or _config.COMPANY_ID
+            if resolved_cid and not existing.get("company_id"):
+                update["company_id"] = resolved_cid
+            elif resolved_cid and existing.get("company_id") != resolved_cid and (metadata or {}).get("company_id"):
+                update["company_id"] = resolved_cid
             await db.chat_sessions.update_one({"id": existing["id"]}, {"$set": update})
             existing.update(update)
             return existing

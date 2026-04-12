@@ -43,6 +43,8 @@ async def create_indexes():
         await db.chat_sessions.create_index("user_id")
         await db.chat_sessions.create_index("session_id")
         await db.chat_sessions.create_index("created_at")
+        await db.chat_sessions.create_index("company_id")
+        await db.chat_sessions.create_index([("company_id", 1), ("created_at", -1)])
         await db.chat_sessions.create_index([("user_id", 1), ("created_at", -1)])
         
         # Document indexes
@@ -66,9 +68,11 @@ async def create_indexes():
         # Audit log indexes
         await db.audit_logs.create_index("id", unique=True)
         await db.audit_logs.create_index("user_id")
+        await db.audit_logs.create_index("company_id")
         await db.audit_logs.create_index("timestamp")
         await db.audit_logs.create_index([("category", 1), ("timestamp", -1)])
         await db.audit_logs.create_index([("user_id", 1), ("timestamp", -1)])
+        await db.audit_logs.create_index([("company_id", 1), ("timestamp", -1)])
         
         # Escalation indexes
         await db.escalations.create_index("id", unique=True)

@@ -28,6 +28,7 @@ from security.input_sanitizer import sanitize_user_input, create_safe_system_pro
 from security.guardrail import guardrail_service, sanitize_logs
 from security.rate_limiter import rate_limiter, check_rate_limit
 from security.cost_monitor import cost_monitor, record_llm_usage
+from config import get_company_id
 
 # Services imports
 from services.intent_classifier import (
@@ -251,7 +252,7 @@ async def chat(request: ChatRequest, http_request: Request):
     
     # Fall through to LLM for complex queries
     user_id    = request.user_id or "guest"
-    company_id = request.company_id
+    company_id = request.company_id or get_company_id()
 
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
@@ -292,7 +293,7 @@ async def chat(request: ChatRequest, http_request: Request):
     scraped_summary = ""
     active_service = detect_service(sanitized_message) or current_flow.get("service")
     if active_service:
-        scraped_summary = extract_service_content(active_service, knowledge_base)
+        scraped_summary = extract_service_content(active_service, knowledge_base, user_query=sanitized_message)
     elif detect_website_service(sanitized_message):
         # Website-only service — keyword search from scraped pages (no visa fallback)
         words = [w for w in sanitized_message.lower().split() if len(w) > 3]
@@ -317,6 +318,11 @@ async def chat(request: ChatRequest, http_request: Request):
 
     if flow_response is not None and not needs_llm:
         # Pure state-machine response — no LLM needed
+        bot_response = flow_response
+    elif flow_response is not None and current_step == "info_shown":
+        # Service info page is already fully formatted by _service_info_page():
+        # it contains static description + live scraped summary + required docs + apply CTA.
+        # No need to send it through the LLM — use it directly.
         bot_response = flow_response
     else:
         # LLM needed (info query, question during pause, etc.)
@@ -512,7 +518,7 @@ async def chat_stream(request: ChatRequest):
             }
 
     active_service = detect_service(sanitized_message) or current_flow.get("service")
-    scraped_summary = extract_service_content(active_service, knowledge_base) if active_service else ""
+    scraped_summary = extract_service_content(active_service, knowledge_base, user_query=sanitized_message) if active_service else ""
 
     flow_response, needs_llm, current_step = await process_flow(
         session_id, sanitized_message,
@@ -543,6 +549,15 @@ async def chat_stream(request: ChatRequest):
         )
 
     # ── Build LLM context ─────────────────────────────────────────────
+    # Knowledge scraper (context_info) is PRIMARY. For service info requests
+    # (step="info_shown"), merge structured service page as additional context.
+    llm_context = context_info or ""
+    if current_step == "info_shown" and flow_response:
+        if llm_context:
+            llm_context = llm_context + "\n\n---\n\n" + flow_response
+        else:
+            llm_context = flow_response
+
     detected_svc = detect_service(sanitized_message)
     svc_docs_hint = ""
     if detected_svc and detected_svc in SERVICES:
@@ -552,6 +567,11 @@ async def chat_stream(request: ChatRequest):
 
     system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 
+CRITICAL — DATA SOURCE RULE:
+Answer ONLY using the OFFICIAL DATA provided below (sourced from www.cgijoburg.gov.in and vfsglobal.com).
+Do NOT use your general training knowledge. Do NOT invent, guess, or add information not present in the official data.
+If the answer is not in the official data, say so and direct the user to contact the Consulate directly.
+
 LANGUAGE: Always respond in English only.
 
 RESPONSE STYLE:
@@ -560,11 +580,23 @@ RESPONSE STYLE:
 - Do NOT add feedback/rating prompts or sign-off phrases.
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
-{svc_docs_hint}
-OFFICIAL WEBSITE DATA (live scraped from cgijoburg.gov.in and vfsglobal.com):
-{context_info}
 
-FALLBACK RULE: If the information is not in the scraped data, say so briefly and direct the user to:
+KEY CONSULATE FACTS (from www.cgijoburg.gov.in — always use these for contact/location questions):
+- Acting Consul General: Mr. Harish Kumar
+- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
+- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
+- Website: www.cgijoburg.gov.in
+- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
+- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
+- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
+- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
+{svc_docs_hint}
+OFFICIAL DATA (Source: www.cgijoburg.gov.in | www.vfsglobal.com | Compiled April 2026):
+{llm_context}
+
+IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
   📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
   🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
   🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)

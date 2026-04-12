@@ -68,7 +68,12 @@ async def lifespan(app: FastAPI):
         # Create database indexes for performance
         from database import create_indexes
         await create_indexes()
-        
+
+        # Validate COMPANY_ID against the companies collection
+        from config import validate_company_id
+        company_id = await validate_company_id(db)
+        logger.info(f"Company validated: {company_id}")
+
         # Initialize super admin
         await init_super_admin()
         logger.info("Super admin initialization complete")

@@ -41,12 +41,16 @@ from security.input_sanitizer import sanitize_user_input
 from security.guardrail import guardrail_service, sanitize_logs
 from security.session_manager import session_manager
 from services.ics_waba_service import ics_waba
+from knowledge_scraper import get_realtime_knowledge, extract_service_content
+from services.hybrid_retrieval import hybrid_search
 from services.application_flow import (
     SERVICES,
     CONTACT_INFO,
     process_flow,
+    flow_suffix,
     get_flow_state,
     detect_service,
+    detect_website_service,
     is_apply_intent,
 )
 
@@ -79,16 +83,6 @@ class SimulateRequest(BaseModel):
 
 
 # =====================================================================
-# SERVICE MENU  (interactive list sections)
-# =====================================================================
-_SERVICE_ROWS = [
-    {"id": key, "title": info["name"], "description": "Tap to learn more & apply"}
-    for key, info in SERVICES.items()
-]
-_MAIN_MENU_SECTIONS = [
-    {"title": "Consular Services",  "rows": _SERVICE_ROWS[:5]},
-    {"title": "More Services",      "rows": _SERVICE_ROWS[5:]},
-]
 
 
 # =====================================================================
@@ -260,30 +254,60 @@ async def _llm_response(user_message: str, session_id: str, context: str = "") -
             "https://www.cgijoburg.gov.in or call +27 11 581 9800."
         )
 
-    system_prompt = f"""You are Seva Setu, the official WhatsApp assistant for the Consulate General of India, Johannesburg.
+    # Build service-specific document hint (same as web bot)
+    detected_svc = detect_service(user_message)
+    svc_docs_hint = ""
+    if detected_svc and detected_svc in SERVICES:
+        svc = SERVICES[detected_svc]
+        docs = "\n".join(f"  • {d}" for d in svc["documents"])
+        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
 
-OFFICE:
+    system_prompt = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg. You are replying via WhatsApp.
+
+CRITICAL — DATA SOURCE RULE:
+Answer ONLY using the OFFICIAL DATA provided below (sourced from www.cgijoburg.gov.in and vfsglobal.com).
+Do NOT use your general training knowledge. Do NOT invent, guess, or add information not present in the official data.
+If the answer is not in the official data, say so and direct the user to contact the Consulate directly.
+
+LANGUAGE: Always respond in English only, regardless of what language the user writes in.
+
+RESPONSE STYLE:
+- Be concise, accurate, and helpful.
+- Do NOT echo the user's question back.
+- Do NOT add feedback/rating prompts or sign-off phrases.
+- Use bullet points only when listing multiple items.
+- Do NOT repeat information already shown in the conversation.
+- Use *bold* for emphasis (WhatsApp format). Do NOT use markdown ** double-asterisks.
+- If asked to apply or start an application, say: "Reply *apply* to start your application."
+- Never ask for money or claim the consulate calls asking for payments.
+
+KEY CONSULATE FACTS (from www.cgijoburg.gov.in — always use these for contact/location questions):
+- Acting Consul General: Mr. Harish Kumar
 - Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
 - Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI) | Web: https://www.cgijoburg.gov.in
-- Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30) | VFS submission: 08:00–15:00
+- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
+- Website: www.cgijoburg.gov.in
+- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
+- Social Media: Twitter/X @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg
+- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
+- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
+- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
+{svc_docs_hint}
+OFFICIAL DATA (Source: www.cgijoburg.gov.in | www.vfsglobal.com | Compiled April 2026):
+{context}
 
-SERVICES: Passport, Indian Visa (via VFS Global), OCI, PCC, Marriage/Birth Registration, Attestation, Renunciation.
-{("OFFICIAL WEBSITE INFORMATION (live):\n" + context) if context else ""}
-RULES:
-1. Keep answers SHORT (3–5 sentences). WhatsApp users want quick answers.
-2. Always offer relevant links or contact info.
-3. Respond in the user's language (English, Hindi, Zulu, Afrikaans).
-4. Never ask for money or claim the consulate calls asking for payments.
-5. Use *bold* for emphasis (WhatsApp format, not markdown **).
-6. If asked to apply or start an application, say: "Reply *apply* to start your application."
-"""
+IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
+  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
+  🏢 No. 1, Eton Road, Park Town 2193, Johannesburg
+  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)"""
+
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
             system_message=system_prompt,
-        ).with_model("openai", "gpt-4o-mini")
+        ).with_model("openai", "gpt-4o")
         return await chat.send_message(UserMessage(text=user_message))
     except Exception as exc:
         logger.error("LLM error: %s", exc)
@@ -526,19 +550,19 @@ async def _handle_message(
     is_menu_trigger = clean_text.lower().strip() in _MENU_WORDS
 
     if is_menu_trigger and not selected_id:
-        await ics_waba.send_list(
-            to=phone,
-            body=(
-                "👋 Welcome to *Seva Setu* — the official WhatsApp assistant of the "
-                "Consulate General of India, Johannesburg.\n\n"
-                "Please select a consular service to get started, or simply type your question."
-            ),
-            button_label="View Services",
-            sections=_MAIN_MENU_SECTIONS,
-            header="Consulate General of India",
-            footer="Mon–Fri 09:00–12:00 | cons.joburg@mea.gov.in",
-            from_override=waba_number,
+        # Send greeting + advisory as plain text first
+        greeting_text = (
+            "🙏 नमस्ते भाइयो और बहनो!\n\n"
+            "मैं हूं \"सेवा सेतु स्वचालित सहायक (बॉट)\", आपकी सेवा में सदैव तत्पर।\n\n"
+            "🗣️ भारतीय काउंसलर सर्विसेज के साथ हाजिर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
+            "आज मैं आपकी मदद करने में सक्षम हूं।\n\n"
+            "Namaste, brothers and sisters!\n\n"
+            "I am \"Seva Setu Automated Assistant (Bot)\", always ready to serve you.\n\n"
+            "🗣️ Here to assist with your Indian consular service queries. "
+            "Please let me know how I can help you today. I am fully equipped to assist you.\n\n"
+            "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*"
         )
+        await ics_waba.send_text(phone, greeting_text, from_override=waba_number)
         return
 
     # ── SERVICE SELECTED FROM LIST — show info card + apply buttons ───
@@ -558,17 +582,6 @@ async def _handle_message(
         await _save_flow(session_id, _flow)
 
         await ics_waba.send_text(phone, info_text, from_override=waba_number)
-        await ics_waba.send_buttons(
-            to=phone,
-            body="Would you like to start an application or ask a question?",
-            buttons=[
-                {"id": f"apply_{selected_id}", "title": "Apply Now"},
-                {"id": "ask_question",          "title": "Ask a Question"},
-                {"id": "main_menu",             "title": "Main Menu"},
-            ],
-            header=svc["name"],
-            from_override=waba_number,
-        )
         return
 
     # ── "Apply" intent handling — context-aware routing ─
@@ -584,31 +597,34 @@ async def _handle_message(
             service_key = current_flow.get("service")
             clean_text = f"apply {service_key}"
             # Don't modify state — let process_flow handle the transition.
-        # Case 2: No service context — show menu
+        # Case 2: No service context — let LLM handle
         elif current_flow.get("state") == "idle":
-            await ics_waba.send_list(
-                to=phone,
-                body="Which service would you like to apply for?",
-                button_label="View Services",
-                sections=_MAIN_MENU_SECTIONS,
-                header="Start an Application",
-                footer="Select a service to begin",
-                from_override=waba_number,
-            )
-            return
+            pass  # fall through to bot engine
 
-    # ── LOAD KNOWLEDGE BASE FOR CONTEXT ───────────────────────────────
-    context_info   = ""
+    # ── LOAD KNOWLEDGE BASE FOR CONTEXT (mirrors web bot exactly) ───────
+    context_info    = ""
     scraped_summary = ""
+    knowledge_base  = {}
     try:
-        from knowledge_scraper import get_realtime_knowledge, extract_service_content
-        from services.hybrid_retrieval import hybrid_search
-        knowledge_base  = await get_realtime_knowledge()
-        active_service  = detect_service(clean_text) or current_flow.get("service")
+        knowledge_base = await get_realtime_knowledge()
+
+        # hybrid_search always runs — same as web bot (context_info goes to LLM)
+        context_info = await hybrid_search(clean_text, knowledge_base)
+
+        # scraped_summary is service-specific — goes to process_flow
+        active_service = detect_service(clean_text) or current_flow.get("service")
         if active_service:
-            scraped_summary = extract_service_content(active_service, knowledge_base)
-        if not scraped_summary:
-            context_info = await hybrid_search(clean_text, knowledge_base)
+            scraped_summary = extract_service_content(active_service, knowledge_base, user_query=clean_text)
+        elif detect_website_service(clean_text):
+            # Website-only service — keyword search from scraped pages
+            words = [w for w in clean_text.lower().split() if len(w) > 3]
+            cgi_text = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
+            vfs_text = knowledge_base.get("vfs_global", {}).get("page_content", "")
+            relevant = [
+                line.strip() for line in (cgi_text + "\n" + vfs_text).split("\n")
+                if line.strip() and any(w in line.lower() for w in words)
+            ]
+            scraped_summary = "\n".join(relevant[:15])
     except Exception as exc:
         logger.warning("Knowledge base fetch failed: %s", exc)
 
@@ -665,17 +681,31 @@ async def _handle_message(
         has_image=has_doc,
         image_doc_data=image_doc_data,
         user_id=phone,
-        scraped_summary=scraped_summary or context_info,
-        knowledge_base=None,   # already extracted above
+        scraped_summary=scraped_summary,   # service-specific → process_flow
+        knowledge_base=knowledge_base,
         preloaded_flow=current_flow,
+        channel="whatsapp",
     )
 
     # ── Build final response text ─────────────────────────────────────
     if flow_response is not None and not needs_llm:
         bot_text = _md_to_wa(flow_response)
     else:
-        # LLM path (Q&A, paused state questions, etc.)
-        raw_llm = await _llm_response(clean_text, session_id, scraped_summary or context_info)
+        # LLM path — knowledge scraper (context_info) is PRIMARY source.
+        # For service info requests (step="info_shown"), also include the
+        # structured service page as additional context so the LLM has both
+        # live knowledge AND the structured docs/fees info.
+        llm_context = context_info or ""
+        if step == "info_shown" and flow_response:
+            if llm_context:
+                llm_context = llm_context + "\n\n---\n\n" + flow_response
+            else:
+                llm_context = flow_response
+        raw_llm = await _llm_response(clean_text, session_id, llm_context)
+        # Append flow guidance suffix (same as web bot)
+        suffix = flow_suffix(step, detect_service(clean_text), channel="whatsapp")
+        if suffix:
+            raw_llm += suffix
         bot_text = _md_to_wa(raw_llm)
 
     # ── Save to session history ───────────────────────────────────────
@@ -734,56 +764,15 @@ async def _handle_message(
 
     elif step in ("submitted", "tracking"):
         await _wa_send(phone, bot_text, db, step, wa)
-        await ics_waba.send_buttons(
-            to=phone,
-            body="Is there anything else I can help you with?",
-            buttons=[
-                {"id": "main_menu",    "title": "View Services"},
-                {"id": "ask_question", "title": "Ask a Question"},
-            ],
-            from_override=wa,
-        )
 
     elif step in ("idle", "escalated", "error", "complete"):
         await _wa_send(phone, bot_text, db, step, wa)
-        await ics_waba.send_buttons(
-            to=phone,
-            body="Is there anything else I can help you with?",
-            buttons=[
-                {"id": "main_menu",    "title": "View Services"},
-                {"id": "ask_question", "title": "Ask a Question"},
-            ],
-            from_override=wa,
-        )
 
     elif step == "info_shown":
         # Service info was shown — always follow with Apply Now / Ask a Question buttons.
         # This eliminates the need to type "Apply" and avoids the race condition where
         # the flow state hasn't been saved yet when the user quickly types "Apply".
         await _wa_send(phone, bot_text, db, step, wa)
-        _svc = detect_service(clean_text) or current_flow.get("service")
-        if _svc and _svc in SERVICES:
-            await ics_waba.send_buttons(
-                to=phone,
-                body="Would you like to start an application or ask a question?",
-                buttons=[
-                    {"id": f"apply_{_svc}", "title": "Apply Now"},
-                    {"id": "ask_question",  "title": "Ask a Question"},
-                    {"id": "main_menu",     "title": "Main Menu"},
-                ],
-                header=SERVICES[_svc]["name"],
-                from_override=wa,
-            )
-        else:
-            await ics_waba.send_buttons(
-                to=phone,
-                body="How can I help you further?",
-                buttons=[
-                    {"id": "main_menu",    "title": "View All Services"},
-                    {"id": "ask_question", "title": "Ask a Question"},
-                ],
-                from_override=wa,
-            )
 
     elif step == "docs_uploading":
         await _wa_send(phone, bot_text, db, step, wa)

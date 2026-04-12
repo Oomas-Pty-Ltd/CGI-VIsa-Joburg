@@ -570,22 +570,138 @@ def _website_only_info_page(service_label: str, scraped_summary: str = "") -> st
     return "\n\n".join(parts)
 
 
-def _service_info_page(service_key: str, scraped_summary: str = "") -> str:
-    """Full info card shown when a user asks about a service.
-    Combines static description + live scraped data + docs required + apply offer."""
-    svc = SERVICES[service_key]
-    docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc["documents"]))
+_PASSPORT_SUBTYPES = {
+    "lost": {
+        "label": "Lost/Stolen Passport — Re-issue",
+        "description": (
+            "To re-issue a lost or stolen Indian passport, you must apply online at "
+            "https://passportindia.gov.in (select 'Re-issue') and submit in person at "
+            "the VFS Global Passport Centre, Johannesburg with an appointment.\n\n"
+            "**Important:** A police report (FIR) for the lost/stolen passport is mandatory. "
+            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page) — includes ICWF ZAR 30. "
+            "Processing time: 3–4 weeks."
+        ),
+        "extra_docs": [
+            "Original FIR / Police Report for lost or stolen passport (mandatory)",
+            "Proof of Indian citizenship (if original passport not available)",
+            "Sworn affidavit explaining circumstances of loss",
+        ],
+    },
+    "stolen": {
+        "label": "Lost/Stolen Passport — Re-issue",
+        "description": (
+            "To re-issue a stolen Indian passport, apply online at "
+            "https://passportindia.gov.in (select 'Re-issue') and submit at VFS Global, Johannesburg.\n\n"
+            "**Important:** A police report (FIR) is mandatory. "
+            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page). Processing: 3–4 weeks."
+        ),
+        "extra_docs": [
+            "Original FIR / Police Report for stolen passport (mandatory)",
+            "Proof of Indian citizenship (Aadhaar / PAN / birth certificate)",
+            "Sworn affidavit explaining circumstances of theft",
+        ],
+    },
+    "damaged": {
+        "label": "Damaged Passport — Re-issue",
+        "description": (
+            "To re-issue a damaged Indian passport, apply online at "
+            "https://passportindia.gov.in (select 'Re-issue') and submit at VFS Global, Johannesburg.\n\n"
+            "A passport is considered damaged if it has ink/water stains, scribbling, torn pages, "
+            "missing data page, or spine damage. "
+            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page). Processing: 3–4 weeks."
+        ),
+        "extra_docs": [
+            "Original damaged passport (must be submitted)",
+        ],
+    },
+    "emergency": {
+        "label": "Emergency Travel Document",
+        "description": (
+            "An Emergency Travel Document (ETD) is issued for a single journey to India when a valid "
+            "Indian passport is not available due to loss, theft, or damage.\n\n"
+            "Required: police report (if lost/stolen), proof of identity, 2 photographs, proof of travel. "
+            "Fees: ZAR 780 (includes ICWF). Processing: 2–3 working days."
+        ),
+        "extra_docs": [
+            "Police report (FIR) if passport was lost or stolen",
+            "Proof of identity (Aadhaar / PAN / any government ID)",
+            "Proof of travel (flight ticket or booking confirmation)",
+            "2 recent passport-size photographs",
+        ],
+    },
+    "tatkal": {
+        "label": "Tatkal (Urgent) Passport",
+        "description": (
+            "Tatkal is an urgent passport scheme for Indian nationals who require a passport quickly. "
+            "Apply online at https://passportindia.gov.in (select 'Tatkal') and submit at VFS Global, Johannesburg.\n\n"
+            "Tatkal fee is higher than normal; processing is typically 2–5 working days after verification."
+        ),
+        "extra_docs": [],
+    },
+}
 
-    parts = [f"## {svc['name']}\n\n{svc['description']}"]
+_PASSPORT_SUBTYPE_KEYWORDS = {
+    "lost":      ["lost passport", "lost my passport", "passport lost", "misplaced passport"],
+    "stolen":    ["stolen passport", "passport stolen", "passport was stolen", "passport theft"],
+    "damaged":   ["damaged passport", "passport damaged", "torn passport", "wet passport", "stained passport"],
+    "emergency": ["emergency travel", "emergency document", "emergency passport", "etd", "stranded without passport"],
+    "tatkal":    ["tatkal", "tatkaal", "urgent passport", "urgent travel"],
+}
+
+
+def _detect_passport_subtype(query: str) -> Optional[str]:
+    low = query.lower()
+    for subtype, phrases in _PASSPORT_SUBTYPE_KEYWORDS.items():
+        if any(p in low for p in phrases):
+            return subtype
+    # Single word fallbacks
+    if "lost" in low.split() or "lose" in low.split():
+        return "lost"
+    if "stolen" in low.split() or "theft" in low.split():
+        return "stolen"
+    if "damaged" in low.split() or "damage" in low.split():
+        return "damaged"
+    if "emergency" in low.split():
+        return "emergency"
+    if "tatkal" in low.split():
+        return "tatkal"
+    return None
+
+
+def _service_info_page(service_key: str, scraped_summary: str = "", user_query: str = "", channel: str = "web") -> str:
+    """Full info card shown when a user asks about a service.
+    Combines static description + live scraped data + docs required + apply offer.
+    For passport, detects sub-type (lost/stolen/damaged/emergency/tatkal) from user_query."""
+    svc = SERVICES[service_key]
+
+    # Passport sub-type customisation
+    subtype_info = None
+    if service_key == "passport" and user_query:
+        subtype_key = _detect_passport_subtype(user_query)
+        subtype_info = _PASSPORT_SUBTYPES.get(subtype_key)
+
+    if subtype_info:
+        title = subtype_info["label"]
+        description = subtype_info["description"]
+        base_docs = list(svc["documents"])
+        # Prepend sub-type specific docs (FIR etc.) before generic list
+        extra = subtype_info.get("extra_docs", [])
+        all_docs = extra + [d for d in base_docs if d not in extra]
+        docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(all_docs))
+        parts = [f"## {title}\n\n{description}"]
+    else:
+        docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc["documents"]))
+        parts = [f"## {svc['name']}\n\n{svc['description']}"]
 
     if scraped_summary and len(scraped_summary.strip()) > 40:
         parts.append(f"**Latest information from official websites:**\n{scraped_summary.strip()}")
 
     parts.append(f"**Documents required:**\n{docs}")
-    parts.append(
-        f"---\n**Are you interested in starting the application process for {svc['name']}?**\n"
-        f"Type **apply** to begin, or ask any questions you may have."
-    )
+    if channel != "whatsapp":
+        parts.append(
+            f"---\n**Are you interested in starting the application process for {svc['name']}?**\n"
+            f"Type **apply** to begin, or ask any questions you may have."
+        )
     return "\n\n".join(parts)
 
 
@@ -796,6 +912,7 @@ async def process_flow(
     scraped_summary: str = "",
     knowledge_base: Optional[Dict] = None,
     preloaded_flow: Optional[Dict] = None,  # avoids duplicate DB read when caller has it
+    channel: str = "web",  # "web" or "whatsapp" — controls apply prompt visibility
 ) -> Tuple[Optional[str], bool, str]:
     """
     Process a message through the application flow state machine.
@@ -1241,6 +1358,14 @@ async def process_flow(
             svc = detected_svc
 
         if svc:
+            if channel == "whatsapp":
+                svc_name = SERVICES[svc]["name"]
+                return (
+                    f"To apply for *{svc_name}*, please visit the official CGI Johannesburg website or contact the consulate directly.\n\n"
+                    f"🌐 https://www.cgijoburg.gov.in\n\n"
+                    f"{CONTACT_INFO}",
+                    False, "info_shown",
+                )
             flow["state"]   = "consent_pending"
             flow["service"] = svc
             await _save_flow(session_id, flow)
@@ -1248,6 +1373,13 @@ async def process_flow(
 
         # Apply intent detected but no recognisable service — ask the user
         if is_apply_intent(message) and not svc:
+            if channel == "whatsapp":
+                return (
+                    f"To apply for consular services, please visit:\n\n"
+                    f"🌐 https://www.cgijoburg.gov.in\n\n"
+                    f"{CONTACT_INFO}",
+                    False, "idle",
+                )
             svc_list = "\n".join(f"• {v['name']}" for v in SERVICES.values())
             return (
                 f"I'd be happy to help you apply! Which service are you looking for?\n\n{svc_list}\n\n"
@@ -1264,7 +1396,10 @@ async def process_flow(
         flow["state"]   = "info_shown"
         flow["service"] = svc
         await _save_flow(session_id, flow)
-        return (_service_info_page(svc, scraped_summary), False, "info_shown")
+        # needs_llm=True so the route handler runs the LLM with live knowledge
+        # (hybrid_search context_info) as primary source. The service info page
+        # is passed back as structured context that the route handler appends.
+        return (_service_info_page(svc, scraped_summary, user_query=message, channel=channel), True, "info_shown")
 
     # ------------------------------------------------------------------
     # Website-only service — scan websites, show info, no registration flow
@@ -1275,7 +1410,7 @@ async def process_flow(
         flow["state"]   = "info_shown"
         flow["service"] = None
         await _save_flow(session_id, flow)
-        return (_website_only_info_page(website_svc_label, scraped_summary), False, "info_shown")
+        return (_website_only_info_page(website_svc_label, scraped_summary), True, "info_shown")
 
     # Default: let LLM handle
     return (None, True, state)
@@ -1401,18 +1536,25 @@ def _validate_field(key: str, value: str) -> Optional[str]:
 # =====================================================================
 # POST-LLM HOOK  (append context-aware suffix after LLM response)
 # =====================================================================
-def flow_suffix(state: str, service: Optional[str]) -> str:
-    """Append after LLM response to guide user back into the flow."""
+def flow_suffix(state: str, service: Optional[str], channel: str = "web") -> str:
+    """Append after LLM response to guide user back into the flow.
+
+    channel: "web" shows apply prompts; "whatsapp" hides them.
+    """
     svc_name = SERVICES[service]["name"] if service and service in SERVICES else "your application"
     # Note: "paused" state no longer uses LLM — it returns direct prompts,
     # so no suffix is needed for it here.
     if state == "consent_pending" and service:
+        if channel == "whatsapp":
+            return ""
         return (
             f"\n\n---\n"
             f"Would you still like to **apply** for {svc_name}? "
             f"Reply **yes** to start registration or **no** to cancel."
         )
     if state in ("idle", "info_shown"):
+        if channel == "whatsapp":
+            return ""
         if service and service in SERVICES:
             svc_name = SERVICES[service]["name"]
             return (
