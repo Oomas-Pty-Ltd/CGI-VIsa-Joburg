@@ -769,11 +769,11 @@ class KnowledgeService:
         if category:
             filter_query["category"] = category.value
         
-        # Get all active entries
+        # Get all active entries (500 gives full coverage for large PDF knowledge bases)
         entries = await db.knowledge_base.find(
             filter_query,
             {"_id": 0}
-        ).to_list(100)
+        ).to_list(500)
         
         # Score entries by relevance
         scored = []
@@ -787,26 +787,50 @@ class KnowledgeService:
         
         return [entry for score, entry in scored[:limit]]
     
+    @staticmethod
+    def _norm(text: str) -> str:
+        """Normalize text: lowercase and replace hyphens/underscores with spaces."""
+        import re as _re
+        return _re.sub(r'[-_]+', ' ', text.lower())
+
     def _calculate_relevance(self, query: str, entry: Dict) -> float:
-        """Calculate relevance score for an entry"""
+        """Calculate relevance score for an entry.
+
+        Normalizes hyphenated terms (e.g. 'id-ul-fitr' == 'id ul fitr') so
+        holiday name variants match regardless of hyphenation style.
+        """
+        import re as _re
         score = 0.0
-        
-        # Check keywords (highest weight)
+        norm_query = self._norm(query)
+        query_words = [w for w in norm_query.split() if len(w) >= 2]
+
+        # Check keywords (highest weight) — try both raw and normalized forms
         keywords = entry.get("keywords", [])
         for keyword in keywords:
-            if keyword.lower() in query:
+            kw_norm = self._norm(keyword)
+            # Full keyword match in normalized query
+            if kw_norm in norm_query:
                 score += 2.0
-        
-        # Check title
-        title = entry.get("title", "").lower()
-        if any(word in title for word in query.split()):
+            # Partial: any keyword word appears in normalized query
+            elif any(w in norm_query for w in kw_norm.split() if len(w) >= 3):
+                score += 0.5
+
+        # Check title (normalized)
+        title_norm = self._norm(entry.get("title", ""))
+        if any(w in title_norm for w in query_words if len(w) >= 3):
             score += 1.5
-        
-        # Check question
-        question = entry.get("question", "").lower()
-        if any(word in question for word in query.split() if len(word) > 3):
+
+        # Check question (normalized)
+        question_norm = self._norm(entry.get("question", ""))
+        if any(w in question_norm for w in query_words if len(w) > 3):
             score += 1.0
-        
+
+        # Bonus: check answer snippet for query words (helps surface PDF sections)
+        answer_snippet = self._norm((entry.get("answer") or "")[:300])
+        matched_in_answer = sum(1 for w in query_words if len(w) >= 4 and w in answer_snippet)
+        if matched_in_answer >= 2:
+            score += 0.5
+
         return score
     
     async def get_entry(self, entry_id: str) -> Optional[Dict]:

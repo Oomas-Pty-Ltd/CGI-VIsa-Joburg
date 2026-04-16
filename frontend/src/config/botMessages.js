@@ -85,10 +85,14 @@ export const ADVISORY_MESSAGES = [
 // LANGUAGE BADGES - Languages displayed on the bot interface
 // =====================================================================
 export const SUPPORTED_LANGUAGES = [
-  "Hindi",
-  "English", 
-  "Zulu",
-  "Afrikaans"
+  "English", "Hindi", "Bengali", "Marathi", "Telugu", "Tamil",
+  "Gujarati", "Urdu", "Kannada", "Odia", "Malayalam", "Punjabi",
+  "Assamese", "Maithili", "Sanskrit", "Santali", "Kashmiri", "Nepali",
+  "Sindhi", "Dogri", "Konkani", "Manipuri", "Bodo", "Marwari",
+  "isiZulu", "isiXhosa", "Afrikaans", "Sepedi", "Setswana", "Sesotho",
+  "Xitsonga", "siSwati", "Tshivenda", "isiNdebele",
+  "Arabic", "French", "Swahili", "Hausa", "Yoruba", "Igbo",
+  "Amharic", "Oromo"
 ];
 
 // =====================================================================

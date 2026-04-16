@@ -587,13 +587,41 @@ function KnowledgeTab({ token }) {
       form.append("file",     file);
       form.append("title",    docTitle);
       form.append("category", category);
-      const res  = await fetch(`${API}/super-admin/knowledge/upload-pdf`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Upload failed");
+
+      let res;
+      try {
+        res = await fetch(`${API}/super-admin/knowledge/upload-pdf`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+      } catch {
+        toast.error("Network error — could not reach the server. Check your connection.", { duration: 6000 });
+        return;
+      }
+
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        toast.error(`Server error (${res.status}) — unexpected response format.`, { duration: 6000 });
+        return;
+      }
+
+      if (!res.ok) {
+        // FastAPI returns detail as a string for HTTPException, but an array for 422 validation errors
+        let msg = "Upload failed";
+        if (typeof data.detail === "string") {
+          msg = data.detail;
+        } else if (Array.isArray(data.detail)) {
+          msg = data.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+        } else if (data.message) {
+          msg = data.message;
+        }
+        toast.error(msg, { duration: 8000 });
+        return;
+      }
+
       const ocrNote = data.ocr_used ? " via OCR" : "";
       const modeNote = data.faq_mode ? " as FAQ pairs" : "";
       toast.success(`PDF processed — ${data.sections_created} entries created${modeNote}${ocrNote}.`);
@@ -603,7 +631,7 @@ function KnowledgeTab({ token }) {
       if (fileInputRef.current) fileInputRef.current.value = "";
       fetchEntries();
     } catch (err) {
-      toast.error(err.message || "Upload failed");
+      toast.error(err.message || "Upload failed — please try again.", { duration: 6000 });
     } finally {
       setUploading(false);
     }
@@ -686,7 +714,7 @@ function KnowledgeTab({ token }) {
               <div className="text-gray-500">
                 <Upload className="w-10 h-10 mx-auto mb-2 text-gray-400" />
                 <p className="font-medium">Drag &amp; drop a PDF here, or click to browse</p>
-                <p className="text-sm mt-1">Max 20 MB · PDF only</p>
+                <p className="text-sm mt-1">Max 50 MB · PDF only</p>
               </div>
             )}
           </div>

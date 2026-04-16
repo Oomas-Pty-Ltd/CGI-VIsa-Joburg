@@ -218,13 +218,17 @@ INTENT_PATTERNS = {
     IntentCategory.OFFICE_INFO: {
         "keywords": [
             "address", "location", "office", "timing", "hours", "open",
-            "closed", "contact", "phone", "email", "where", "directions"
+            "closed", "contact", "phone", "email", "where", "directions",
+            "cgi", "consulate", "johannesburg", "joburg", "jburg",
+            "consul general", "consulate general"
         ],
         "patterns": [
             r"(where|what).*(office|address|location)",
             r"(office|consulate).*(timing|hours|address)",
             r"(contact|phone|email).*(number|address)",
-            r"(when|what time).*open"
+            r"(when|what time).*open",
+            r"cgi\s*(joburg|johannesburg|jburg)?",
+            r"(consulate|consul).*(general|india|johannesburg|joburg)?"
         ],
         "response_key": "office_info"
     },
@@ -352,23 +356,17 @@ Multi-purpose, multi-entry life-long visa to India.
         "title": "CGI Johannesburg Office",
         "content": """**Consulate General of India, Johannesburg:**
 
-**Address:**
-2nd Floor, Sandown Mews East
-88 Stella Street, Sandton
-Johannesburg
-
-**Phone:** +27 11 783 0202
-**Emergency:** (+27) 11 581 9800 (24/7)
-**Email:** cons.joburg@mea.gov.in
-
-**Office Hours:**
-Mon-Fri: 9:00 AM - 5:30 PM
-
-**Consular Services:**
-Mon-Fri: 9:00 AM - 12:30 PM
-
-**Website:** https://www.cgijoburg.gov.in""",
-        "source": "CGI Johannesburg Official"
+- **Acting Consul General:** Mr. Harish Kumar
+- **Address:** No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+- **Phone:** +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
+- **Email:** ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
+- **Website:** www.cgijoburg.gov.in
+- **Office Hours:** Mon–Fri 08:30–17:00 (Lunch break: 13:00–13:30)
+- **Jurisdiction:** Gauteng, North West, Limpopo and Mpumalanga provinces
+- **VFS Global (Passport/PCC):** 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
+- **VFS Global (Visa):** 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
+- **VFS Hours:** Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00""",
+        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
     },
     
     "emergency_contact": {

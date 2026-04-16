@@ -594,13 +594,26 @@ def _split_into_sections(text: str, max_chars: int = 1500) -> List[str]:
 
 
 def _extract_keywords(text: str) -> List[str]:
-    """Top-15 non-stop-word tokens from text."""
-    words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    """Top-20 non-stop-word tokens from text.
+
+    Also captures hyphenated compound terms (e.g. 'id-ul-fitr', 'eid-ul-adha')
+    as whole keywords so they are searchable by their full or partial forms.
+    """
+    norm_text = re.sub(r'[-_]+', ' ', text.lower())
+    words = re.findall(r'\b[a-zA-Z]{3,}\b', norm_text)
     freq: dict = {}
     for w in words:
         if w not in _KB_STOP_WORDS:
             freq[w] = freq.get(w, 0) + 1
-    return [w for w, _ in sorted(freq.items(), key=lambda x: x[1], reverse=True)[:15]]
+    top_words = [w for w, _ in sorted(freq.items(), key=lambda x: x[1], reverse=True)[:15]]
+
+    # Add full hyphenated tokens as extra keywords (e.g. "id-ul-fitr" alongside "fitr")
+    compound = re.findall(r'\b[a-zA-Z]+-(?:[a-zA-Z]+-)*[a-zA-Z]+\b', text.lower())
+    for c in compound:
+        if c not in top_words:
+            top_words.append(c)
+
+    return top_words[:20]
 
 
 def _make_title(section_text: str, doc_title: str, idx: int) -> str:
@@ -680,10 +693,10 @@ async def upload_pdf_to_knowledge(
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    MAX_SIZE = 20 * 1024 * 1024  # 20 MB
+    MAX_SIZE = 50 * 1024 * 1024  # 50 MB
     file_bytes = await file.read()
     if len(file_bytes) > MAX_SIZE:
-        raise HTTPException(status_code=400, detail="PDF exceeds 20 MB limit.")
+        raise HTTPException(status_code=400, detail="PDF exceeds 50 MB limit.")
 
     # ── Step 1: try fast text-layer extraction ────────────────────────
     raw_text = _extract_pdf_text(file_bytes)

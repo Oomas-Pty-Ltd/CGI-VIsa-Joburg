@@ -163,12 +163,66 @@ const STEPS = [
 
 // Language configuration with codes
 const LANGUAGES = [
-  { code: "en", name: "English", flag: "🇬🇧" },
-  { code: "hi", name: "हिंदी (Hindi)", flag: "🇮🇳" },
-  { code: "ta", name: "தமிழ் (Tamil)", flag: "🇮🇳" },
-  { code: "zu", name: "isiZulu", flag: "🇿🇦" },
-  { code: "af", name: "Afrikaans", flag: "🇿🇦" }
+  // English
+  { code: "en",  name: "English",                flag: "🇬🇧" },
+  // Indian languages
+  { code: "hi",  name: "हिंदी (Hindi)",            flag: "🇮🇳" },
+  { code: "bn",  name: "বাংলা (Bengali)",           flag: "🇮🇳" },
+  { code: "mr",  name: "मराठी (Marathi)",           flag: "🇮🇳" },
+  { code: "te",  name: "తెలుగు (Telugu)",           flag: "🇮🇳" },
+  { code: "ta",  name: "தமிழ் (Tamil)",             flag: "🇮🇳" },
+  { code: "gu",  name: "ગુજરાતી (Gujarati)",        flag: "🇮🇳" },
+  { code: "ur",  name: "اردو (Urdu)",               flag: "🇮🇳" },
+  { code: "kn",  name: "ಕನ್ನಡ (Kannada)",           flag: "🇮🇳" },
+  { code: "or",  name: "ଓଡ଼ିଆ (Odia)",              flag: "🇮🇳" },
+  { code: "ml",  name: "മലയാളം (Malayalam)",        flag: "🇮🇳" },
+  { code: "pa",  name: "ਪੰਜਾਬੀ (Punjabi)",          flag: "🇮🇳" },
+  { code: "as",  name: "অসমীয়া (Assamese)",         flag: "🇮🇳" },
+  { code: "mai", name: "मैथिली (Maithili)",          flag: "🇮🇳" },
+  { code: "sa",  name: "संस्कृत (Sanskrit)",         flag: "🇮🇳" },
+  { code: "sat", name: "ᱥᱟᱱᱛᱟᱲᱤ (Santali)",        flag: "🇮🇳" },
+  { code: "ks",  name: "کٲشُر (Kashmiri)",          flag: "🇮🇳" },
+  { code: "ne",  name: "नेपाली (Nepali)",            flag: "🇮🇳" },
+  { code: "sd",  name: "سنڌي (Sindhi)",             flag: "🇮🇳" },
+  { code: "doi", name: "डोगरी (Dogri)",              flag: "🇮🇳" },
+  { code: "kok", name: "कोंकणी (Konkani)",           flag: "🇮🇳" },
+  { code: "mni", name: "মৈতৈলোন্ (Manipuri)",        flag: "🇮🇳" },
+  { code: "brx", name: "बड़ो (Bodo)",                flag: "🇮🇳" },
+  { code: "mwr", name: "मारवाड़ी (Marwari)",          flag: "🇮🇳" },
+  // South African languages
+  { code: "zu",  name: "isiZulu",                   flag: "🇿🇦" },
+  { code: "xh",  name: "isiXhosa",                  flag: "🇿🇦" },
+  { code: "af",  name: "Afrikaans",                 flag: "🇿🇦" },
+  { code: "nso", name: "Sepedi",                    flag: "🇿🇦" },
+  { code: "tn",  name: "Setswana",                  flag: "🇿🇦" },
+  { code: "st",  name: "Sesotho",                   flag: "🇿🇦" },
+  { code: "ts",  name: "Xitsonga",                  flag: "🇿🇦" },
+  { code: "ss",  name: "siSwati",                   flag: "🇿🇦" },
+  { code: "ve",  name: "Tshivenda",                 flag: "🇿🇦" },
+  { code: "nr",  name: "isiNdebele",                flag: "🇿🇦" },
+  // Other languages
+  { code: "ar",  name: "العربية (Arabic)",           flag: "🇸🇦" },
+  { code: "fr",  name: "Français (French)",          flag: "🇫🇷" },
+  { code: "sw",  name: "Kiswahili (Swahili)",        flag: "🇹🇿" },
+  { code: "ha",  name: "Hausa",                     flag: "🇳🇬" },
+  { code: "yo",  name: "Yorùbá (Yoruba)",            flag: "🇳🇬" },
+  { code: "ig",  name: "Igbo",                      flag: "🇳🇬" },
+  { code: "am",  name: "አማርኛ (Amharic)",             flag: "🇪🇹" },
+  { code: "om",  name: "Oromoo (Oromo)",             flag: "🇪🇹" },
 ];
+
+// BCP-47 codes for speech recognition (browser Web Speech API)
+const SPEECH_LANG_MAP = {
+  en: "en-GB", hi: "hi-IN", bn: "bn-IN", mr: "mr-IN", te: "te-IN",
+  ta: "ta-IN", gu: "gu-IN", ur: "ur-IN", kn: "kn-IN", or: "or-IN",
+  ml: "ml-IN", pa: "pa-IN", as: "as-IN", mai: "hi-IN", sa: "sa-IN",
+  sat: "hi-IN", ks: "hi-IN", ne: "ne-NP", sd: "ur-IN", doi: "hi-IN",
+  kok: "mr-IN", mni: "hi-IN", brx: "hi-IN", mwr: "hi-IN",
+  zu: "zu-ZA", xh: "xh-ZA", af: "af-ZA", nso: "af-ZA", tn: "af-ZA",
+  st: "st-ZA", ts: "af-ZA", ss: "af-ZA", ve: "af-ZA", nr: "af-ZA",
+  ar: "ar-SA", fr: "fr-FR", sw: "sw-KE", ha: "ha-NE", yo: "yo-NG",
+  ig: "ig-NG", am: "am-ET", om: "om-ET",
+};
 
 export default function ConsularBot() {
   const [messages, setMessages] = useState([]);
@@ -184,8 +238,11 @@ export default function ConsularBot() {
   const [isTyping, setIsTyping] = useState(false);
   const typingIntervalRef = useRef(null);
   const typingStoppedRef = useRef(false);
+  const welcomeBackShownRef = useRef(false); // prevents duplicate welcome-back on StrictMode double-mount
   const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const selectedLanguageRef = useRef("en"); // always reflects latest value inside async handlers
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
+  const [showAllLangs, setShowAllLangs] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [mediaRecorder, setMediaRecorder] = useState(null);
@@ -248,7 +305,8 @@ export default function ConsularBot() {
 
     // Persistence: if a saved session exists, check for an in-progress application
     const savedSession = localStorage.getItem("consular_session_id");
-    if (savedSession) {
+    if (savedSession && !welcomeBackShownRef.current) {
+      welcomeBackShownRef.current = true; // guard against StrictMode double-mount
       axios.get(`${API}/consular/session/${savedSession}`)
         .then(res => {
           const flow = res.data?.flow;
@@ -257,13 +315,22 @@ export default function ConsularBot() {
             const serviceName = flow.service
               ? flow.service.charAt(0).toUpperCase() + flow.service.slice(1)
               : "application";
+            // Only show tracking ID if one has actually been assigned
+            const trackingLine = flow.tracking_id
+              ? ` (Tracking ID: \`${flow.tracking_id}\`)`
+              : "";
             setMessages(prev => [
               ...prev,
               {
                 role: "assistant",
-                content: `Welcome back! You have an **in-progress ${serviceName} application** (Tracking ID: \`${flow.tracking_id || "pending"}\`).\n\nType **continue** to resume where you left off, or **discard** to start fresh.`
+                content: `Welcome back! You have an **in-progress ${serviceName} application**${trackingLine}.\n\nType **continue** to resume where you left off, or **discard** to start fresh.`
               }
             ]);
+            // Sync currentStep so the flow UI (quick-reply chips etc.) renders correctly
+            setCurrentStep(flow.state);
+          } else if (!flow || !inProgressStates.includes(flow.state)) {
+            // Flow is idle/completed — nothing to restore, clear stale flag
+            welcomeBackShownRef.current = false;
           }
         })
         .catch(() => {
@@ -271,6 +338,7 @@ export default function ConsularBot() {
           localStorage.removeItem("consular_session_id");
           sessionIdRef.current = null;
           setSessionId(null);
+          welcomeBackShownRef.current = false;
         });
     }
   }, []);
@@ -298,7 +366,7 @@ export default function ConsularBot() {
           session_id: sessionIdRef.current,
           user_id: "guest",
           enable_voice: false,
-          language: selectedLanguage,
+          language: selectedLanguageRef.current,
         }),
         signal: AbortSignal.timeout(60000),
       });
@@ -333,7 +401,7 @@ export default function ConsularBot() {
               });
             }
             if (evt.done) {
-              if (enableVoiceRef.current && fullText) speakText(fullText);
+              if (enableVoiceRef.current && fullText) speakWithBackend(fullText);
             }
           } catch {}
         }
@@ -347,7 +415,7 @@ export default function ConsularBot() {
     } finally {
       setIsTyping(false);
     }
-  }, [selectedLanguage]);
+  }, []);
 
   const handleSend = async (overrideText) => {
     if (isTyping) return;
@@ -384,7 +452,7 @@ export default function ConsularBot() {
           session_id: sessionIdRef.current,
           user_id: "guest",
           enable_voice: false,   // voice not supported over stream
-          language: selectedLanguage,
+          language: selectedLanguageRef.current,
         }),
         signal: AbortSignal.timeout(60000),
       });
@@ -443,7 +511,7 @@ export default function ConsularBot() {
             }
             // Speak the completed response if voice is enabled
             if (enableVoiceRef.current && fullText) {
-              speakText(fullText);
+              speakWithBackend(fullText);
             }
           }
         }
@@ -537,7 +605,7 @@ export default function ConsularBot() {
     }
   };
 
-  // Browser TTS — strips markdown, respects enableVoiceRef
+  // Browser TTS — strips markdown, speaks in the selected language
   const speakText = (text) => {
     if (!enableVoiceRef.current) return;
     if (!window.speechSynthesis) return;
@@ -564,44 +632,134 @@ export default function ConsularBot() {
 
     if (!plain) return;
 
-    const utter = new SpeechSynthesisUtterance(plain);
-    utter.lang = selectedLanguage || "en";
-    utter.rate = 1.3;
+    const targetLang = SPEECH_LANG_MAP[selectedLanguageRef.current] || "en-GB";
+    const langFamily = targetLang.split("-")[0];
 
-    // Strictly female voices only — known female voice names across all platforms
     const FEMALE_NAMES = /heera|priya|aditi|neerja|kalpana|swara|zira|samantha|karen|moira|fiona|tessa|victoria|linda|emma|aria|jenny|sonia|natasha|susan|hazel|amelie|alice|alva|anna|claire|carmit|damayanti|ioana|joana|laura|lekha|luciana|mariska|mei\-jia|melina|milena|monica|paulina|sangeeta|sara|satu|sin\-ji|yelda|yuna|zosia/i;
+    const allVoices  = window.speechSynthesis.getVoices();
+    const isFemale   = (v) => FEMALE_NAMES.test(v.name) || /female|woman|girl/i.test(v.name);
 
-    const allVoices = window.speechSynthesis.getVoices();
-
-    // Filter to female-only voices
-    const femaleVoices = allVoices.filter(
-      (v) => FEMALE_NAMES.test(v.name) || /female|woman|girl/i.test(v.name)
-    );
-
-    const femaleVoice =
-      // 1. Indian English female (en-IN)
-      femaleVoices.find((v) => v.lang === "en-IN") ||
-      // 2. Hindi female (hi-IN)
-      femaleVoices.find((v) => v.lang === "hi-IN") ||
-      // 3. Any English female
-      femaleVoices.find((v) => v.lang.startsWith("en")) ||
-      // 4. Any female voice at all
-      femaleVoices[0] ||
+    // Find a voice for the selected language only.
+    // Never fall back to an English voice when another language is selected —
+    // instead leave .voice unset so Chrome/Edge use their cloud TTS engine
+    // (Google TTS / Windows Speech) for the target language automatically.
+    const matchingVoice =
+      allVoices.find((v) => isFemale(v) && v.lang === targetLang) ||
+      allVoices.find((v) => isFemale(v) && v.lang.startsWith(langFamily + "-")) ||
+      allVoices.find((v) => v.lang === targetLang) ||
+      allVoices.find((v) => v.lang.startsWith(langFamily + "-")) ||
       null;
 
-    if (femaleVoice) {
-      utter.voice = femaleVoice;
-      utter.lang  = femaleVoice.lang;
-    } else {
-      // No female voice found — set lang hint only, do not use a male voice
-      utter.lang = "en-IN";
+    // Chrome bug: utterances > ~300 chars may cut off silently.
+    // Split on sentence boundaries and queue them all.
+    const CHUNK_SIZE = 250;
+    const sentences = plain.match(/[^।॥.!?]+[।॥.!?]*/g) || [plain];
+    const chunks = [];
+    let current = "";
+    for (const s of sentences) {
+      if ((current + s).length > CHUNK_SIZE && current) {
+        chunks.push(current.trim());
+        current = s;
+      } else {
+        current += s;
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+
+    chunks.forEach((chunk, i) => {
+      const utter = new SpeechSynthesisUtterance(chunk);
+      utter.lang = targetLang;
+      utter.rate = 1.0;
+      if (matchingVoice) {
+        utter.voice = matchingVoice;
+        utter.lang  = matchingVoice.lang;
+      }
+      if (i === 0)               utter.onstart = () => setIsSpeaking(true);
+      if (i === chunks.length - 1) {
+        utter.onend   = () => setIsSpeaking(false);
+        utter.onerror = () => setIsSpeaking(false);
+      }
+      window.speechSynthesis.speak(utter);
+    });
+  };
+
+  // Play a base64 audio clip and resolve when it finishes (or errors)
+  const playAudioAsync = useCallback((audioBase64) => {
+    return new Promise((resolve) => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.onended = null;
+        audioRef.current.onerror = null;
+        audioRef.current = null;
+      }
+      setIsSpeaking(true);
+      const audio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
+      audioRef.current = audio;
+      audio.onended = () => { setIsSpeaking(false); audioRef.current = null; resolve(); };
+      audio.onerror = () => { setIsSpeaking(false); audioRef.current = null; resolve(); };
+      audio.play().catch(() => { setIsSpeaking(false); resolve(); });
+    });
+  }, []);
+
+  // Fetch TTS audio for one chunk from backend
+  const fetchTTSChunk = useCallback(async (chunk) => {
+    const res = await fetch(`${API}/consular/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: chunk, language: selectedLanguageRef.current }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+    const data = await res.json();
+    return data.audio_base64 || null;
+  }, []);
+
+  // Backend TTS — splits text into sentence chunks, fires all fetches in parallel,
+  // then plays them in order so audio starts as soon as the first chunk is ready.
+  // Falls back to browser Web Speech API if the backend is unavailable.
+  const speakWithBackend = useCallback(async (text) => {
+    if (!enableVoiceRef.current) return;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+    // Strip markdown so TTS doesn't read "asterisk asterisk" etc.
+    const plain = text
+      .replace(/\*\*?([^*]+)\*\*?/g, "$1")
+      .replace(/#{1,6}\s/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/`[^`]+`/g, "")
+      .replace(/•|-\s/g, "")
+      .replace(/\n{2,}/g, ". ")
+      .replace(/\n/g, " ")
+      .trim();
+    if (!plain) return;
+
+    // Split on sentence/paragraph boundaries into ~300-char chunks
+    const CHUNK = 300;
+    const sentences = plain.match(/[^।॥.!?]+[।॥.!?]*/g) || [plain];
+    const chunks = [];
+    let cur = "";
+    for (const s of sentences) {
+      if (cur && (cur + s).length > CHUNK) { chunks.push(cur.trim()); cur = s; }
+      else cur += s;
+    }
+    if (cur.trim()) chunks.push(cur.trim());
+
+    // Fire all TTS requests in parallel — don't wait for one before starting the next
+    const audioPromises = chunks.map(chunk => fetchTTSChunk(chunk).catch(() => null));
+
+    // Play in order: wait for each clip in sequence
+    let anyPlayed = false;
+    for (const promise of audioPromises) {
+      if (!enableVoiceRef.current) break;
+      const audio = await promise;
+      if (audio) { await playAudioAsync(audio); anyPlayed = true; }
     }
 
-    utter.onstart = () => setIsSpeaking(true);
-    utter.onend   = () => setIsSpeaking(false);
-    utter.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utter);
-  };
+    if (!anyPlayed) {
+      // All backend calls failed — fall back to browser TTS
+      speakText(plain);
+    }
+  }, [fetchTTSChunk, playAudioAsync]);
 
   // =====================================================================
   // ENHANCED MICROPHONE INPUT - Using OpenAI Whisper via Backend
@@ -638,14 +796,14 @@ export default function ConsularBot() {
           
           const formData = new FormData();
           formData.append('audio', audioBlob, 'recording.webm');
-          formData.append('language', selectedLanguage);
-          
+          formData.append('language', selectedLanguageRef.current);
+
           const response = await axios.post(`${API}/consular/voice-input`, formData, {
             headers: {
               'Content-Type': 'multipart/form-data'
             }
           });
-          
+
           if (response.data.success && response.data.transcription) {
             setInput(response.data.transcription);
             toast.success("✅ Voice captured successfully!");
@@ -654,15 +812,12 @@ export default function ConsularBot() {
           }
         } catch (err) {
           console.error("Voice processing error:", err);
-          
+
           // Fallback to Web Speech API if backend fails
           if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
             toast.info("Trying browser speech recognition...");
             const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-            recognition.lang = selectedLanguage === 'hi' ? 'hi-IN' : 
-                              selectedLanguage === 'ta' ? 'ta-IN' :
-                              selectedLanguage === 'zu' ? 'zu-ZA' :
-                              selectedLanguage === 'af' ? 'af-ZA' : 'en-US';
+            recognition.lang = SPEECH_LANG_MAP[selectedLanguageRef.current] || 'en-GB';
             recognition.interimResults = false;
             
             recognition.onresult = (event) => {
@@ -697,7 +852,7 @@ export default function ConsularBot() {
         toast.error("Failed to access microphone. Please try again.");
       }
     }
-  }, [selectedLanguage]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -915,21 +1070,57 @@ export default function ConsularBot() {
             </Button>
             
             {showLanguageMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border z-50" 
+              <div
+                className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border z-50"
                 data-testid="language-menu"
                 role="listbox"
                 aria-label="Select language"
               >
-                <div className="p-2">
+                <div className="p-2 max-h-80 overflow-y-auto">
                   <p className="text-xs text-gray-500 px-3 py-1 font-semibold uppercase" id="lang-label">Select Language</p>
                   {LANGUAGES.map((lang) => (
                     <button
                       key={lang.code}
                       onClick={() => {
+                        if (lang.code === selectedLanguage) {
+                          setShowLanguageMenu(false);
+                          return;
+                        }
+                        // Stop any playing audio
+                        if (audioRef.current) {
+                          audioRef.current.pause();
+                          audioRef.current.onended = null;
+                          audioRef.current = null;
+                          setIsSpeaking(false);
+                        }
+                        if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+                        // Save & close the old session in DB before starting fresh
+                        const oldSessionId = sessionIdRef.current;
+                        if (oldSessionId) {
+                          fetch(`${API}/consular/session/${oldSessionId}/close`, {
+                            method: "POST",
+                          }).catch(() => {}); // fire-and-forget, don't block UI
+                        }
+                        localStorage.removeItem("consular_session_id");
+                        sessionIdRef.current = null;
+                        setSessionId(null);
+
+                        // Switch language
+                        selectedLanguageRef.current = lang.code;
                         setSelectedLanguage(lang.code);
                         setShowLanguageMenu(false);
-                        toast.success(`Language set to ${lang.name}`);
+
+                        // Reset chat to initial greeting
+                        const freshMessages = [{ role: "assistant", content: GREETING_MESSAGE }];
+                        ADVISORY_MESSAGES.filter(a => a.active).forEach(adv => {
+                          freshMessages.push({ role: "advisory", type: adv.type, title: adv.title, content: adv.content });
+                        });
+                        setMessages(freshMessages);
+                        setCurrentStep("register");
+                        welcomeBackShownRef.current = false;
+
+                        toast.success(`Language changed to ${lang.name} — new session started`);
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors min-h-[44px] ${
                         selectedLanguage === lang.code 
@@ -1095,9 +1286,15 @@ export default function ConsularBot() {
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Supported Languages</p>
                   <div className="flex flex-wrap justify-center gap-2">
-                    {SUPPORTED_LANGUAGES.map((lang) => (
+                    {(showAllLangs ? SUPPORTED_LANGUAGES : SUPPORTED_LANGUAGES.slice(0, 5)).map((lang) => (
                       <span key={lang} className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">{lang}</span>
                     ))}
+                    <button
+                      onClick={() => setShowAllLangs(v => !v)}
+                      className="text-xs px-3 py-1.5 bg-gradient-to-r from-[#1A2E40] to-[#243a52] text-white rounded-full font-semibold border border-[#1A2E40] hover:opacity-90 transition-opacity"
+                    >
+                      {showAllLangs ? "Show Less" : `+${SUPPORTED_LANGUAGES.length - 5} More`}
+                    </button>
                   </div>
                 </div>
               </div>

@@ -95,9 +95,14 @@ async def lifespan(app: FastAPI):
         _check_whatsapp_config()
         
         # Pre-warm the scraper cache so the first user chat request is instant
-        from knowledge_scraper import get_realtime_knowledge
+        from knowledge_scraper import get_realtime_knowledge, start_periodic_cgi_crawl
         asyncio.create_task(get_realtime_knowledge())
         logger.info("Scraper cache pre-warm started in background")
+
+        # Periodic background crawl: fetches https://www.cgijoburg.gov.in/ + sub-pages
+        # every 6 hours and stores results into MongoDB knowledge_base
+        asyncio.create_task(start_periodic_cgi_crawl())
+        logger.info("Periodic CGI background crawl task started (interval: 6h)")
         
         # Start session cleanup task (runs every hour)
         async def periodic_session_cleanup():
@@ -320,15 +325,30 @@ api_router.include_router(user_router)
 
 app.include_router(api_router)
 
-# HSTS Middleware for security
+# HSTS + body-size middleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
+
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — matches the PDF upload limit
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose Content-Length exceeds the upload cap before reading the body."""
+    async def dispatch(self, request, call_next):
+        cl = request.headers.get("content-length")
+        if cl and int(cl) > _MAX_UPLOAD_BYTES:
+            return StarletteResponse(
+                content='{"detail": "Request body too large. Maximum allowed size is 50 MB."}',
+                status_code=413,
+                media_type="application/json",
+            )
+        return await call_next(request)
+
 
 class HSTSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
-        # Add HSTS header for HTTPS enforcement
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-        # Additional security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -336,6 +356,7 @@ class HSTSMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(HSTSMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

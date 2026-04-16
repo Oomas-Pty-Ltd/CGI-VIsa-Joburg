@@ -1520,29 +1520,40 @@ def _discover_relevant_links(homepage_html: str, base_url: str, keywords: List[s
 
 async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
     """
-    Background task: crawl relevant sub-pages for the given keywords and
-    store results in _deep_scan_cache. Never called on the hot path.
+    Background task: crawl the CGI homepage + relevant sub-pages for the given
+    keywords and store results in _deep_scan_cache. Never called on the hot path.
     """
     logger.info(f"[SCAN L2 BG] Starting background deep crawl for '{cache_key}'")
     deep_content = ""
     try:
-        homepage_html = await _fetch_with_retry("https://www.cgijoburg.gov.in/")
-        relevant_urls = _discover_relevant_links(
-            homepage_html, "https://www.cgijoburg.gov.in/", keywords
-        )
+        homepage_url  = "https://www.cgijoburg.gov.in/"
+        homepage_html = await _fetch_with_retry(homepage_url)
+
+        # Extract content from the homepage itself (not just use it for link discovery)
+        homepage_lines = _clean_html_text(homepage_html)
+        homepage_text  = "\n".join(homepage_lines[:150])
+
+        relevant_urls = _discover_relevant_links(homepage_html, homepage_url, keywords)
         # Add known sub-pages whose path matches a keyword
         for sub in CGI_SUB_PAGES:
             path = urlparse(sub).path.lower()
             if any(k in path for k in keywords) and sub not in relevant_urls:
                 relevant_urls.append(sub)
 
+        # Fetch sub-pages in parallel
+        page_parts = []
+
+        # Include homepage content first if it has keyword matches
+        homepage_matched = _extract_matching_lines(keywords, homepage_text, max_lines=20)
+        if homepage_matched:
+            page_parts.append("[cgijoburg.gov.in — homepage]\n" + "\n".join(homepage_matched))
+
         if relevant_urls:
-            logger.info(f"[SCAN L2 BG] Crawling {len(relevant_urls)} pages for '{cache_key}'")
+            logger.info(f"[SCAN L2 BG] Crawling {len(relevant_urls)} sub-pages for '{cache_key}'")
             pages = await asyncio.gather(
                 *[_fetch_page_text(url) for url in relevant_urls],
                 return_exceptions=True,
             )
-            page_parts = []
             for url, page_text in zip(relevant_urls, pages):
                 if isinstance(page_text, Exception) or not page_text:
                     continue
@@ -1550,9 +1561,10 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
                 if matched:
                     page_label = url.rstrip("/").split("/")[-1] or "page"
                     page_parts.append(f"[{page_label}]\n" + "\n".join(matched))
-            if page_parts:
-                deep_content = "\n\n".join(page_parts)
-                logger.info(f"[SCAN L2 BG] Found content in {len(page_parts)} pages for '{cache_key}'")
+
+        if page_parts:
+            deep_content = "\n\n".join(page_parts)
+            logger.info(f"[SCAN L2 BG] Found content in {len(page_parts)} pages for '{cache_key}'")
     except Exception as e:
         logger.warning(f"[SCAN L2 BG] Crawl failed for '{cache_key}': {e}")
 
@@ -1564,6 +1576,120 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
     logger.info(f"[SCAN L2 BG] Cache updated for '{cache_key}'")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PERIODIC BACKGROUND CRAWL — stores full CGI site into MongoDB
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CGI_CRAWL_INTERVAL_SECONDS = 6 * 3600   # re-crawl every 6 hours
+_cgi_crawl_running = False
+
+
+async def _store_crawl_to_mongodb(url: str, content: str, category: str = "general"):
+    """Write a crawled page's content back to MongoDB knowledge_base."""
+    try:
+        from database import get_database
+        db = await get_database()
+        title = f"[BGCrawl] {url}"
+        await db.knowledge_base.update_one(
+            {"title": title},
+            {
+                "$set": {
+                    "title":           title,
+                    "category":        category,
+                    "question":        f"Information from {url}",
+                    "answer":          content,
+                    "keywords":        [],
+                    "source":          f"background_crawl:{url}",
+                    "source_verified": False,
+                    "status":          "active",
+                    "auto_generated":  True,
+                    "updated_at":      datetime.now(timezone.utc).isoformat(),
+                },
+                "$setOnInsert": {
+                    "id":         f"bgcrawl_{hashlib.md5(url.encode()).hexdigest()[:12]}",
+                    "version":    1,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": "periodic_crawl",
+                },
+            },
+            upsert=True,
+        )
+        logger.info(f"[BGCrawl] Stored {len(content)} chars from {url} → MongoDB")
+    except Exception as exc:
+        logger.warning(f"[BGCrawl] Failed to store {url}: {exc}")
+
+
+_CGI_URL_CATEGORY = {
+    "passport":  "passport",
+    "visa":      "visa",
+    "oci":       "oci",
+    "fee":       "fees",
+    "contact":   "office",
+    "emergency": "emergency",
+    "consular":  "consular",
+    "police":    "consular",
+}
+
+
+async def _do_cgi_full_crawl():
+    """
+    Crawl https://www.cgijoburg.gov.in/ and all known sub-pages.
+    Store full page text into MongoDB so hybrid_search Layer 1 benefits
+    from up-to-date live content on the next query.
+    """
+    global _cgi_crawl_running
+    if _cgi_crawl_running:
+        logger.debug("[BGCrawl] Full CGI crawl already in progress — skipping")
+        return
+    _cgi_crawl_running = True
+    try:
+        all_urls = ["https://www.cgijoburg.gov.in/"] + list(CGI_SUB_PAGES)
+        logger.info(f"[BGCrawl] Starting full CGI crawl ({len(all_urls)} URLs)")
+
+        # Use _fetch_with_retry directly so the 5-min rate limiter doesn't block
+        # an intentional periodic crawl (rate limiter is for the hot query path only)
+        results = await asyncio.gather(
+            *[_fetch_with_retry(url) for url in all_urls],
+            return_exceptions=True,
+        )
+        stored = 0
+        for url, html in zip(all_urls, results):
+            if isinstance(html, Exception) or not html:
+                continue
+            lines = _clean_html_text(html)
+            text  = "\n".join(lines[:150])
+            if len(text.strip()) < 50:
+                continue
+            _record_fetch_success(url)   # update last-fetched so rate limiter stays accurate
+            # Derive category from URL path
+            path = urlparse(url).path.lower()
+            category = next(
+                (cat for seg, cat in _CGI_URL_CATEGORY.items() if seg in path),
+                "general",
+            )
+            await _store_crawl_to_mongodb(url, text, category)
+            stored += 1
+
+        logger.info(f"[BGCrawl] Full CGI crawl complete — {stored}/{len(all_urls)} pages stored")
+    except Exception as exc:
+        logger.warning(f"[BGCrawl] Full CGI crawl failed: {exc}")
+    finally:
+        _cgi_crawl_running = False
+
+
+async def start_periodic_cgi_crawl():
+    """
+    Periodic loop: crawl all CGI pages and store to MongoDB every
+    _CGI_CRAWL_INTERVAL_SECONDS (default 6 hours).
+    Runs one immediate crawl at startup, then loops.
+    Call once at server startup via asyncio.create_task().
+    """
+    logger.info(f"[BGCrawl] Periodic CGI crawl started (interval: {_CGI_CRAWL_INTERVAL_SECONDS // 3600}h)")
+    while True:
+        await _do_cgi_full_crawl()
+        await asyncio.sleep(_CGI_CRAWL_INTERVAL_SECONDS)
 
 
 # Tracks which cache keys have a background crawl already in flight

@@ -45,40 +45,75 @@ _STOP_WORDS = {
     "need", "want", "get", "tell", "know", "please", "about",
 }
 
+# Holiday / event name aliases: maps variant spellings to all equivalent forms.
+# When any key is found in a query, all its aliases are also searched.
+_TERM_ALIASES: Dict[str, List[str]] = {
+    "eid":      ["id", "idul", "eidul"],
+    "id":       ["eid", "idul", "eidul"],
+    "fitr":     ["fitar", "fitri"],
+    "adha":     ["azha"],
+    "muharram": ["moharram"],
+    "diwali":   ["deepavali"],
+    "holi":     ["holika"],
+}
+
+
+def _normalize(text: str) -> str:
+    """Lower-case and replace hyphens/underscores with spaces for fuzzy matching."""
+    return re.sub(r'[-_]+', ' ', text.lower())
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_keywords(query: str) -> List[str]:
-    words = re.findall(r'\b[a-zA-Z]{3,}\b', query.lower())
-    return [w for w in words if w not in _STOP_WORDS]
+    """Extract keywords; also captures hyphenated compound words as whole tokens."""
+    norm = _normalize(query)
+    words = re.findall(r'\b[a-zA-Z]{3,}\b', norm)
+    base = [w for w in words if w not in _STOP_WORDS]
+    # Also keep full hyphenated tokens from original query (e.g. "id-ul-fitr")
+    compound = re.findall(r'\b[a-zA-Z]+-(?:[a-zA-Z]+-)*[a-zA-Z]+\b', query.lower())
+    return list(dict.fromkeys(base + compound))  # deduplicate, preserve order
+
+
+def _expand_keywords(keywords: List[str]) -> List[str]:
+    """Add alias variants for known holiday/event name fragments."""
+    expanded = list(keywords)
+    for kw in keywords:
+        for alias in _TERM_ALIASES.get(kw, []):
+            if alias not in expanded:
+                expanded.append(alias)
+    return expanded
 
 
 def _count_hits(keywords: List[str], content: str) -> int:
     if not content or not keywords:
         return 0
+    expanded = _expand_keywords(keywords)
     return sum(
         1 for line in content.split("\n")
-        if line.strip() and any(k in line.lower() for k in keywords)
+        if line.strip() and any(k in _normalize(line) for k in expanded)
     )
 
 
-def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 25) -> List[str]:
+def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 30) -> List[str]:
     """Return lines ranked by number of keyword matches (highest first).
 
     Lines matching more keywords (e.g. both 'lost' and 'passport') float to
     the top so compound queries return specific content before generic lines.
+    Also matches normalized/alias variants for holiday and event names.
     """
     if not content or not keywords:
         return []
+    expanded = _expand_keywords(keywords)
     scored = []
     for line in content.split("\n"):
         stripped = line.strip()
         if not stripped:
             continue
-        low = stripped.lower()
-        count = sum(1 for k in keywords if k in low)
+        norm_line = _normalize(stripped)
+        count = sum(1 for k in expanded if k in norm_line)
         if count > 0:
             scored.append((count, stripped))
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -194,14 +229,14 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     try:
         from services.knowledge_service import knowledge_service
         await knowledge_service.initialize()
-        # Fetch top matches — use limit=5 so fee+service combos both surface
-        kb_results = await knowledge_service.search(query, limit=5)
+        # Fetch top 20 so full PDFs (e.g. holiday calendars with many sections)
+        # and multi-topic queries (fee + service combos) all surface
+        kb_results = await knowledge_service.search(query, limit=20)
         if kb_results:
             top_score = knowledge_service._calculate_relevance(query.lower(), kb_results[0])
             if top_score >= _KB_CONFIDENCE_THRESHOLD:
                 logger.debug(f"[HYBRID L1] '{cache_key}' — MongoDB hit (score {top_score:.1f})")
-                # For fee queries, include ALL entries that scored above threshold
-                # so e.g. "visa fees" returns both the Visa entry AND the Fees entry
+                # Include ALL entries that scored above threshold
                 strong = [
                     e for e in kb_results
                     if knowledge_service._calculate_relevance(query.lower(), e) >= _KB_CONFIDENCE_THRESHOLD
@@ -210,21 +245,36 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     except Exception as e:
         logger.warning(f"[HYBRID L1] MongoDB search failed: {e}")
 
-    # ── Layer 2: in-memory scraped cache ─────────────────────────────
-    # Only web-scraped content is scanned here. Uploaded PDF docs are
-    # handled exclusively at Layer 1 (MongoDB relevance scoring) so they
-    # are never injected into unrelated queries via keyword leakage.
-    cgi_content = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
-    vfs_content = knowledge_base.get("vfs_global", {}).get("page_content", "")
-    combined    = cgi_content + "\n" + vfs_content
+    # ── Layer 2: PDF documents first → knowledge scraper fallback ───────
+    # Include the original query phrase so compound terms score higher
+    phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
 
-    hits = _count_hits(keywords, combined)
-    if hits >= _CACHE_HIT_THRESHOLD:
-        logger.debug(f"[HYBRID L2] '{cache_key}' — scraped cache hit ({hits} lines)")
-        # Include the original query phrase so compound terms (e.g. "lost passport")
-        # score higher than lines matching only a single keyword
-        phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
+    uploaded_content = knowledge_base.get("uploaded_docs", {}).get("page_content", "")
+    cgi_content      = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
+    vfs_content      = knowledge_base.get("vfs_global", {}).get("page_content", "")
+
+    pdf_hits = _count_hits(keywords, uploaded_content)
+
+    # 2a: Uploaded PDF documents have sufficient hits — return PDF content directly
+    if pdf_hits >= _CACHE_HIT_THRESHOLD:
+        logger.debug(f"[HYBRID L2a] '{cache_key}' — PDF match ({pdf_hits} lines)")
+        uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=50)
+        if uploaded_lines:
+            return "[Uploaded Documents]\n" + "\n".join(uploaded_lines)
+
+    # 2b: PDF insufficient — check knowledge scraper (CGI Joburg + VFS)
+    scraper_hits = _count_hits(keywords, cgi_content + "\n" + vfs_content)
+    if scraper_hits >= _CACHE_HIT_THRESHOLD:
+        logger.debug(
+            f"[HYBRID L2b] '{cache_key}' — PDF insufficient ({pdf_hits} hits), "
+            f"knowledge scraper hit ({scraper_hits} lines)"
+        )
         parts = []
+        # Prepend any partial PDF matches so they're still visible
+        if pdf_hits > 0:
+            uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=20)
+            if uploaded_lines:
+                parts.append("[Uploaded Documents]\n" + "\n".join(uploaded_lines))
         cgi_lines = _extract_matching_lines(phrase_kws, cgi_content)
         vfs_lines = _extract_matching_lines(phrase_kws, vfs_content)
         if cgi_lines:

@@ -49,6 +49,94 @@ from fastapi.responses import Response as FastAPIResponse
 
 load_dotenv()
 
+# ── Language support ──────────────────────────────────────────────────────────
+_LANG_NAMES: dict[str, str] = {
+    # English
+    "en":  "English",
+    # Indian languages
+    "hi":  "Hindi",
+    "bn":  "Bengali",
+    "mr":  "Marathi",
+    "te":  "Telugu",
+    "ta":  "Tamil",
+    "gu":  "Gujarati",
+    "ur":  "Urdu",
+    "kn":  "Kannada",
+    "or":  "Odia",
+    "ml":  "Malayalam",
+    "pa":  "Punjabi",
+    "as":  "Assamese",
+    "mai": "Maithili",
+    "sa":  "Sanskrit",
+    "sat": "Santali",
+    "ks":  "Kashmiri",
+    "ne":  "Nepali",
+    "sd":  "Sindhi",
+    "doi": "Dogri",
+    "kok": "Konkani",
+    "mni": "Manipuri",
+    "brx": "Bodo",
+    "mwr": "Marwari",
+    # South African languages
+    "zu":  "Zulu",
+    "xh":  "Xhosa",
+    "af":  "Afrikaans",
+    "nso": "Sepedi",
+    "tn":  "Setswana",
+    "st":  "Sesotho",
+    "ts":  "Xitsonga",
+    "ss":  "siSwati",
+    "ve":  "Tshivenda",
+    "nr":  "isiNdebele",
+    # International languages
+    "ar":  "Arabic",
+    "fr":  "French",
+    "sw":  "Swahili",
+    "ha":  "Hausa",
+    "yo":  "Yoruba",
+    "ig":  "Igbo",
+    "am":  "Amharic",
+    "om":  "Oromo",
+}
+
+_LANG_SCRIPT_HINT: dict[str, str] = {
+    # Devanagari-script languages — must NOT use Urdu/Perso-Arabic script
+    "hi":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script (اردو). Do NOT mix languages.",
+    "mr":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script.",
+    "ne":  "You MUST write in Devanagari script (देवनागरी).",
+    "sa":  "You MUST write in Devanagari script (देवनागरी).",
+    "doi": "You MUST write in Devanagari script (देवनागरी).",
+    # Urdu — Perso-Arabic script
+    "ur":  "You MUST write in Perso-Arabic script (اردو رسم الخط). Do NOT use Devanagari script.",
+    # Punjabi — Gurmukhi script (not Shahmukhi/Arabic)
+    "pa":  "You MUST write in Gurmukhi script (ਗੁਰਮੁਖੀ). Do NOT use Shahmukhi/Perso-Arabic script.",
+    # Tamil — ensure Tamil script not Telugu or similar
+    "ta":  "You MUST write in Tamil script (தமிழ் எழுத்து). Do NOT use any other South Indian script.",
+    "te":  "You MUST write in Telugu script (తెలుగు లిపి).",
+    "kn":  "You MUST write in Kannada script (ಕನ್ನಡ ಲಿಪಿ).",
+    "ml":  "You MUST write in Malayalam script (മലയാളം ലിപി).",
+    "gu":  "You MUST write in Gujarati script (ગુજરાતી લિપિ).",
+    "bn":  "You MUST write in Bengali script (বাংলা লিপি).",
+    "or":  "You MUST write in Odia script (ଓଡ଼ିଆ ଲିପି).",
+    "as":  "You MUST write in Bengali-Assamese script (অসমীয়া লিপি).",
+}
+
+def _lang_instruction(code: str) -> str:
+    """Return the LANGUAGE system-prompt line for the given language code."""
+    code = (code or "en").lower()
+    name = _LANG_NAMES.get(code, "English")
+    if code == "en":
+        return "LANGUAGE: Respond in English."
+    script_hint = _LANG_SCRIPT_HINT.get(code, "")
+    script_line = f" {script_hint}" if script_hint else ""
+    return (
+        f"LANGUAGE: The user has selected {name} as their preferred language. "
+        f"You MUST respond entirely in {name}.{script_line} "
+        f"Even if the user writes in English, always reply in {name}. "
+        f"Proper nouns, addresses, phone numbers, email addresses, URLs, and "
+        f"tracking IDs must remain unchanged (do not translate them)."
+    )
+
 # When False the application/form-filling flow is hidden from users.
 # Set APPLICATION_FLOW_ENABLED=true in .env to re-enable it.
 _FLOW_ENABLED: bool = os.getenv("APPLICATION_FLOW_ENABLED", "true").lower() == "true"
@@ -214,9 +302,12 @@ async def chat(request: ChatRequest, http_request: Request):
         IntentCategory.PIO:      "oci",  # PIO converts to OCI
     }
 
-    # Try deterministic response first (no LLM cost)
+    # Try deterministic response first (no LLM cost).
+    # Skip for non-English — deterministic strings are English-only; let LLM translate.
     deterministic_response = get_deterministic_response(intent_result)
-    if deterministic_response and not request.image_base64 and not is_tracking_query(sanitized_message):
+    if (deterministic_response and not request.image_base64
+            and not is_tracking_query(sanitized_message)
+            and (not request.language or request.language == "en")):
         user_id = request.user_id or "guest"
         session = await session_manager.get_or_create_session(
             channel="web",
@@ -324,9 +415,13 @@ async def chat(request: ChatRequest, http_request: Request):
     else:
         flow_response, needs_llm, current_step = None, True, "idle"
 
+    # For non-English: flow hardcoded strings are English — route through LLM to translate
+    if flow_response is not None and not needs_llm and request.language and request.language != "en":
+        needs_llm = True
+
     if flow_response is not None and not needs_llm:
         bot_response = flow_response
-    elif flow_response is not None and current_step == "info_shown":
+    elif flow_response is not None and current_step == "info_shown" and (not request.language or request.language == "en"):
         bot_response = flow_response
     else:
         # LLM needed (info query, question during pause, etc.)
@@ -341,25 +436,53 @@ async def chat(request: ChatRequest, http_request: Request):
                 f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
             )
 
+        # When a known-good English answer exists (flow or deterministic), pass it as
+        # translation context so the LLM translates it rather than searching from scratch.
+        _flow_translate_hint = ""
+        if request.language and request.language != "en":
+            _translate_source = flow_response if flow_response is not None else deterministic_response
+            if _translate_source:
+                _flow_translate_hint = (
+                    f"\nINTENDED RESPONSE (translate this exactly into the user's selected language, "
+                    f"keeping all proper nouns, addresses, phone numbers, email addresses, URLs, "
+                    f"and IDs unchanged):\n{_translate_source}\n"
+                )
+
         _base_system_message = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 
-LANGUAGE: Always respond in English only, regardless of what language the user writes in.
+{_lang_instruction(request.language or "en")}
 
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
+- Do NOT ask clarifying questions like "What information do you need?" — provide the complete relevant answer directly.
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
+- When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
+
+OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
+
+CONSULATE FACTS:
+- Acting Consul General: Mr. Harish Kumar
+- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
+- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
+- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
+- Website: www.cgijoburg.gov.in
+- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces
+- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
+- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
+- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
 {svc_docs_hint}
-OFFICIAL DATA (sourced from cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents):
+ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
 {context_info}
 
-FALLBACK RULE: If the information is not in the data above, say so briefly and direct the user to:
+IF the answer is not in any of the data above, say so briefly and direct the user to:
   📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
   🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
   🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/"""
+  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/{_flow_translate_hint}"""
 
         api_key = os.environ.get('EMERGENT_LLM_KEY')
         chat_instance = LlmChat(
@@ -465,7 +588,9 @@ async def chat_stream(request: ChatRequest):
     # Only use deterministic shortcut for pure greetings / FAQs with NO active
     # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
     # reach process_flow so the application state-machine runs correctly.
-    if deterministic and not is_apply_intent(sanitized_message) and not is_tracking_query(sanitized_message):
+    # Skip for non-English — deterministic strings are English-only; let LLM translate.
+    if (deterministic and not is_apply_intent(sanitized_message) and not is_tracking_query(sanitized_message)
+            and (not request.language or request.language == "en")):
         # Quick peek at flow state — skip deterministic if user is mid-flow
         _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
         if _quick_flow.get("state", "idle") == "idle":
@@ -537,6 +662,10 @@ async def chat_stream(request: ChatRequest):
         flow_response, needs_llm, current_step = None, True, "idle"
 
     # ── Non-LLM flow response ─────────────────────────────────────────
+    # For non-English: flow hardcoded strings are English — route through LLM to translate
+    if _FLOW_ENABLED and flow_response is not None and not needs_llm and request.language and request.language != "en":
+        needs_llm = True
+
     if _FLOW_ENABLED and flow_response is not None and not needs_llm:
         full_text = flow_response
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
@@ -563,24 +692,34 @@ async def chat_stream(request: ChatRequest):
         docs = "\n".join(f"  • {d}" for d in svc["documents"])
         svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
 
+    # When a known-good English answer exists (flow or deterministic), pass it as
+    # translation context so the LLM translates it rather than searching from scratch.
+    _stream_flow_translate_hint = ""
+    if request.language and request.language != "en":
+        _stream_translate_source = flow_response if flow_response is not None else deterministic
+        if _stream_translate_source:
+            _stream_flow_translate_hint = (
+                f"\nINTENDED RESPONSE (translate this exactly into the user's selected language, "
+                f"keeping all proper nouns, addresses, phone numbers, email addresses, URLs, "
+                f"and IDs unchanged):\n{_stream_translate_source}\n"
+            )
+
     system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 
-CRITICAL — DATA SOURCE RULE:
-Answer ONLY using the OFFICIAL DATA provided below.
-The data comes from: www.cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents (FAQs, events, notices).
-Do NOT use general training knowledge. Do NOT invent or add information not in the data below.
-If the answer is not in the data, say so and direct the user to contact the Consulate directly.
-
-LANGUAGE: Always respond in English only.
+{_lang_instruction(request.language or "en")}
 
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
+- Do NOT ask clarifying questions like "What information do you need?" — provide the complete relevant answer directly.
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
+- When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
 
-KEY CONSULATE FACTS (always use these for contact/location questions):
+OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
+
+CONSULATE FACTS:
 - Acting Consul General: Mr. Harish Kumar
 - Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
 - Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
@@ -592,14 +731,14 @@ KEY CONSULATE FACTS (always use these for contact/location questions):
 - VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
 - VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
 {svc_docs_hint}
-OFFICIAL DATA (cgijoburg.gov.in | vfsglobal.com | uploaded documents):
+ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
 {llm_context}
 
-IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
+IF the answer is not in any of the data above, say so and direct the user to:
   📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
   🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
   🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/"""
+  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/{_stream_flow_translate_hint}"""
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     chat_instance = LlmChat(
@@ -938,6 +1077,45 @@ async def get_session(session_id: str):
     
     return session
 
+@router.post("/session/{session_id}/close")
+async def close_session(session_id: str, reason: str = "language_changed"):
+    """
+    Mark a session as closed in the DB and persist its final state.
+    Called by the frontend when the user changes language so the old
+    conversation is cleanly archived before a fresh session begins.
+    """
+    db = await get_database()
+    result = await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$set": {
+            "closed_at": datetime.now(timezone.utc).isoformat(),
+            "close_reason": reason,
+            "status": "closed",
+        }}
+    )
+    if result.matched_count == 0:
+        # Session not found — not an error, frontend may call with a stale id
+        return {"closed": False, "reason": "session_not_found"}
+    return {"closed": True, "session_id": session_id}
+
+
+class TTSRequest(BaseModel):
+    text: str
+    language: Optional[str] = "en"
+
+@router.post("/tts")
+async def text_to_speech(request: TTSRequest):
+    """Convert bot response text to speech using OpenAI TTS (supports all languages)."""
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+    # Truncate to avoid very large TTS calls
+    text = request.text.strip()[:3000]
+    audio_base64 = await voice_service.text_to_speech(text, request.language or "en")
+    if not audio_base64:
+        raise HTTPException(status_code=500, detail="TTS generation failed")
+    return {"audio_base64": audio_base64}
+
+
 @router.post("/voice-input")
 async def voice_input(
     audio: UploadFile = File(...),
@@ -1004,6 +1182,7 @@ class WidgetChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     mode: Optional[str] = "concise"  # concise or detailed
+    language: Optional[str] = "en"
 
 class WidgetChatResponse(BaseModel):
     session_id: str
@@ -1054,7 +1233,7 @@ RESPONSE LENGTH GUIDE:
 - Process question (how to apply?) → Numbered steps, brief
 - Document question (what documents?) → Bullet list only
 
-LANGUAGE: Always respond in English only.
+{_lang_instruction(request.language or "en")}
 
 EXAMPLE GOOD RESPONSES:
 
