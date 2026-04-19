@@ -552,15 +552,29 @@ async def _handle_message(
     if is_menu_trigger and not selected_id:
         # Send greeting + advisory as plain text first
         greeting_text = (
-            "🙏 नमस्ते भाइयो और बहनो!\n\n"
+            "🙏 नमस्ते भाईयो और बहनो!\n\n"
             "मैं हूं \"सेवा सेतु स्वचालित सहायक (बॉट)\", आपकी सेवा में सदैव तत्पर।\n\n"
-            "🗣️ भारतीय काउंसलर सर्विसेज के साथ हाजिर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
+            "🗣 भारतीय काउंसलर सर्विसेज के साथ हाज़िर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
             "आज मैं आपकी मदद करने में सक्षम हूं।\n\n"
             "Namaste, brothers and sisters!\n\n"
             "I am \"Seva Setu Automated Assistant (Bot)\", always ready to serve you.\n\n"
-            "🗣️ Here to assist with your Indian consular service queries. "
+            "🗣 Here to assist with your Indian consular service queries. "
             "Please let me know how I can help you today. I am fully equipped to assist you.\n\n"
-            "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*"
+            "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*\n"
+            "The Consulate does not make phone calls demanding money for fines, penalties, or any other reason. "
+            "It is not within our mandate to conduct criminal investigations.\n\n"
+            "Do not engage with such callers under any circumstance.\n\n"
+            "• Do not share any personal or financial information.\n"
+            "• If you receive a suspicious call, note the caller's number and any details.\n"
+            "• Report it immediately to your local police station.\n\n"
+            "Be vigilant. Stay safe.\n\n"
+            "🗣 *Fraud Alert: Extortion Calls Using Spoofed Numbers*\n"
+            "It has come to our attention that certain individuals are fraudulently spoofing the Consulate General's "
+            "phone numbers to contact persons of Indian origin. These calls attempt to intimidate recipients with "
+            "false legal threats and demand payments, claiming affiliation with the Consulate General or Government of India agencies.\n\n"
+            "Please be advised:\n\n"
+            "• No representative of the Consulate General will call to request payments for any governmental purpose.\n"
+            "• If you receive such a call, note the caller's details and report the incident to your local police immediately."
         )
         await ics_waba.send_text(phone, greeting_text, from_override=waba_number)
         return
