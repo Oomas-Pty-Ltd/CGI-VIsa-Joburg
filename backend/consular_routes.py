@@ -1088,6 +1088,7 @@ async def close_session(session_id: str, reason: str = "language_changed"):
     result = await db.chat_sessions.update_one(
         {"id": session_id},
         {"$set": {
+            "is_active": False,
             "closed_at": datetime.now(timezone.utc).isoformat(),
             "close_reason": reason,
             "status": "closed",
@@ -1183,6 +1184,7 @@ class WidgetChatRequest(BaseModel):
     session_id: Optional[str] = None
     mode: Optional[str] = "concise"  # concise or detailed
     language: Optional[str] = "en"
+    image_base64: Optional[str] = None
 
 class WidgetChatResponse(BaseModel):
     session_id: str
@@ -1263,8 +1265,18 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
         system_message=_base_system_message
     ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
-    user_message = UserMessage(text=sanitized_message)
-    
+    if request.image_base64:
+        try:
+            normalized_b64, media_type = _normalize_image(request.image_base64)
+            user_message = UserMessage(
+                text=sanitized_message or "Please describe what you see in this document/image and help me with it.",
+                file_contents=[ImageContent(image_base64=normalized_b64, media_type=media_type)]
+            )
+        except Exception:
+            user_message = UserMessage(text=sanitized_message or "Document uploaded.")
+    else:
+        user_message = UserMessage(text=sanitized_message)
+
     try:
         bot_response = await chat_instance.send_message(user_message)
     except Exception as e:

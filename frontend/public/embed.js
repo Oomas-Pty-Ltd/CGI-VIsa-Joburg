@@ -1,512 +1,483 @@
 /**
- * ====================================================================
- * SEVA SETU BOT - EMBED SCRIPT
- * ====================================================================
- * 
- * Add this script to your website to embed the Seva Setu Bot chat widget.
- * 
- * INSTALLATION:
- * Add the following code before the </body> tag of your website:
- * 
- * <script src="https://consulai.preview.emergentagent.com/embed.js"></script>
- * <script>
- *   SevaSetu.init({
- *     position: 'bottom-right',  // or 'bottom-left'
- *     primaryColor: '#E06F2C',
- *     greeting: 'Namaste! How can I help you?'
- *   });
- * </script>
- * 
- * ====================================================================
+ * ════════════════════════════════════════════════════════
+ * SEVA SETU BOT — EMBEDDABLE WIDGET v2.0
+ * Consulate General of India, Johannesburg
+ * ════════════════════════════════════════════════════════
+ *
+ * USAGE — add before </body> on any website:
+ *
+ *   <script src="https://YOUR_DOMAIN/embed.js"></script>
+ *   <script>
+ *     SevaSetu.init({
+ *       position:     'bottom-right',   // or 'bottom-left'
+ *       primaryColor: '#E85D1A',
+ *       autoOpen:     false,            // open on page load
+ *       openOnClick:  false,            // open on any page click
+ *     });
+ *   </script>
+ *
+ * PUBLIC METHODS:
+ *   SevaSetu.open()          — open the chat
+ *   SevaSetu.close()         — close the chat
+ *   SevaSetu.sendMessage(t)  — send a message programmatically
+ * ════════════════════════════════════════════════════════
  */
 
-(function() {
+(function () {
   'use strict';
-  
-  // Configuration - Dynamic URL detection for deployment compatibility
-  const BOT_URL = window.location.origin;
-  const API_URL = BOT_URL + '/api/consular/chat-widget';
-  
-  // Default settings
+
+  // ── CONFIG ──────────────────────────────────────────────
+  const BOT_URL   = (function(){
+    const s = document.currentScript;
+    if(s && s.src) return new URL(s.src).origin;
+    return window.location.origin;
+  })();
+  const CHAT_API  = BOT_URL + '/api/consular/chat-widget';
+
+  const AVATAR_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%230B1F3A'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-size='36' fill='%23E85D1A'%3E🙏%3C/text%3E%3C/svg%3E";
+
+  const LANGS = [
+    {code:'en', label:'English'},
+    {code:'hi', label:'हिंदी'},
+    {code:'bn', label:'বাংলা'},
+    {code:'mr', label:'मराठी'},
+    {code:'te', label:'తెలుగు'},
+    {code:'ta', label:'தமிழ்'},
+  ];
+
+  const QUICK_ACTIONS = [
+    {icon:'🛂', label:'Passport Renewal', query:'Passport renewal process'},
+    {icon:'🌍', label:'Visa Services',    query:'Visa services information'},
+    {icon:'🪪', label:'OCI Card',         query:'OCI card application'},
+    {icon:'📄', label:'Attestation',      query:'Document attestation services'},
+    {icon:'📅', label:'Appointment',      query:'Appointment booking'},
+    {icon:'📞', label:'Emergency',        query:'Emergency consular contact'},
+  ];
+
+  // ── STATE ────────────────────────────────────────────────
+  let isOpen      = false;
+  let isLoading   = false;
+  let sessionId   = 'widget_' + Math.random().toString(36).substr(2,9) + '_' + Date.now();
+  let currentLang = 'en';
+  let welcomed    = false;
+  let settings    = {};
+  let typingEl    = null;
+
   const defaults = {
-    position: 'bottom-right',
-    primaryColor: '#E06F2C',
-    greeting: '🙏 Namaste! How can I help you with consular services?',
-    headerTitle: 'Seva Setu Assistant',
-    headerSubtitle: 'Consulate General of India',
-    placeholder: 'Type your question...',
-    zIndex: 9999
+    position:     'bottom-right',
+    primaryColor: '#E85D1A',
+    accentColor:  '#1A57D4',
+    autoOpen:     false,
+    openOnClick:  false,
+    zIndex:       9999,
   };
-  
-  // State
-  let isOpen = false;
-  let isMinimized = false;
-  let sessionId = null;
-  let messages = [];
-  let settings = {};
-  
-  // Generate unique session ID
-  function generateSessionId() {
-    return 'widget_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+
+  // ── CSS ──────────────────────────────────────────────────
+  function injectStyles() {
+    const c = settings.primaryColor;
+    const a = settings.accentColor;
+    const pos = settings.position === 'bottom-left' ? 'left:28px' : 'right:28px';
+    const z = settings.zIndex;
+
+    const css = `
+#ss-widget-root*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif}
+/* FAB */
+#ss-fab{position:fixed;${pos};bottom:28px;z-index:${z};width:64px;height:64px;border-radius:50%;background:#fff;border:3px solid ${c};cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.18);transition:all .25s cubic-bezier(.34,1.56,.64,1);overflow:hidden;display:flex;align-items:center;justify-content:center}
+#ss-fab:hover{transform:scale(1.1)}
+#ss-fab img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.ss-badge{position:absolute;top:-1px;right:-1px;width:16px;height:16px;border-radius:50%;background:#16A34A;border:2px solid #fff}
+.ss-badge::after{content:'';position:absolute;inset:3px;border-radius:50%;background:rgba(255,255,255,.7);animation:ss-ping 1.6s ease-out infinite}
+@keyframes ss-ping{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.5);opacity:0}}
+/* POPUP */
+#ss-popup{position:fixed;${pos};bottom:104px;z-index:${z - 1};width:390px;background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(11,31,58,.22),0 4px 16px rgba(0,0,0,.1);display:flex;flex-direction:column;overflow:hidden;transform:scale(0.85) translateY(20px);transform-origin:bottom right;opacity:0;pointer-events:none;transition:all .3s cubic-bezier(.34,1.2,.64,1);max-height:90vh}
+#ss-popup.ss-open{transform:scale(1) translateY(0);opacity:1;pointer-events:all}
+/* HEADER */
+.ss-header{background:linear-gradient(135deg,#0B1F3A,#1A3A6B);padding:0;position:relative;overflow:hidden}
+.ss-header::before{content:'';position:absolute;right:-30px;top:-30px;width:130px;height:130px;border-radius:50%;background:rgba(232,93,26,.12)}
+.ss-header::after{content:'';position:absolute;left:-20px;bottom:-20px;width:100px;height:100px;border-radius:50%;background:rgba(26,87,212,.12)}
+.ss-htop{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;position:relative;z-index:1}
+.ss-hav{display:flex;align-items:center;gap:12px}
+.ss-av{width:46px;height:46px;border-radius:50%;border:2.5px solid ${c};overflow:hidden;flex-shrink:0;box-shadow:0 0 0 3px rgba(232,93,26,.2)}
+.ss-av img{width:100%;height:100%;object-fit:cover}
+.ss-hname{font-size:14px;font-weight:700;color:#fff;line-height:1.2}
+.ss-hsub{font-size:10.5px;color:rgba(255,255,255,.6);margin-top:2px}
+.ss-hstatus{display:flex;align-items:center;gap:5px;margin-top:4px}
+.ss-sdot{width:7px;height:7px;border-radius:50%;background:#4ADE80;animation:ss-pulse 1.4s ease infinite}
+@keyframes ss-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.ss-stext{font-size:10px;color:#4ADE80;font-weight:500}
+.ss-hbtns{display:flex;gap:6px;position:relative;z-index:1}
+.ss-hbtn{width:30px;height:30px;border-radius:7px;border:none;background:rgba(255,255,255,.12);color:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:background .2s}
+.ss-hbtn:hover{background:rgba(255,255,255,.22);color:#fff}
+/* LANG BAR */
+.ss-langs{background:rgba(0,0,0,.22);padding:7px 14px;display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:1}
+.ss-langs::-webkit-scrollbar{display:none}
+.ss-lang-lbl{font-size:9.5px;color:rgba(255,255,255,.4);white-space:nowrap;margin-right:2px;font-weight:500;letter-spacing:.04em}
+.ss-ltag{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);color:rgba(255,255,255,.78);font-size:9.5px;font-weight:500;padding:3px 8px;border-radius:9px;white-space:nowrap;cursor:pointer;transition:all .2s;flex-shrink:0}
+.ss-ltag:hover,.ss-ltag.ss-active{background:rgba(232,93,26,.7);border-color:${c};color:#fff}
+.ss-lmore{background:rgba(26,87,212,.45);border:1px solid rgba(26,87,212,.35);color:#C2D9FF;font-size:9.5px;font-weight:600;padding:3px 8px;border-radius:9px;white-space:nowrap;flex-shrink:0;cursor:default}
+/* ADVISORY */
+.ss-advisory{background:#FFF9EC;border-bottom:1px solid #FDE68A;padding:7px 13px;display:flex;align-items:flex-start;gap:7px}
+.ss-advisory-ico{font-size:13px;flex-shrink:0;margin-top:1px}
+.ss-advisory-txt{font-size:10.5px;color:#92400E;line-height:1.5}
+.ss-advisory-txt strong{font-weight:600}
+/* MESSAGES */
+.ss-msgs{flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:10px;background:#F8F9FB;min-height:180px;max-height:320px;scrollbar-width:thin;scrollbar-color:rgba(11,31,58,.12) transparent}
+.ss-msgs::-webkit-scrollbar{width:4px}
+.ss-msgs::-webkit-scrollbar-thumb{background:rgba(11,31,58,.14);border-radius:2px}
+.ss-bot{display:flex;gap:8px;align-items:flex-end}
+.ss-bot-av{width:28px;height:28px;border-radius:50%;flex-shrink:0;border:1.5px solid ${c};overflow:hidden}
+.ss-bot-av img{width:100%;height:100%;object-fit:cover}
+.ss-bbub{background:#fff;border:1px solid #E5E7EB;border-radius:14px 14px 14px 4px;padding:9px 12px;max-width:calc(100% - 44px);box-shadow:0 1px 4px rgba(0,0,0,.05);font-size:12.5px;color:#374151;line-height:1.6}
+.ss-bbub p{margin:0 0 4px 0}
+.ss-bbub p:last-child{margin-bottom:0}
+.ss-bbub .ss-mhi{font-size:12px;font-weight:700;color:#0B1F3A;margin-bottom:4px}
+.ss-bbub .ss-mhin{font-size:11px;color:#6B7280;margin-bottom:5px}
+.ss-user{display:flex;justify-content:flex-end}
+.ss-ubub{background:linear-gradient(135deg,${a},#2768F5);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 12px;max-width:75%;font-size:12.5px;line-height:1.6}
+.ss-time{font-size:9.5px;color:#9CA3AF;margin-top:4px;text-align:right}
+.ss-utime{font-size:9.5px;color:rgba(255,255,255,.6);margin-top:4px;text-align:right}
+/* TYPING */
+.ss-typing-dots{display:flex;gap:4px;align-items:center;padding:2px 0}
+.ss-typing-dots span{width:6px;height:6px;border-radius:50%;background:#9CA3AF;animation:ss-blink 1.2s ease infinite}
+.ss-typing-dots span:nth-child(2){animation-delay:.2s}
+.ss-typing-dots span:nth-child(3){animation-delay:.4s}
+@keyframes ss-blink{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+/* QUICK ACTIONS */
+.ss-qa{padding:8px 12px 0;display:flex;gap:6px;flex-wrap:wrap}
+.ss-qbtn{background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8;font-size:10.5px;font-weight:500;padding:5px 10px;border-radius:18px;cursor:pointer;transition:all .2s;white-space:nowrap;font-family:inherit}
+.ss-qbtn:hover{background:#DBEAFE;border-color:#93C5FD}
+/* INPUT */
+.ss-input-area{background:#fff;border-top:1px solid #E5E7EB;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.ss-textarea{width:100%;resize:none;border:1.5px solid #E5E7EB;border-radius:10px;padding:9px 12px;font-family:inherit;font-size:12.5px;color:#374151;outline:none;line-height:1.5;transition:border-color .2s,box-shadow .2s;min-height:64px;max-height:130px;background:#F9FAFB}
+.ss-textarea:focus{border-color:${a};background:#fff;box-shadow:0 0 0 3px rgba(26,87,212,.08)}
+.ss-textarea::placeholder{color:#B0B8C4;font-size:12px}
+.ss-irow{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ss-ilibtn{width:36px;height:36px;border-radius:9px;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all .2s}
+.ss-ilibtn-mic{background:#FFF0E8;color:${c};border:1.5px solid #FDD0B8}
+.ss-ilibtn-mic:hover{background:${c};color:#fff}
+.ss-ilibtn-doc{background:#FFF0E8;color:${c};border:1.5px solid #FDD0B8}
+.ss-ilibtn-doc:hover{background:${c};color:#fff}
+.ss-send{height:36px;padding:0 16px;border-radius:9px;border:none;background:linear-gradient(135deg,${a},#2768F5);color:#fff;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .2s;white-space:nowrap;box-shadow:0 2px 8px rgba(26,87,212,.25)}
+.ss-send:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.ss-send:disabled{background:#9CA3AF;transform:none;box-shadow:none;cursor:not-allowed}
+.ss-footer{text-align:center;padding:5px;font-size:9.5px;color:#9CA3AF;border-top:1px solid #F3F4F6}
+.ss-footer span{color:${c};font-weight:500}
+/* MOBILE */
+@media(max-width:480px){
+  #ss-popup{width:calc(100vw - 16px);right:8px!important;left:8px!important;bottom:88px}
+}
+    `;
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
   }
-  
-  // Create widget HTML
-  function createWidget() {
-    const container = document.createElement('div');
-    container.id = 'seva-setu-widget';
-    container.innerHTML = `
-      <style>
-        #seva-setu-widget * {
-          box-sizing: border-box;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        }
-        
-        .ss-button {
-          position: fixed;
-          ${settings.position === 'bottom-left' ? 'left: 24px;' : 'right: 24px;'}
-          bottom: 24px;
-          width: 60px;
-          height: 60px;
-          border-radius: 50%;
-          background: ${settings.primaryColor};
-          border: none;
-          cursor: pointer;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: transform 0.3s, box-shadow 0.3s;
-          z-index: ${settings.zIndex};
-        }
-        
-        .ss-button:hover {
-          transform: scale(1.1);
-          box-shadow: 0 6px 25px rgba(0,0,0,0.3);
-        }
-        
-        .ss-button svg {
-          width: 28px;
-          height: 28px;
-          fill: white;
-        }
-        
-        .ss-badge {
-          position: absolute;
-          top: -2px;
-          right: -2px;
-          width: 14px;
-          height: 14px;
-          background: #22c55e;
-          border-radius: 50%;
-          border: 2px solid white;
-          animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-        
-        .ss-chat {
-          position: fixed;
-          ${settings.position === 'bottom-left' ? 'left: 24px;' : 'right: 24px;'}
-          bottom: 24px;
-          width: 380px;
-          height: 500px;
-          background: white;
-          border-radius: 16px;
-          box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-          display: none;
-          flex-direction: column;
-          overflow: hidden;
-          z-index: ${settings.zIndex};
-        }
-        
-        .ss-chat.open {
-          display: flex;
-        }
-        
-        .ss-header {
-          background: linear-gradient(135deg, ${settings.primaryColor}, ${adjustColor(settings.primaryColor, -20)});
-          color: white;
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-        
-        .ss-header-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        
-        .ss-avatar {
-          width: 40px;
-          height: 40px;
-          background: rgba(255,255,255,0.2);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 20px;
-        }
-        
-        .ss-header-text h3 {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 600;
-        }
-        
-        .ss-header-text p {
-          margin: 2px 0 0;
-          font-size: 11px;
-          opacity: 0.8;
-        }
-        
-        .ss-header-actions {
-          display: flex;
-          gap: 8px;
-        }
-        
-        .ss-header-btn {
-          background: rgba(255,255,255,0.2);
-          border: none;
-          border-radius: 6px;
-          padding: 6px;
-          cursor: pointer;
-          color: white;
-          transition: background 0.2s;
-        }
-        
-        .ss-header-btn:hover {
-          background: rgba(255,255,255,0.3);
-        }
-        
-        .ss-messages {
-          flex: 1;
-          overflow-y: auto;
-          padding: 16px;
-          background: #f9fafb;
-        }
-        
-        .ss-message {
-          margin-bottom: 12px;
-          display: flex;
-        }
-        
-        .ss-message.user {
-          justify-content: flex-end;
-        }
-        
-        .ss-message-content {
-          max-width: 80%;
-          padding: 10px 14px;
-          border-radius: 12px;
-          font-size: 14px;
-          line-height: 1.4;
-        }
-        
-        .ss-message.user .ss-message-content {
-          background: ${settings.primaryColor};
-          color: white;
-          border-bottom-right-radius: 4px;
-        }
-        
-        .ss-message.bot .ss-message-content {
-          background: white;
-          color: #1f2937;
-          border: 1px solid #e5e7eb;
-          border-bottom-left-radius: 4px;
-        }
-        
-        .ss-typing {
-          display: flex;
-          gap: 4px;
-          padding: 12px 14px;
-        }
-        
-        .ss-typing span {
-          width: 8px;
-          height: 8px;
-          background: ${settings.primaryColor};
-          border-radius: 50%;
-          animation: bounce 1.4s infinite ease-in-out;
-        }
-        
-        .ss-typing span:nth-child(2) { animation-delay: 0.2s; }
-        .ss-typing span:nth-child(3) { animation-delay: 0.4s; }
-        
-        @keyframes bounce {
-          0%, 80%, 100% { transform: translateY(0); }
-          40% { transform: translateY(-6px); }
-        }
-        
-        .ss-input-area {
-          padding: 12px;
-          background: white;
-          border-top: 1px solid #e5e7eb;
-        }
-        
-        .ss-input-wrap {
-          display: flex;
-          gap: 8px;
-        }
-        
-        .ss-input {
-          flex: 1;
-          padding: 10px 14px;
-          border: 1px solid #d1d5db;
-          border-radius: 8px;
-          font-size: 14px;
-          outline: none;
-          transition: border-color 0.2s;
-        }
-        
-        .ss-input:focus {
-          border-color: ${settings.primaryColor};
-        }
-        
-        .ss-send {
-          padding: 10px 16px;
-          background: ${settings.primaryColor};
-          color: white;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        
-        .ss-send:hover {
-          background: ${adjustColor(settings.primaryColor, -15)};
-        }
-        
-        .ss-send:disabled {
-          background: #d1d5db;
-          cursor: not-allowed;
-        }
-        
-        .ss-powered {
-          text-align: center;
-          padding: 8px;
-          font-size: 11px;
-          color: #9ca3af;
-        }
-        
-        @media (max-width: 480px) {
-          .ss-chat {
-            width: calc(100% - 32px);
-            height: calc(100% - 100px);
-            left: 16px;
-            right: 16px;
-            bottom: 80px;
-          }
-        }
-      </style>
-      
-      <button class="ss-button" id="ss-toggle">
-        <svg viewBox="0 0 24 24"><path d="M12 3c5.5 0 10 3.58 10 8s-4.5 8-10 8c-1.24 0-2.43-.18-3.53-.5C5.55 21 2 21 2 21c2.33-2.33 2.7-3.9 2.75-4.5C3.05 15.07 2 13.13 2 11c0-4.42 4.5-8 10-8z"/></svg>
-        <span class="ss-badge"></span>
-      </button>
-      
-      <div class="ss-chat" id="ss-chat">
-        <div class="ss-header">
-          <div class="ss-header-info">
-            <div class="ss-avatar">🙏</div>
-            <div class="ss-header-text">
-              <h3>${settings.headerTitle}</h3>
-              <p>${settings.headerSubtitle}</p>
+
+  // ── BUILD HTML ───────────────────────────────────────────
+  function buildWidget() {
+    const root = document.createElement('div');
+    root.id = 'ss-widget-root';
+
+    const posStyle = settings.position === 'bottom-left' ? 'left:28px' : 'right:28px';
+
+    // FAB
+    const fab = document.createElement('div');
+    fab.id = 'ss-fab';
+    fab.setAttribute('role','button');
+    fab.setAttribute('aria-label','Open Seva Setu chatbot');
+    fab.setAttribute('title','Chat with Seva Setu');
+    fab.innerHTML = `<img id="ss-fab-img" src="${AVATAR_SVG}" alt="Seva Setu"><span class="ss-badge"></span>`;
+    fab.onclick = toggleChat;
+
+    // LANG TAGS HTML
+    const langTagsHtml = LANGS.map((l,i) =>
+      `<span class="ss-ltag${i===0?' ss-active':''}" data-lang="${l.code}">${l.label}</span>`
+    ).join('') + `<span class="ss-lmore">+35 More</span>`;
+
+    // QUICK ACTIONS HTML
+    const qaHtml = QUICK_ACTIONS.map(qa =>
+      `<button class="ss-qbtn" data-query="${qa.query}">${qa.icon} ${qa.label}</button>`
+    ).join('');
+
+    // POPUP
+    const popup = document.createElement('div');
+    popup.id = 'ss-popup';
+    popup.setAttribute('role','dialog');
+    popup.setAttribute('aria-label','Seva Setu Chatbot');
+    popup.innerHTML = `
+      <div class="ss-header">
+        <div class="ss-htop">
+          <div class="ss-hav">
+            <div class="ss-av"><img id="ss-popup-av" src="${AVATAR_SVG}" alt="Seva Setu"></div>
+            <div>
+              <div class="ss-hname">Seva Setu <span style="font-size:9px;opacity:.6;font-weight:400">सेवा सेतु</span></div>
+              <div class="ss-hsub">Consulate General of India, Johannesburg</div>
+              <div class="ss-hstatus"><span class="ss-sdot"></span><span class="ss-stext" id="ss-status">Ready to Assist</span></div>
             </div>
           </div>
-          <div class="ss-header-actions">
-            <button class="ss-header-btn" id="ss-minimize" title="Minimize">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <button class="ss-header-btn" id="ss-close" title="Close">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+          <div class="ss-hbtns">
+            <button class="ss-hbtn" id="ss-min-btn" title="Minimize">−</button>
+            <button class="ss-hbtn" id="ss-close-btn" title="Close">✕</button>
           </div>
         </div>
-        
-        <div class="ss-messages" id="ss-messages"></div>
-        
-        <div class="ss-input-area">
-          <div class="ss-input-wrap">
-            <input type="text" class="ss-input" id="ss-input" placeholder="${settings.placeholder}">
-            <button class="ss-send" id="ss-send">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-            </button>
-          </div>
-          <div class="ss-powered">Powered by Seva Setu Bot</div>
+        <div class="ss-langs">
+          <span class="ss-lang-lbl">LANG:</span>
+          ${langTagsHtml}
         </div>
       </div>
+      <div class="ss-advisory">
+        <span class="ss-advisory-ico">⚠️</span>
+        <span class="ss-advisory-txt"><strong>Advisory:</strong> For urgent matters, call the consular helpline. Verify documents before visiting.</span>
+      </div>
+      <div class="ss-msgs" id="ss-msgs"></div>
+      <div class="ss-qa" id="ss-qa">${qaHtml}</div>
+      <div class="ss-input-area">
+        <textarea class="ss-textarea" id="ss-input" rows="2" placeholder="Type your question in English or हिंदी..."></textarea>
+        <div class="ss-irow">
+          <div style="display:flex;gap:6px">
+            <button class="ss-ilibtn ss-ilibtn-mic" id="ss-mic" title="Voice input">🎤</button>
+            <button class="ss-ilibtn ss-ilibtn-doc" id="ss-doc" title="Upload document">📎</button>
+          </div>
+          <button class="ss-send" id="ss-send">➤ Send</button>
+        </div>
+      </div>
+      <div class="ss-footer">Official service of <span>Consulate General of India</span> · Johannesburg</div>
     `;
-    
-    document.body.appendChild(container);
-    
-    // Bind events
-    document.getElementById('ss-toggle').addEventListener('click', toggleChat);
-    document.getElementById('ss-close').addEventListener('click', closeChat);
-    document.getElementById('ss-minimize').addEventListener('click', minimizeChat);
-    document.getElementById('ss-send').addEventListener('click', sendMessage);
-    document.getElementById('ss-input').addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') sendMessage();
-    });
-  }
-  
-  function adjustColor(color, percent) {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + 
-      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + 
-      (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
-  }
-  
-  function toggleChat() {
-    const chat = document.getElementById('ss-chat');
-    const button = document.getElementById('ss-toggle');
-    
-    if (isOpen) {
-      closeChat();
-    } else {
-      chat.classList.add('open');
-      button.style.display = 'none';
-      isOpen = true;
-      
-      // Show greeting on first open
-      if (messages.length === 0) {
-        addMessage('bot', settings.greeting);
-      }
-      
-      document.getElementById('ss-input').focus();
-    }
-  }
-  
-  function closeChat() {
-    const chat = document.getElementById('ss-chat');
-    const button = document.getElementById('ss-toggle');
-    
-    chat.classList.remove('open');
-    button.style.display = 'flex';
-    isOpen = false;
-  }
-  
-  function minimizeChat() {
-    closeChat();
-  }
-  
-  function addMessage(role, content) {
-    messages.push({ role, content });
-    renderMessages();
-  }
-  
-  function renderMessages() {
-    const container = document.getElementById('ss-messages');
-    container.innerHTML = messages.map(msg => `
-      <div class="ss-message ${msg.role === 'user' ? 'user' : 'bot'}">
-        <div class="ss-message-content">${formatMessage(msg.content)}</div>
-      </div>
-    `).join('');
-    container.scrollTop = container.scrollHeight;
-  }
-  
-  function formatMessage(text) {
-    // Simple markdown-like formatting
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n/g, '<br>')
-      .replace(/• /g, '&bull; ');
-  }
-  
-  function showTyping() {
-    const container = document.getElementById('ss-messages');
-    const typing = document.createElement('div');
-    typing.className = 'ss-message bot';
-    typing.id = 'ss-typing';
-    typing.innerHTML = '<div class="ss-message-content"><div class="ss-typing"><span></span><span></span><span></span></div></div>';
-    container.appendChild(typing);
-    container.scrollTop = container.scrollHeight;
-  }
-  
-  function hideTyping() {
-    const typing = document.getElementById('ss-typing');
-    if (typing) typing.remove();
-  }
-  
-  async function sendMessage() {
-    const input = document.getElementById('ss-input');
-    const sendBtn = document.getElementById('ss-send');
-    const message = input.value.trim();
-    
-    if (!message) return;
-    
-    // Add user message
-    addMessage('user', message);
-    input.value = '';
-    input.disabled = true;
-    sendBtn.disabled = true;
-    
-    // Show typing
-    showTyping();
-    
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: message,
-          session_id: sessionId,
-          mode: 'concise'
-        })
+
+    root.appendChild(fab);
+    root.appendChild(popup);
+    document.body.appendChild(root);
+
+    // BIND EVENTS
+    popup.querySelector('#ss-min-btn').onclick  = toggleChat;
+    popup.querySelector('#ss-close-btn').onclick = closeChat;
+    popup.querySelector('#ss-send').onclick      = sendMessage;
+    popup.querySelector('#ss-mic').onclick       = doVoice;
+    popup.querySelector('#ss-doc').onclick       = doDocUpload;
+
+    const ta = popup.querySelector('#ss-input');
+    ta.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+    ta.addEventListener('input', () => { ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,130)+'px'; });
+
+    popup.querySelectorAll('.ss-ltag').forEach(btn =>
+      btn.addEventListener('click', () => {
+        popup.querySelectorAll('.ss-ltag').forEach(b=>b.classList.remove('ss-active'));
+        btn.classList.add('ss-active');
+        currentLang = btn.dataset.lang;
+        updatePlaceholder(ta);
+      })
+    );
+
+    popup.querySelectorAll('.ss-qbtn').forEach(btn =>
+      btn.addEventListener('click', () => {
+        ta.value = btn.dataset.query;
+        sendMessage();
+      })
+    );
+
+    // openOnClick: any click on page opens the widget
+    if(settings.openOnClick){
+      document.addEventListener('click', e => {
+        const p = popup, f = fab;
+        if(!p.contains(e.target) && !f.contains(e.target) && !isOpen) toggleChat();
       });
-      
-      const data = await response.json();
-      
-      if (!sessionId) {
-        sessionId = data.session_id;
+    }
+
+    // Attempt to load bot avatar
+    fetch(BOT_URL + '/api/consular/bot-info').then(r=>r.json()).then(d=>{
+      if(d.avatar_url){
+        document.getElementById('ss-fab-img').src      = d.avatar_url;
+        document.getElementById('ss-popup-av').src     = d.avatar_url;
       }
-      
-      hideTyping();
-      addMessage('bot', data.response);
-      
-    } catch (error) {
-      console.error('Seva Setu Error:', error);
-      hideTyping();
-      addMessage('bot', 'I apologize, I\'m having trouble connecting. Please try again.');
-    } finally {
-      input.disabled = false;
-      sendBtn.disabled = false;
-      input.focus();
+    }).catch(()=>{});
+
+    // Connectivity
+    window.addEventListener('online',  updateStatus);
+    window.addEventListener('offline', updateStatus);
+  }
+
+  // ── OPEN / CLOSE ─────────────────────────────────────────
+  function toggleChat() {
+    isOpen = !isOpen;
+    const popup = document.getElementById('ss-popup');
+    popup.classList.toggle('ss-open', isOpen);
+    if (isOpen && !welcomed) {
+      welcomed = true;
+      showWelcome();
+      setTimeout(() => { const i = document.getElementById('ss-input'); if(i) i.focus(); }, 350);
     }
   }
-  
-  // Public API
-  window.SevaSetu = {
-    init: function(options) {
-      settings = Object.assign({}, defaults, options);
-      sessionId = generateSessionId();
-      
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', createWidget);
-      } else {
-        createWidget();
-      }
-    },
-    
-    open: function() {
-      if (!isOpen) toggleChat();
-    },
-    
-    close: function() {
-      if (isOpen) closeChat();
-    },
-    
-    sendMessage: function(text) {
-      document.getElementById('ss-input').value = text;
-      sendMessage();
+
+  function closeChat() {
+    isOpen = false;
+    const popup = document.getElementById('ss-popup');
+    if(popup) popup.classList.remove('ss-open');
+  }
+
+  // ── WELCOME ──────────────────────────────────────────────
+  function showWelcome() {
+    appendBot(`
+      <div class="ss-mhin">🙏 नमस्ते! मैं <strong>सेवा सेतु</strong> हूँ — आपकी सेवा में।</div>
+      <div class="ss-mhi">Namaste! 🇮🇳</div>
+      <p>I'm <strong>Seva Setu</strong>, your official AI assistant for consular services. I can help with:</p>
+      <p>• Passport &amp; Travel Documents<br>• Visa Services (Tourist / Business / Student)<br>• OCI / PIO Cards<br>• Document Attestation<br>• Appointments &amp; Emergency Help</p>
+      <p style="margin-top:6px">How can I assist you today?</p>
+    `);
+  }
+
+  // ── SEND ─────────────────────────────────────────────────
+  async function sendMessage() {
+    if(isLoading) return;
+    const ta  = document.getElementById('ss-input');
+    const txt = ta.value.trim();
+    if(!txt) return;
+
+    appendUser(txt);
+    ta.value = '';
+    ta.style.height = 'auto';
+
+    const qa = document.getElementById('ss-qa');
+    if(qa) qa.style.display = 'none';
+
+    setLoading(true);
+    showTyping();
+
+    try {
+      const res = await fetch(CHAT_API, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ message:txt, session_id:sessionId, language:currentLang, mode:'concise' })
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if(data.session_id) sessionId = data.session_id;
+      removeTyping();
+      appendBot(formatText(data.response || data.reply || 'I could not process that request. Please try again.'));
+    } catch(err) {
+      removeTyping();
+      appendBot(navigator.onLine
+        ? 'I\'m having trouble reaching the server. Please try again.'
+        : 'You appear to be offline. Please check your connection.'
+      );
+    } finally {
+      setLoading(false);
     }
+  }
+
+  // ── DOM HELPERS ──────────────────────────────────────────
+  function appendUser(text) {
+    const msgs = document.getElementById('ss-msgs');
+    const d = document.createElement('div');
+    d.className = 'ss-user';
+    d.innerHTML = `<div class="ss-ubub">${esc(text)}<div class="ss-utime">${now()}</div></div>`;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function appendBot(html) {
+    const msgs = document.getElementById('ss-msgs');
+    const av   = (document.getElementById('ss-popup-av') || {}).src || AVATAR_SVG;
+    const d = document.createElement('div');
+    d.className = 'ss-bot';
+    d.innerHTML = `
+      <div class="ss-bot-av"><img src="${av}" alt=""></div>
+      <div class="ss-bbub">${html}<div class="ss-time">${now()}</div></div>`;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function showTyping() {
+    typingEl = document.createElement('div');
+    typingEl.className = 'ss-bot';
+    typingEl.id = '__ss-typing__';
+    const av = (document.getElementById('ss-popup-av') || {}).src || AVATAR_SVG;
+    typingEl.innerHTML = `
+      <div class="ss-bot-av"><img src="${av}" alt=""></div>
+      <div class="ss-bbub"><div class="ss-typing-dots"><span></span><span></span><span></span></div></div>`;
+    const msgs = document.getElementById('ss-msgs');
+    msgs.appendChild(typingEl);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function removeTyping() {
+    if(typingEl){ typingEl.remove(); typingEl=null; }
+  }
+
+  function setLoading(v) {
+    isLoading = v;
+    const btn = document.getElementById('ss-send');
+    if(!btn) return;
+    btn.disabled = v;
+    btn.textContent = v ? '⏳ Sending…' : '➤ Send';
+  }
+
+  function updateStatus() {
+    const el = document.getElementById('ss-status');
+    if(el) el.textContent = navigator.onLine ? 'Ready to Assist' : 'Offline';
+  }
+
+  function updatePlaceholder(ta) {
+    const map = {
+      en:'Type your question in English or हिंदी...',
+      hi:'अपना प्रश्न हिंदी या English में लिखें...',
+      bn:'আপনার প্রশ্ন লিখুন...',
+      mr:'तुमचा प्रश्न टाइप करा...',
+      te:'మీ ప్రశ్నను టైప్ చేయండి...',
+      ta:'உங்கள் கேள்வியை தட்டச்சு செய்யுங்கள்...'
+    };
+    ta.placeholder = map[currentLang] || map.en;
+  }
+
+  function now()  { return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+  function esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function formatText(t) {
+    return '<p>' + t
+      .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g,'<em>$1</em>')
+      .replace(/\n\n+/g,'</p><p>')
+      .replace(/\n/g,'<br>')
+      + '</p>';
+  }
+
+  // ── VOICE ────────────────────────────────────────────────
+  function doVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){ alert('Voice input not supported in this browser (try Chrome).'); return; }
+    const rec = new SR();
+    rec.lang = currentLang === 'hi' ? 'hi-IN' : 'en-IN';
+    rec.onresult = e => {
+      const ta = document.getElementById('ss-input');
+      ta.value = e.results[0][0].transcript;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight,130)+'px';
+    };
+    rec.start();
+  }
+
+  function doDocUpload() {
+    const inp = document.createElement('input');
+    inp.type='file';
+    inp.accept='.pdf,.jpg,.jpeg,.png,.doc,.docx';
+    inp.onchange = () => {
+      if(inp.files[0]){
+        const ta = document.getElementById('ss-input');
+        ta.value = `[Document: ${inp.files[0].name}] Please help me with this document.`;
+      }
+    };
+    inp.click();
+  }
+
+  // ── PUBLIC API ───────────────────────────────────────────
+  window.SevaSetu = {
+    init(options) {
+      settings = Object.assign({}, defaults, options);
+      const run = () => { injectStyles(); buildWidget(); if(settings.autoOpen) toggleChat(); };
+      document.readyState === 'loading'
+        ? document.addEventListener('DOMContentLoaded', run)
+        : run();
+    },
+    open()          { if(!isOpen) toggleChat(); },
+    close()         { closeChat(); },
+    sendMessage(t)  { const ta=document.getElementById('ss-input'); if(ta){ta.value=t; sendMessage();} }
   };
+
 })();
