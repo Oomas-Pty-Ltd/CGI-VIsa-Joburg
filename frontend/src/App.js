@@ -13,6 +13,7 @@ import LocalAdminDashboard from "@/pages/LocalAdminDashboard";
 import ConsularBot from "@/pages/ConsularBot";
 import ICSWhatsAppBot from "@/pages/ICSWhatsAppBot";
 import FormReview from "@/pages/FormReview";
+import SevaReview from "@/pages/SevaReview";
 import ChatWidget from "@/components/ChatWidget";
 import AdminDashboardPage from "@/pages/AdminDashboardPage";
 
@@ -33,6 +34,7 @@ function App() {
                 <Route path="/consular" element={<ConsularBot />} />
                 <Route path="/whatsapp" element={<ICSWhatsAppBot />} />
                 <Route path="/consular/review" element={<FormReview />} />
+                <Route path="/review/:token" element={<SevaReview />} />
                 <Route path="/widget" element={<ChatWidget />} />
                 <Route path="/widget-demo" element={<WidgetDemo />} />
               </Routes>

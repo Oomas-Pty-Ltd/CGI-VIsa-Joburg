@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square, Eye, RefreshCw, Trash2 } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square, Eye, RefreshCw, Trash2, LogOut, List, Download, UserCheck, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -117,6 +117,114 @@ const BotMessage = ({ content }) => (
   </ReactMarkdown>
 );
 
+// ── Service info card — shown before auth ─────────────────────────────────────
+const ServiceInfoCard = ({ svc, onApply }) => (
+  <div className="bg-white border-2 border-[#E06F2C] rounded-xl shadow-md px-5 py-4 max-w-[92%] space-y-3">
+    <div className="flex items-center gap-2">
+      <span className="text-2xl">{svc.emoji}</span>
+      <h3 className="text-base font-bold text-[#1A2E40] flex-1">{svc.name}</h3>
+      {svc.category === "TYPE_A" && (
+        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium whitespace-nowrap">Gov Portal</span>
+      )}
+    </div>
+    <p className="text-sm text-gray-600 leading-relaxed">{svc.description}</p>
+    <div>
+      <p className="text-xs font-semibold text-[#1A2E40] uppercase tracking-wide mb-1.5">Required Documents</p>
+      <ul className="space-y-1">
+        {svc.documents.map((doc, i) => (
+          <li key={i} className="flex items-start gap-1.5 text-xs text-gray-600">
+            <span className="text-[#E06F2C] mt-0.5 flex-shrink-0">•</span>{doc}
+          </li>
+        ))}
+      </ul>
+    </div>
+    <button
+      onClick={onApply}
+      className="w-full bg-[#E06F2C] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-[#c45a1a] transition"
+    >
+      Apply Now →
+    </button>
+  </div>
+);
+
+// ── TYPE A card with gov-reference input (self-contained state) ───────────────
+const TypeACard = ({ msg, onFinalize }) => {
+  const [govRef, setGovRef] = React.useState("");
+  const [submitted, setSubmitted] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+
+  const handleSubmit = async () => {
+    if (!govRef.trim()) return;
+    setLoading(true);
+    try {
+      await onFinalize(msg.service?.application_id, govRef);
+      setSubmitted(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-[#E06F2C] rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
+      {/* Reference ID */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500">Seva Setu Reference</span>
+        <span className="font-mono text-sm font-bold text-[#E06F2C]">{msg.service?.reference_id}</span>
+      </div>
+
+      {/* Required documents */}
+      {(msg.service?.documents_required || []).length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-[#1A2E40] mb-1">Documents Required</p>
+          <ul className="space-y-0.5">
+            {msg.service.documents_required.map((d, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs text-gray-600">
+                <span className="text-[#E06F2C] mt-0.5">•</span>{d}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Open portal button */}
+      <a
+        href={msg.govUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 bg-[#E06F2C] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#c45a1a] transition w-full justify-center"
+      >
+        <ChevronRight className="w-4 h-4" /> Open Government Portal
+      </a>
+
+      {/* Gov reference input */}
+      {!submitted ? (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">After applying on the portal, enter your Government Reference / Application Number below to record it and receive your PDF:</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="e.g. AP2026XXXXXXX"
+              value={govRef}
+              onChange={e => setGovRef(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={loading || !govRef.trim()}
+              className="bg-[#1A2E40] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#243a52] transition disabled:opacity-50"
+            >
+              {loading ? "…" : "Submit"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-green-700 font-semibold text-center">✅ Recorded — check your email for the PDF!</p>
+      )}
+    </div>
+  );
+};
+
 // ── Document card rendered inside chat for uploaded docs ─────────────────────
 const DocumentCard = ({ doc, onView, onReplace, onRemove }) => (
   <div className="flex flex-col gap-2 mt-1">
@@ -159,6 +267,63 @@ const STEPS = [
   { id: 2, label: "Upload", value: "upload" },
   { id: 3, label: "Verify", value: "verify" },
   { id: 4, label: "Sign", value: "sign" }
+];
+
+const SERVICE_INFO = {
+  passport: {
+    key: "passport", name: "Passport Services", emoji: "🛂", category: "TYPE_A",
+    gov_url: "https://passportindia.gov.in",
+    description: "Apply for a new Indian passport, renew your existing passport, or update personal details via the official Passport Seva portal.",
+    documents: ["Valid / Expired Indian Passport (original + copy)", "Completed Application Form (available on Govt. portal)", "2 recent passport-size photographs (white background)", "Proof of South African address (utility bill / lease)", "Birth Certificate (for new applicants)"],
+  },
+  visa: {
+    key: "visa", name: "Indian Visa", emoji: "✈️", category: "TYPE_A",
+    gov_url: "https://indianvisaonline.gov.in",
+    description: "Apply for an Indian visa (tourist, business, medical, or student) via the official Indian Visa Online portal.",
+    documents: ["Valid Passport (minimum 6 months validity)", "Completed Visa Application Form", "2 recent passport-size photographs", "Travel itinerary / confirmed tickets", "Hotel booking / invitation letter", "Bank statement (last 3 months)"],
+  },
+  pcc: {
+    key: "pcc", name: "Police Clearance Certificate (PCC)", emoji: "📋", category: "TYPE_A",
+    gov_url: "https://passportindia.gov.in/pcc",
+    description: "Obtain a PCC required for immigration, employment abroad, or other official purposes via the Passport Seva portal.",
+    documents: ["Valid Indian Passport (original + copy)", "Completed PCC Application Form", "Proof of current South African residential address", "Copy of South African Permanent Residence / Visa", "2 passport-size photographs"],
+  },
+  oci: {
+    key: "oci", name: "OCI (Overseas Citizen of India)", emoji: "🇮🇳", category: "TYPE_B",
+    description: "Apply for an OCI card — lifelong multiple-entry visa to India and other benefits. Application processed entirely at this consulate.",
+    documents: ["Proof of Indian origin (old Indian passport / parent's Indian passport)", "Current valid foreign passport (copy)", "2 recent passport-size photographs (50×50mm, white background)", "Renunciation / Surrender Certificate (if applicable)", "South African ID / Residence permit"],
+  },
+  ec_death: {
+    key: "ec_death", name: "EC / Death Certificate", emoji: "📄", category: "TYPE_B",
+    description: "Apply for an Emergency Certificate or get a Death Certificate attested / transcribed for use in India. Processed at this consulate.",
+    documents: ["Indian Passport of the deceased (copy)", "South African Death Certificate (original + notarised copy)", "Proof of relationship to deceased", "Applicant's valid Indian Passport or OCI card", "Two passport-size photographs of applicant"],
+  },
+  surrender: {
+    key: "surrender", name: "Surrender / Renunciation", emoji: "📜", category: "TYPE_B",
+    description: "Surrender your Indian passport and renounce Indian citizenship after acquiring foreign nationality. Personal visit to the consulate is required.",
+    documents: ["Original Indian Passport (to be surrendered)", "Copy of acquired foreign citizenship / naturalisation certificate", "Completed Renunciation Form (Form I)", "Two passport-size photographs", "Proof of South African citizenship"],
+  },
+  marriage: {
+    key: "marriage", name: "Marriage Certificate", emoji: "💍", category: "TYPE_B",
+    description: "Register your marriage or get your South African marriage certificate attested for use in India. Processed at this consulate.",
+    documents: ["Valid Indian Passport or OCI card (copy)", "South African Marriage Certificate (original + copy)", "Two passport-size photographs of both spouses", "Proof of address"],
+  },
+  misc: {
+    key: "misc", name: "Miscellaneous / Other", emoji: "🗂️", category: "TYPE_B",
+    description: "For other consular services — affidavits, power of attorney, document attestation, name correction, and more. Submit a miscellaneous form at this consulate.",
+    documents: ["Valid Indian Passport or OCI card (copy)", "Relevant supporting documents (case-specific)", "Two passport-size photographs", "Affidavit / Notarised documents (where required)"],
+  },
+};
+
+const SERVICE_KEYWORDS = [
+  { key: "passport", pattern: /\b(passport|passaport)\b/i },
+  { key: "visa",     pattern: /\b(visa)\b/i },
+  { key: "pcc",      pattern: /\b(pcc|police clearance|clearance cert)\b/i },
+  { key: "oci",      pattern: /\b(oci|overseas citizen)\b/i },
+  { key: "ec_death", pattern: /\b(death cert|ec cert|emergency cert)\b/i },
+  { key: "surrender",pattern: /\b(surrender|renunciation|renounce)\b/i },
+  { key: "marriage", pattern: /\b(marriage cert(ificate)?|marriage registration|marriage)\b/i },
+  { key: "misc",     pattern: /\b(misc|miscellaneous|affidavit|attestation|power of attorney)\b/i },
 ];
 
 // Language configuration with codes
@@ -251,6 +416,31 @@ export default function ConsularBot() {
   const [docModal, setDocModal] = useState(null); // { doc, msgIndex }
   const replaceInputRef = useRef(null);
   const replacingMsgIndexRef = useRef(null);
+
+  // ── Seva Setu Auth + Application State ───────────────────────────────────────
+  const [sevaToken, setSevaToken] = useState(() => sessionStorage.getItem("seva_token") || null);
+  const sevaTokenRef = useRef(sessionStorage.getItem("seva_token") || null);
+  const [sevaUser, setSevaUser] = useState(null);
+  const [sevaAuthStep, setSevaAuthStep] = useState(null); // null|"name_email"|"otp"|"done"
+  const [sevaAuthName, setSevaAuthName] = useState("");
+  const [sevaAuthEmail, setSevaAuthEmail] = useState("");
+  const [sevaOtpInput, setSevaOtpInput] = useState("");
+  const [sevaAuthError, setSevaAuthError] = useState("");
+  const [sevaAuthLoading, setSevaAuthLoading] = useState(false);
+  const [sevaCurrentApp, setSevaCurrentApp] = useState(null);
+  const [sevaApps, setSevaApps] = useState([]);
+  const [showSevaApps, setShowSevaApps] = useState(false);
+  const [sevaSelectedService, setSevaSelectedService] = useState(null);
+  const [sevaFormMode, setSevaFormMode] = useState(null); // "upload"|"manual"|null
+  const [sevaFormFieldIndex, setSevaFormFieldIndex] = useState(0);
+  const [sevaFormData, setSevaFormData] = useState({});
+  const [sevaFormInput, setSevaFormInput] = useState("");
+  const [sevaUploadingDocName, setSevaUploadingDocName] = useState(null);
+  const [sevaServices, setSevaServices] = useState({});
+  const [sevaDocPreviews, setSevaDocPreviews] = useState({}); // appId → [{id,name,dataUrl,isPdf}]
+  const [isApiLoading, setIsApiLoading] = useState(false);
+  const sevaDocInputRef = useRef(null);
+  const lastActivityRef = useRef(Date.now());
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -352,6 +542,458 @@ export default function ConsularBot() {
     };
   }, [cameraStream]);
 
+  // Load services catalogue on mount
+  useEffect(() => {
+    fetch(`${API}/seva-setu/services`)
+      .then(r => r.json())
+      .then(setSevaServices)
+      .catch(() => {});
+  }, []);
+
+  // Inactivity auto-logout — 10 minutes
+  useEffect(() => {
+    if (!sevaToken) return;
+    const touch = () => { lastActivityRef.current = Date.now(); };
+    window.addEventListener("mousemove", touch);
+    window.addEventListener("keydown", touch);
+    window.addEventListener("click", touch);
+    const tick = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > 10 * 60 * 1000) {
+        handleSevaLogout(true);
+      }
+    }, 30000);
+    return () => {
+      clearInterval(tick);
+      window.removeEventListener("mousemove", touch);
+      window.removeEventListener("keydown", touch);
+      window.removeEventListener("click", touch);
+    };
+  }, [sevaToken]); // eslint-disable-line
+
+  // ── Seva Setu API helpers ────────────────────────────────────────────────────
+
+  const sevaApi = async (method, path, body, token) => {
+    const headers = { "Content-Type": "application/json" };
+    if (token || sevaTokenRef.current) headers["Authorization"] = `Bearer ${token || sevaTokenRef.current}`;
+    const res = await fetch(`${API}/seva-setu${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Request failed");
+    return data;
+  };
+
+  const handleSevaLogout = async (isTimeout = false) => {
+    // Save text-only chat history to DB before clearing
+    const saveable = messages
+      .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
+      .map(m => ({ role: m.role, content: m.content }));
+    try {
+      await sevaApi("POST", "/auth/logout", { chat_history: saveable });
+    } catch {}
+
+    // Clear Seva Setu auth + application state
+    sessionStorage.removeItem("seva_token");
+    sevaTokenRef.current = null;
+    setSevaToken(null);
+    setSevaUser(null);
+    setSevaAuthStep(null);
+    setSevaCurrentApp(null);
+    setSevaApps([]);
+    setShowSevaApps(false);
+    setSevaFormMode(null);
+    setSevaSelectedService(null);
+    setSevaFormData({});
+    setSevaFormFieldIndex(0);
+    setSevaDocPreviews({});
+
+    // Clear consular session too
+    localStorage.removeItem("consular_session_id");
+    sessionIdRef.current = null;
+    setSessionId(null);
+    welcomeBackShownRef.current = false;
+
+    // Reset chat to initial greeting
+    const freshMessages = [{ role: "assistant", content: GREETING_MESSAGE }];
+    ADVISORY_MESSAGES.filter(a => a.active).forEach(adv => {
+      freshMessages.push({ role: "advisory", type: adv.type, title: adv.title, content: adv.content });
+    });
+    setMessages(freshMessages);
+    setCurrentStep("register");
+
+    if (isTimeout) {
+      toast.info("⏱️ Logged out due to inactivity. Your applications are saved and accessible via your Reference ID.");
+    }
+  };
+
+  const handleSevaShowInfo = (svcKey) => {
+    const svcInfo = SERVICE_INFO[svcKey];
+    if (!svcInfo) return;
+    setMessages(prev => [...prev, { role: "seva_service_info", svc: svcInfo }]);
+  };
+
+  const handleSevaStartAuth = async (service) => {
+    setSevaSelectedService(service);
+    setSevaAuthStep("name_email");
+    setSevaAuthError("");
+    setMessages(prev => [...prev, {
+      role: "assistant",
+      content: `Great! To apply for **${service.name}**, I need to verify your identity first.\n\nPlease enter your details below.`
+    }]);
+  };
+
+  const handleSevaSubmitNameEmail = async () => {
+    if (!sevaAuthName.trim() || !sevaAuthEmail.trim()) {
+      setSevaAuthError("Please enter both your name and email address.");
+      return;
+    }
+    const emailRx = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    if (!emailRx.test(sevaAuthEmail.trim())) {
+      setSevaAuthError("Invalid email format. Please check and try again.");
+      return;
+    }
+    setSevaAuthLoading(true);
+    setIsApiLoading(true);
+    setSevaAuthError("");
+    try {
+      const res = await sevaApi("POST", "/auth/start", { name: sevaAuthName.trim(), email: sevaAuthEmail.trim().toLowerCase() });
+      setSevaAuthStep("otp");
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `📧 An OTP has been sent to **${sevaAuthEmail.trim()}**. Please enter it below to continue.\n\n*Valid for 10 minutes.*`
+      }]);
+      if (res.is_new_user === false) {
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "ℹ️ We found an existing account with this email. You can view your past applications after logging in."
+        }]);
+      }
+    } catch (e) {
+      setSevaAuthError(e.message);
+    } finally {
+      setSevaAuthLoading(false);
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaVerifyOtp = async () => {
+    if (!sevaOtpInput.trim()) { setSevaAuthError("Please enter the OTP."); return; }
+    setSevaAuthLoading(true);
+    setIsApiLoading(true);
+    setSevaAuthError("");
+    try {
+      const res = await sevaApi("POST", "/auth/verify-otp", { email: sevaAuthEmail.trim().toLowerCase(), otp: sevaOtpInput.trim() });
+      const token = res.session_token;
+      sessionStorage.setItem("seva_token", token);
+      sevaTokenRef.current = token;
+      setSevaToken(token);
+      setSevaUser(res.user);
+      setSevaAuthStep("done");
+      lastActivityRef.current = Date.now();
+
+      // Create application for the selected service
+      if (sevaSelectedService) {
+        const appRes = await sevaApi("POST", "/applications", { service_type: sevaSelectedService.key }, token);
+        setSevaCurrentApp(appRes);
+        const svc = sevaSelectedService;
+
+        if (appRes.service_category === "TYPE_A") {
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: `✅ **Verified!** Your Reference ID is \`${appRes.reference_id}\`.\n\n🔗 Redirecting you to the official government portal for **${svc.name}**...\n\nYour Reference ID has been created. Click below to open the portal.`
+          }, {
+            role: "seva_type_a",
+            service: appRes,
+            govUrl: appRes.gov_url,
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: `✅ **Verified!** Your Reference ID is \`${appRes.reference_id}\`.\n\nNow let's complete your **${svc.name}** application.\n\nHow would you like to fill in your details?`
+          }, {
+            role: "seva_form_mode",
+            appId: appRes.application_id,
+          }]);
+        }
+      }
+    } catch (e) {
+      setSevaAuthError(e.message);
+    } finally {
+      setSevaAuthLoading(false);
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaChooseFormMode = (mode) => {
+    setSevaFormMode(mode);
+    const fields = sevaCurrentApp?.fields || [];
+    if (mode === "manual") {
+      const prefilledData = { full_name: sevaUser?.name || "", email: sevaUser?.email || "" };
+      setSevaFormData(prefilledData);
+      const firstUnfilled = fields.findIndex(f => !prefilledData[f.key]);
+      const startIdx = firstUnfilled >= 0 ? firstUnfilled : 0;
+      setSevaFormFieldIndex(startIdx);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `📝 **Manual Form Entry**\n\nLet's fill in your details step by step. I'll ask one question at a time.\n\n**${fields[startIdx]?.label}:**`
+      }]);
+    } else {
+      const svcInfo = sevaServices[sevaSelectedService?.key] || {};
+      const docs = svcInfo.documents || sevaCurrentApp?.documents_required || [];
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `📤 **Upload Documents**\n\nPlease upload the required documents. I'll extract your details automatically.\n\n**Required documents:**\n${docs.map(d => `• ${d}`).join("\n")}\n\nUpload each document using the upload button below.`
+      }, {
+        role: "seva_doc_upload",
+        appId: sevaCurrentApp?.application_id,
+        docs: docs,
+      }]);
+    }
+  };
+
+  const handleSevaFormFieldSubmit = async () => {
+    const fields = sevaCurrentApp?.fields || [];
+    const value = sevaFormInput.trim();
+    const field = fields[sevaFormFieldIndex];
+
+    // Validation
+    if (!value) {
+      toast.error(`${field.label} is required.`);
+      return;
+    }
+    if (field.key === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    if ((field.key === "dob" || field.key === "marriage_date") && !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+      toast.error("Please use DD/MM/YYYY format (e.g. 15/08/1990).");
+      return;
+    }
+    if (field.key === "phone" && !/^\+?[\d\s\-]{7,15}$/.test(value)) {
+      toast.error("Please enter a valid phone number.");
+      return;
+    }
+
+    const newData = { ...sevaFormData, [field.key]: value };
+    setSevaFormData(newData);
+    setSevaFormInput("");
+
+    setMessages(prev => [...prev, { role: "user", content: value }]);
+
+    const nextIndex = sevaFormFieldIndex + 1;
+    if (nextIndex < fields.length) {
+      setSevaFormFieldIndex(nextIndex);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `✓ Got it.\n\n**${fields[nextIndex].label}:**`
+      }]);
+    } else {
+      // All fields filled — save, show summary, then show doc upload for TYPE_B services
+      setIsApiLoading(true);
+      try {
+        await sevaApi("PUT", `/applications/${sevaCurrentApp.application_id}`, { form_data: newData });
+        setSevaCurrentApp(prev => ({ ...prev, form_data: newData }));
+        const summary = Object.entries(newData)
+          .map(([k, v]) => `• **${k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}:** ${v}`)
+          .join("\n");
+        const svcInfo = sevaServices[sevaSelectedService?.key] || {};
+        const docs = svcInfo.documents || sevaCurrentApp?.documents_required || [];
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `✅ **Form complete!** Here's your summary:\n\n${summary}\n\nNow please upload the required supporting documents below.`
+        }, {
+          role: "seva_doc_upload",
+          appId: sevaCurrentApp.application_id,
+          docs,
+        }]);
+        setSevaFormMode(null);
+      } catch (e) {
+        toast.error("Failed to save form data. Please try again.");
+      } finally {
+        setIsApiLoading(false);
+      }
+    }
+  };
+
+  const handleSevaPreviewPdf = async () => {
+    if (!sevaCurrentApp) return;
+    setIsApiLoading(true);
+    try {
+      if (Object.keys(sevaFormData).length > 0) {
+        await sevaApi("PUT", `/applications/${sevaCurrentApp.application_id}`, { form_data: sevaFormData });
+      }
+      const url = `${API}/seva-setu/applications/${sevaCurrentApp.application_id}/preview?token=${encodeURIComponent(sevaTokenRef.current)}`;
+      const a = document.createElement("a");
+      a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } catch (e) {
+      toast.error("Failed to generate PDF preview.");
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaUploadDoc = async (file, docName) => {
+    if (!file || !sevaCurrentApp) return;
+    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+    if (!allowed.includes(file.type)) { toast.error("Only PDF, JPG, PNG files are accepted."); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("File too large. Max size is 5MB."); return; }
+
+    // Capture preview dataUrl before upload
+    const previewDataUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    });
+
+    setSevaUploadingDocName(docName);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("app_id", sevaCurrentApp.application_id);
+    fd.append("doc_name", docName || file.name);
+
+    try {
+      const res = await fetch(`${API}/seva-setu/upload-document`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${sevaTokenRef.current}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+
+      // Store preview (replace if same docName exists)
+      const appId = sevaCurrentApp.application_id;
+      setSevaDocPreviews(prev => ({
+        ...prev,
+        [appId]: [
+          ...(prev[appId] || []).filter(d => d.name !== (docName || file.name)),
+          { id: data.document?.id || Date.now().toString(), name: docName || file.name, dataUrl: previewDataUrl, isPdf: file.type === "application/pdf" },
+        ],
+      }));
+
+      if (data.ocr_fields && Object.keys(data.ocr_fields).length > 0) {
+        const extracted = Object.entries(data.ocr_fields)
+          .map(([k, v]) => `• **${k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}:** ${v}`)
+          .join("\n");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `📋 **OCR extracted from ${docName || file.name}** (please verify):\n${extracted}`,
+        }]);
+        setSevaFormData(prev => {
+          const merged = { ...prev, ...data.ocr_fields };
+          sevaApi("PUT", `/applications/${appId}`, { form_data: merged }).catch(() => {});
+          return merged;
+        });
+      }
+      toast.success(`${docName || file.name} uploaded!`);
+    } catch (e) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setSevaUploadingDocName(null);
+    }
+  };
+
+  const handleSevaRemoveDoc = async (appId, docId, docName) => {
+    setIsApiLoading(true);
+    try {
+      await sevaApi("DELETE", `/applications/${appId}/documents/${docId}`);
+      setSevaDocPreviews(prev => ({
+        ...prev,
+        [appId]: (prev[appId] || []).filter(d => d.id !== docId),
+      }));
+      toast.success(`${docName} removed.`);
+    } catch (e) {
+      toast.error("Failed to remove document.");
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaSubmitApp = async () => {
+    if (!sevaCurrentApp) return;
+    setIsApiLoading(true);
+    try {
+      if (Object.keys(sevaFormData).length > 0) {
+        await sevaApi("PUT", `/applications/${sevaCurrentApp.application_id}`, { form_data: sevaFormData });
+      }
+      const res = await sevaApi("POST", `/applications/${sevaCurrentApp.application_id}/submit`);
+      setSevaCurrentApp(prev => ({ ...prev, status: "submitted" }));
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `📧 **Application Submitted for Review!**\n\nA review email has been sent to **${sevaUser?.email}** with a link to confirm your application within 24 hours.\n\nReference ID: \`${res.reference_id}\``
+      }]);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaConfirmApp = async () => {
+    if (!sevaCurrentApp) return;
+    setIsApiLoading(true);
+    try {
+      if (Object.keys(sevaFormData).length > 0) {
+        await sevaApi("PUT", `/applications/${sevaCurrentApp.application_id}`, { form_data: sevaFormData });
+      }
+      const res = await sevaApi("POST", `/applications/${sevaCurrentApp.application_id}/confirm`);
+      setSevaCurrentApp(prev => ({ ...prev, status: "confirmed" }));
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `🎉 **Application Confirmed!**\n\nYour **${sevaCurrentApp.service_name}** application has been confirmed.\n\nA confirmation email with your **PDF** has been sent to ${sevaUser?.email}.\n\nReference: \`${res.reference_id}\``
+      }]);
+      setTimeout(() => {
+        const pdfUrl = `${API}/seva-setu/applications/${sevaCurrentApp.application_id}/pdf?token=${encodeURIComponent(sevaTokenRef.current)}`;
+        const a = document.createElement("a");
+        a.href = pdfUrl; a.target = "_blank"; a.rel = "noopener noreferrer";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }, 600);
+      if (sevaSelectedService?.category === "surrender") {
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `⚠️ **Important Reminder:** You must visit the Consulate in person to physically surrender your original Indian passport to complete this process.\n\n📍 1 Eton Road, Parktown 2193, Johannesburg\n📞 +27 11 581 9800`
+        }]);
+      }
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaFetchApps = async () => {
+    setIsApiLoading(true);
+    try {
+      const res = await sevaApi("GET", "/applications");
+      setSevaApps(res.applications || []);
+      setShowSevaApps(true);
+    } catch (e) {
+      toast.error("Failed to load applications. Please try again.");
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaTypeAFinalize = async (appId, govRef) => {
+    if (!govRef.trim()) { toast.error("Please enter your government reference number."); return; }
+    setIsApiLoading(true);
+    try {
+      const res = await sevaApi("POST", `/applications/${appId}/type-a-finalize`, { gov_reference: govRef.trim() });
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `✅ **Application Recorded!**\n\nGov Reference: \`${govRef.trim()}\`\n\nA confirmation email with your PDF has been sent to **${sevaUser?.email}**.\n\nReference: \`${res.reference_id}\``,
+      }]);
+      toast.success("Confirmation email sent with PDF!");
+    } catch (e) {
+      toast.error(e.message || "Failed to finalize application.");
+    } finally {
+      setIsApiLoading(false);
+    }
+  };
+
+  const handleSevaDownloadPdf = (appId) => {
+    const t = sevaTokenRef.current;
+    window.open(`${API}/seva-setu/applications/${appId}/pdf${t ? `?token=${encodeURIComponent(t)}` : ""}`, "_blank");
+  };
+
   // Notify backend that a document was uploaded so the flow advances
   const sendDocumentToBackend = useCallback(async (imageBase64) => {
     setIsTyping(true);
@@ -436,7 +1078,16 @@ export default function ConsularBot() {
     setMessages((prev) => [...prev, userMessage]);
     const messageText = text;
     setInput("");
-    
+
+    // Detect service keyword — let LLM answer from knowledge base, then show Apply card
+    let detectedServiceKey = null;
+    if (!sevaAuthStep) {
+      const matched = SERVICE_KEYWORDS.find(({ pattern }) => pattern.test(messageText));
+      if (matched && SERVICE_INFO[matched.key]) {
+        detectedServiceKey = matched.key;
+      }
+    }
+
     // Show typing indicator
     setIsTyping(true);
 
@@ -508,6 +1159,13 @@ export default function ConsularBot() {
                   window.open(`${process.env.REACT_APP_BACKEND_URL}${evt.pdf_url}`, "_blank");
                 }, 800);
               }
+            }
+            // After LLM responds with knowledge base info, show Apply card for detected service
+            if (detectedServiceKey && SERVICE_INFO[detectedServiceKey]) {
+              setMessages(prev => [...prev, {
+                role: "seva_service_action",
+                svc: SERVICE_INFO[detectedServiceKey],
+              }]);
             }
             // Speak the completed response if voice is enabled
             if (enableVoiceRef.current && fullText) {
@@ -1303,12 +1961,54 @@ export default function ConsularBot() {
 
           {/* Chat Section */}
           <div className="lg:col-span-8">
-            <div 
-              className="glass-card rounded-xl shadow-lg flex flex-col" 
-              style={{ height: "600px" }}
+            {/* Persistent auth bar — always visible above the chat box when logged in */}
+            {sevaToken && sevaUser && (
+              <div className="flex items-center justify-between px-4 py-2 mb-2 rounded-xl bg-[#1A2E40] shadow">
+                <div className="flex items-center gap-2 text-sm text-white">
+                  <UserCheck className="w-4 h-4 text-[#FF9933]" />
+                  <span className="font-semibold text-[#FF9933]">{sevaUser.name}</span>
+                  <span className="text-gray-400 text-xs hidden sm:inline">· {sevaUser.email}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSevaFetchApps}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-white/10 text-white hover:bg-white/20 transition border border-white/20"
+                  >
+                    <List className="w-3.5 h-3.5" /> My Applications
+                  </button>
+                  <button
+                    onClick={() => handleSevaLogout(false)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-red-500 text-white hover:bg-red-600 transition"
+                  >
+                    <LogOut className="w-3.5 h-3.5" /> Logout
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div
+              className="glass-card rounded-xl shadow-lg flex flex-col relative"
+              style={{ height: sevaToken && sevaUser ? "560px" : "600px" }}
               role="region"
               aria-label="Chat conversation"
             >
+              {/* API loading overlay */}
+              {isApiLoading && (
+                <>
+                  {/* progress bar */}
+                  <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl overflow-hidden z-30 bg-gray-100">
+                    <div className="h-full bg-[#E06F2C] rounded-full"
+                      style={{ animation: "loading-bar 1.2s ease-in-out infinite" }} />
+                  </div>
+                  {/* centre spinner */}
+                  <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] flex items-center justify-center z-20 rounded-xl pointer-events-none">
+                    <div className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-full shadow-lg border border-gray-100">
+                      <div className="w-4 h-4 border-[3px] border-[#E06F2C] border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm font-semibold text-[#1A2E40]">Please wait…</span>
+                    </div>
+                  </div>
+                </>
+              )}
               <div
                 ref={chatScrollRef}
                 className="flex-1 overflow-y-auto p-6 space-y-4"
@@ -1357,6 +2057,167 @@ export default function ConsularBot() {
                           onReplace={() => handleDocReplace(index)}
                           onRemove={() => handleDocRemove(index)}
                         />
+                      </div>
+                    ) : msg.role === "seva_type_a" ? (
+                      <TypeACard msg={msg} onFinalize={handleSevaTypeAFinalize} />
+                    ) : msg.role === "seva_form_mode" ? (
+                      <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 max-w-[88%]">
+                        <p className="text-sm font-semibold text-[#1A2E40] mb-3">How would you like to proceed?</p>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => handleSevaChooseFormMode("upload")}
+                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-[#E06F2C] rounded-lg p-3 hover:bg-orange-50 transition text-sm font-medium text-[#E06F2C]"
+                          >
+                            <Download className="w-5 h-5" /> Upload Documents<span className="text-xs text-gray-400 font-normal">OCR auto-fill</span>
+                          </button>
+                          <button
+                            onClick={() => handleSevaChooseFormMode("manual")}
+                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-[#1A2E40] rounded-lg p-3 hover:bg-slate-50 transition text-sm font-medium text-[#1A2E40]"
+                          >
+                            <FileText className="w-5 h-5" /> Fill Manually<span className="text-xs text-gray-400 font-normal">Step by step</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : msg.role === "seva_doc_upload" ? (
+                      (() => {
+                        const appId = msg.appId || sevaCurrentApp?.application_id;
+                        const previews = sevaDocPreviews[appId] || [];
+                        return (
+                          <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 max-w-[92%] space-y-3">
+                            <p className="text-sm font-semibold text-[#1A2E40]">Upload Required Documents</p>
+
+                            {/* Upload rows */}
+                            <div className="flex flex-col gap-2">
+                              {(msg.docs || []).map((doc, i) => {
+                                const preview = previews.find(p => p.name === doc);
+                                return (
+                                  <div key={i} className="space-y-1.5">
+                                    {/* Upload row */}
+                                    <label className={`flex items-center gap-2 cursor-pointer rounded p-1.5 border transition ${preview ? "border-green-300 bg-green-50" : "border-dashed border-gray-300 hover:bg-gray-50"}`}>
+                                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                                        onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ""; }}
+                                        disabled={sevaUploadingDocName === doc}
+                                      />
+                                      <FileText className={`w-4 h-4 flex-shrink-0 ${preview ? "text-green-600" : "text-[#E06F2C]"}`} />
+                                      <span className="text-xs text-[#1A2E40] flex-1 line-clamp-1">{doc}</span>
+                                      {sevaUploadingDocName === doc
+                                        ? <span className="text-xs text-gray-400 animate-pulse">Uploading…</span>
+                                        : preview
+                                          ? <span className="text-xs text-green-600 font-medium">✓ Uploaded</span>
+                                          : <span className="text-xs text-[#E06F2C] font-medium">Upload ↑</span>
+                                      }
+                                    </label>
+
+                                    {/* Preview card */}
+                                    {preview && (
+                                      <div className="flex items-center gap-2 pl-2 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
+                                        {preview.isPdf ? (
+                                          <div className="w-10 h-10 rounded bg-red-50 flex items-center justify-center flex-shrink-0">
+                                            <FileText className="w-5 h-5 text-red-500" />
+                                          </div>
+                                        ) : (
+                                          <img src={preview.dataUrl} alt={preview.name}
+                                            className="w-10 h-10 rounded object-cover flex-shrink-0 border border-gray-200 cursor-pointer"
+                                            onClick={() => setDocModal({ doc: { dataUrl: preview.dataUrl, name: preview.name, isPdf: false }, msgIndex: -1 })}
+                                          />
+                                        )}
+                                        <span className="text-xs text-gray-600 flex-1 truncate">{preview.name}</span>
+                                        <label className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition cursor-pointer">
+                                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                                            onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ""; }}
+                                          />
+                                          <RefreshCw className="w-3 h-3" /> Replace
+                                        </label>
+                                        <button
+                                          onClick={() => handleSevaRemoveDoc(appId, preview.id, preview.name)}
+                                          className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100 transition"
+                                        >
+                                          <Trash2 className="w-3 h-3" /> Remove
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {appId && (
+                              <button
+                                onClick={() => setMessages(prev => [...prev, { role: "seva_submit_review", appId }])}
+                                className="w-full bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition"
+                              >
+                                Done Uploading — Review & Submit
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()
+                    ) : msg.role === "seva_submit_review" ? (
+                      <div className="bg-white border border-[#059669] rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
+                        <p className="text-sm font-semibold text-[#1A2E40]">Ready to submit?</p>
+                        <p className="text-xs text-gray-500">A review email will be sent to <strong>{sevaUser?.email}</strong>. You can edit for 24 hours before it locks.</p>
+                        <button
+                          onClick={handleSevaPreviewPdf}
+                          className="w-full border border-[#1A2E40] text-[#1A2E40] rounded-lg py-2 text-sm font-semibold hover:bg-gray-50 transition flex items-center justify-center gap-2"
+                        >
+                          <FileText className="w-4 h-4" /> Preview PDF
+                        </button>
+                        <div className="flex gap-2">
+                          <button onClick={handleSevaSubmitApp} className="flex-1 bg-[#059669] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#047857] transition">
+                            📤 Submit for Review
+                          </button>
+                          <button onClick={handleSevaConfirmApp} className="flex-1 bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition">
+                            ✅ Confirm &amp; Get PDF
+                          </button>
+                        </div>
+                      </div>
+                    ) : msg.role === "seva_service_info" ? (
+                      <ServiceInfoCard
+                        svc={msg.svc}
+                        onApply={() => {
+                          setSevaToken(null);
+                          setSevaUser(null);
+                          sevaTokenRef.current = null;
+                          sessionStorage.removeItem("seva_token");
+                          setSevaCurrentApp(null);
+                          setSevaFormMode(null);
+                          setSevaFormData({});
+                          setSevaFormFieldIndex(0);
+                          setSevaAuthName("");
+                          setSevaAuthEmail("");
+                          setSevaOtpInput("");
+                          setSevaAuthError("");
+                          handleSevaStartAuth({ key: msg.svc.key, name: msg.svc.name, category: msg.svc.category });
+                        }}
+                      />
+                    ) : msg.role === "seva_service_action" ? (
+                      <div className="bg-white border border-[#E06F2C] rounded-xl shadow-sm px-4 py-3 max-w-[88%] flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-[#1A2E40]">
+                            {msg.svc.emoji} {msg.svc.name}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">Ready to start your application?</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setSevaToken(null);
+                            setSevaUser(null);
+                            sevaTokenRef.current = null;
+                            sessionStorage.removeItem("seva_token");
+                            setSevaCurrentApp(null);
+                            setSevaFormMode(null);
+                            setSevaFormData({});
+                            setSevaFormFieldIndex(0);
+                            setSevaAuthName("");
+                            setSevaAuthEmail("");
+                            setSevaOtpInput("");
+                            setSevaAuthError("");
+                            handleSevaStartAuth({ key: msg.svc.key, name: msg.svc.name, category: msg.svc.category });
+                          }}
+                          className="whitespace-nowrap bg-[#E06F2C] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#c45a1a] transition flex-shrink-0"
+                        >
+                          Apply Now →
+                        </button>
                       </div>
                     ) : (
                       <div
@@ -1413,9 +2274,18 @@ export default function ConsularBot() {
                       value: "__preview_pdf__",
                       action: () => {
                         const sid = sessionIdRef.current;
-                        if (sid) {
-                          window.open(`${process.env.REACT_APP_BACKEND_URL}/api/consular/generate-pdf?session_id=${encodeURIComponent(sid)}`, "_blank");
+                        if (!sid) {
+                          toast.error("No active session found. Please start your application again.");
+                          return;
                         }
+                        const url = `${process.env.REACT_APP_BACKEND_URL}/api/consular/generate-pdf?session_id=${encodeURIComponent(sid)}`;
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.target = "_blank";
+                        a.rel = "noopener noreferrer";
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
                       },
                     },
                     { label: "📤 Submit application",  value: "submit"  },
@@ -1440,6 +2310,93 @@ export default function ConsularBot() {
                         {chip.label}
                       </button>
                     ))}
+                  </div>
+                );
+              })()}
+
+              {/* Seva Auth Panel — name/email entry */}
+              {sevaAuthStep === "name_email" && (
+                <div className="border-t border-orange-200 bg-orange-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-[#E06F2C] mb-2">Step 1 of 2 — Your Details</p>
+                  {sevaAuthError && <p className="text-xs text-red-500 mb-2">{sevaAuthError}</p>}
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="text"
+                      placeholder="Full Name"
+                      value={sevaAuthName}
+                      onChange={e => setSevaAuthName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Email Address"
+                      value={sevaAuthEmail}
+                      onChange={e => setSevaAuthEmail(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleSevaSubmitNameEmail()}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                    />
+                    <button
+                      onClick={handleSevaSubmitNameEmail}
+                      disabled={sevaAuthLoading}
+                      className="bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition disabled:opacity-50"
+                    >
+                      {sevaAuthLoading ? "Sending OTP…" : "Send OTP →"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Seva Auth Panel — OTP entry */}
+              {sevaAuthStep === "otp" && (
+                <div className="border-t border-orange-200 bg-orange-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-[#E06F2C] mb-2">Step 2 of 2 — Enter OTP</p>
+                  {sevaAuthError && <p className="text-xs text-red-500 mb-2">{sevaAuthError}</p>}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="6-digit OTP"
+                      maxLength={6}
+                      value={sevaOtpInput}
+                      onChange={e => setSevaOtpInput(e.target.value.replace(/\D/g, ""))}
+                      onKeyDown={e => e.key === "Enter" && handleSevaVerifyOtp()}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                    />
+                    <button
+                      onClick={handleSevaVerifyOtp}
+                      disabled={sevaAuthLoading}
+                      className="bg-[#E06F2C] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#c45a1a] transition disabled:opacity-50"
+                    >
+                      {sevaAuthLoading ? "…" : "Verify ✓"}
+                    </button>
+                  </div>
+                  <button onClick={() => { setSevaAuthStep("name_email"); setSevaOtpInput(""); setSevaAuthError(""); }} className="text-xs text-gray-400 hover:text-gray-600 mt-1">← Back</button>
+                </div>
+              )}
+
+              {/* Seva Form Field Panel — sequential manual entry */}
+              {sevaFormMode === "manual" && sevaCurrentApp && (() => {
+                const fields = sevaCurrentApp.fields || [];
+                const field = fields[sevaFormFieldIndex];
+                if (!field) return null;
+                return (
+                  <div className="border-t border-blue-200 bg-blue-50 px-4 py-3">
+                    <p className="text-xs font-semibold text-blue-600 mb-1">{field.label} ({sevaFormFieldIndex + 1}/{fields.length})</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder={field.label}
+                        value={sevaFormInput}
+                        onChange={e => setSevaFormInput(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && handleSevaFormFieldSubmit()}
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                      <button
+                        onClick={handleSevaFormFieldSubmit}
+                        className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition"
+                      >
+                        Next →
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
@@ -1532,6 +2489,48 @@ export default function ConsularBot() {
           <p>GDPR, DPDA & POPIA Compliant • Your data is secure and private</p>
         </footer>
       </div>
+
+      {/* My Applications Modal */}
+      {showSevaApps && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowSevaApps(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <h2 className="text-lg font-bold text-[#1A2E40]">My Applications</h2>
+              <button onClick={() => setShowSevaApps(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {sevaApps.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-8">No applications found.</p>
+              ) : sevaApps.map(app => (
+                <div key={app.id} className="border border-gray-200 rounded-xl p-4 hover:border-[#E06F2C] transition">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-[#1A2E40] text-sm">{app.service_name}</p>
+                      <p className="text-xs text-[#E06F2C] font-mono mt-0.5">{app.reference_id}</p>
+                      <p className="text-xs text-gray-400 mt-1">{new Date(app.created_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                        app.status === "confirmed" ? "bg-green-100 text-green-700" :
+                        app.status === "submitted" ? "bg-blue-100 text-blue-700" :
+                        "bg-gray-100 text-gray-600"
+                      }`}>{app.status.charAt(0).toUpperCase() + app.status.slice(1)}</span>
+                      {app.has_pdf && (
+                        <button
+                          onClick={() => handleSevaDownloadPdf(app.id)}
+                          className="flex items-center gap-1 text-xs bg-[#1A2E40] text-white px-2.5 py-1 rounded-full hover:bg-[#243a52] transition"
+                        >
+                          <Download className="w-3 h-3" /> PDF
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Camera Dialog */}
       <Dialog open={showCamera} onOpenChange={(open) => !open && stopCamera()}>

@@ -310,6 +310,7 @@ async def sevasetu_delivery_webhook(
     return {"error": "Missing required parameters: qStatus and qMsgRef"}
 
 from user_routes import router as user_router
+from seva_setu_auth_routes import router as seva_setu_router
 
 api_router.include_router(auth_router)
 api_router.include_router(super_admin_router)
@@ -322,6 +323,7 @@ api_router.include_router(template_router)
 api_router.include_router(monitoring_router)
 api_router.include_router(admin_router)
 api_router.include_router(user_router)
+api_router.include_router(seva_setu_router)
 
 app.include_router(api_router)
 
@@ -345,10 +347,14 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+_IS_DEV = os.environ.get("ENVIRONMENT", "development").lower() == "development"
+
 class HSTSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+        # HSTS must only be sent over HTTPS — skip in local dev to avoid ERR_FAILED
+        if not _IS_DEV:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"

@@ -78,6 +78,7 @@ def generate_application_pdf(
     form_data: Dict[str, str],
     tracking_id: str,
     uploaded_docs: Optional[List[Dict]] = None,
+    required_docs: Optional[List[str]] = None,
 ) -> bytes:
     """
     Generate an editable AcroForm PDF for the applicant to review.
@@ -88,7 +89,8 @@ def generate_application_pdf(
     page_w, page_h = A4
     c = rl_canvas.Canvas(buf, pagesize=A4)
 
-    _draw_page(c, page_w, page_h, service_name, form_data, tracking_id, uploaded_docs or [])
+    _draw_page(c, page_w, page_h, service_name, form_data, tracking_id,
+               uploaded_docs or [], required_docs or [])
 
     c.save()
     return buf.getvalue()
@@ -106,6 +108,7 @@ def _draw_page(
     form_data: Dict,
     tracking_id: str,
     uploaded_docs: List[Dict],
+    required_docs: List[str] = None,
 ):
     # ── Header band ───────────────────────────────────────────────────
     header_h = 30 * mm
@@ -161,22 +164,23 @@ def _draw_page(
     field_start_y = notice_y - 12 * mm
     _draw_form_fields(c, pw, ph, form_data, field_start_y)
 
-    # ── Documents uploaded ────────────────────────────────────────────
-    # Calculate how many fields were drawn to find next y position
-    fields = list(form_data.items())
-    fields_drawn = len(fields)
-    field_block_h = fields_drawn * 14 * mm
-    docs_y = field_start_y - field_block_h - 8 * mm
+    # Track vertical position after form fields
+    field_block_h = len(form_data) * 14 * mm
+    current_y = field_start_y - field_block_h - 8 * mm
 
-    if docs_y > 40 * mm:
-        _draw_docs_section(c, pw, uploaded_docs, docs_y)
-        sig_y = docs_y - (len(uploaded_docs) + 1) * 7 * mm - 10 * mm
-    else:
-        sig_y = docs_y
+    # ── Required documents checklist ──────────────────────────────────
+    if required_docs and current_y > 50 * mm:
+        _draw_required_docs_section(c, pw, required_docs, current_y)
+        current_y -= (len(required_docs) + 2) * 7 * mm + 8 * mm
+
+    # ── Uploaded documents checklist ──────────────────────────────────
+    if uploaded_docs and current_y > 50 * mm:
+        _draw_docs_section(c, pw, uploaded_docs, current_y)
+        current_y -= (len(uploaded_docs) + 2) * 7 * mm + 8 * mm
 
     # ── Signature line ────────────────────────────────────────────────
-    if sig_y > 35 * mm:
-        _draw_signature(c, pw, sig_y)
+    if current_y > 35 * mm:
+        _draw_signature(c, pw, current_y)
 
     # ── Footer ────────────────────────────────────────────────────────
     _draw_footer(c, pw)
@@ -232,14 +236,37 @@ def _draw_form_fields(c, pw: float, ph: float, form_data: Dict, start_y: float):
         y -= row_h
 
 
-def _draw_docs_section(c, pw: float, uploaded_docs: List[Dict], start_y: float):
-    """Show a checklist of uploaded documents."""
+def _draw_required_docs_section(c, pw: float, required_docs: List[str], start_y: float):
+    """Show a checklist of required documents the applicant must bring."""
     left_margin = 15 * mm
     y = start_y
 
     c.setFont("Helvetica-Bold", 9)
     c.setFillColor(_NAVY)
-    c.drawString(left_margin, y + 2 * mm, "UPLOADED DOCUMENTS")
+    c.drawString(left_margin, y + 2 * mm, "REQUIRED DOCUMENTS (Please bring originals + copies)")
+    c.setStrokeColor(_NAVY)
+    c.setLineWidth(1)
+    c.line(left_margin, y + 0.5 * mm, left_margin + 90 * mm, y + 0.5 * mm)
+    y -= 6 * mm
+
+    for doc in required_docs:
+        c.setFillColor(_ORANGE)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(left_margin, y, "□")
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica", 8)
+        c.drawString(left_margin + 6 * mm, y, doc)
+        y -= 7 * mm
+
+
+def _draw_docs_section(c, pw: float, uploaded_docs: List[Dict], start_y: float):
+    """Show a checklist of uploaded/attached documents."""
+    left_margin = 15 * mm
+    y = start_y
+
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColor(_NAVY)
+    c.drawString(left_margin, y + 2 * mm, "ATTACHED DOCUMENTS")
     c.setStrokeColor(_NAVY)
     c.setLineWidth(1)
     c.line(left_margin, y + 0.5 * mm, left_margin + 50 * mm, y + 0.5 * mm)

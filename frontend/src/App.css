@@ -32,6 +32,12 @@
     }
 }
 
+@keyframes loading-bar {
+    0%   { transform: translateX(-100%); width: 40%; }
+    50%  { width: 60%; }
+    100% { transform: translateX(300%); width: 40%; }
+}
+
 .step-line-active {
     background: linear-gradient(90deg, #E06F2C 0%, #2E8B57 100%);
 }

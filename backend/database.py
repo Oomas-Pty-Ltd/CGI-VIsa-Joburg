@@ -120,6 +120,25 @@ async def create_indexes():
         await db.applications.create_index([("user_id", 1), ("created_at", -1)])
         await db.applications.create_index([("status", 1), ("created_at", -1)])
 
+        # ── Seva Setu auth + application indexes ──────────────────────────
+        await db.seva_setu_users.create_index("id", unique=True)
+        await db.seva_setu_users.create_index("email", unique=True)
+
+        await db.otp_tokens.create_index("id", unique=True)
+        await db.otp_tokens.create_index("email")
+        await db.otp_tokens.create_index("expires_at", expireAfterSeconds=0)
+
+        await db.seva_setu_sessions.create_index("session_id", unique=True)
+        await db.seva_setu_sessions.create_index("user_id")
+        await db.seva_setu_sessions.create_index("last_active")
+
+        await db.seva_setu_applications.create_index("id", unique=True)
+        await db.seva_setu_applications.create_index("reference_id", unique=True)
+        await db.seva_setu_applications.create_index("user_id")
+        await db.seva_setu_applications.create_index("edit_token", sparse=True)
+        await db.seva_setu_applications.create_index("status")
+        await db.seva_setu_applications.create_index([("user_id", 1), ("created_at", -1)])
+
         logger.info("Database indexes created successfully")
         
     except Exception as e:
