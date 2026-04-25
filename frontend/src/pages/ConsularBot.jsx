@@ -592,6 +592,7 @@ export default function ConsularBot() {
 
     // Clear Seva Setu auth + application state
     sessionStorage.removeItem("seva_token");
+    sessionStorage.removeItem("seva_user");
     sevaTokenRef.current = null;
     setSevaToken(null);
     setSevaUser(null);
@@ -683,6 +684,7 @@ export default function ConsularBot() {
       const res = await sevaApi("POST", "/auth/verify-otp", { email: sevaAuthEmail.trim().toLowerCase(), otp: sevaOtpInput.trim() });
       const token = res.session_token;
       sessionStorage.setItem("seva_token", token);
+      sessionStorage.setItem("seva_user", JSON.stringify(res.user));
       sevaTokenRef.current = token;
       setSevaToken(token);
       setSevaUser(res.user);
@@ -2179,6 +2181,7 @@ export default function ConsularBot() {
                           setSevaUser(null);
                           sevaTokenRef.current = null;
                           sessionStorage.removeItem("seva_token");
+                          sessionStorage.removeItem("seva_user");
                           setSevaCurrentApp(null);
                           setSevaFormMode(null);
                           setSevaFormData({});
@@ -2204,6 +2207,7 @@ export default function ConsularBot() {
                             setSevaUser(null);
                             sevaTokenRef.current = null;
                             sessionStorage.removeItem("seva_token");
+                            sessionStorage.removeItem("seva_user");
                             setSevaCurrentApp(null);
                             setSevaFormMode(null);
                             setSevaFormData({});

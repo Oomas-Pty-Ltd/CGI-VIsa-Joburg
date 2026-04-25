@@ -384,13 +384,19 @@ async def start_auth(req: StartAuthRequest):
         "attempts": 0,
     })
 
-    # Send OTP
-    send_otp_email(email, OTP_DEV)
+    # Send OTP — if email is not configured the fallback OTP is 123456
+    email_sent = send_otp_email(email, OTP_DEV)
+    if email_sent:
+        msg = f"OTP sent to {email}. Please enter it to continue."
+    else:
+        logger.warning(f"[AUTH] OTP email failed for {email}. Using dev OTP: {OTP_DEV}")
+        msg = f"Email delivery unavailable — use OTP: {OTP_DEV} to continue."
 
     return {
         "success": True,
         "is_new_user": is_new,
-        "message": f"OTP sent to {email}. Please enter it to continue.",
+        "message": msg,
+        "email_sent": email_sent,
     }
 
 

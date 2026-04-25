@@ -16,18 +16,25 @@ logger = logging.getLogger(__name__)
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
+# Support both SMTP_PASSWORD and legacy SMTP_PASS
+SMTP_PASS = os.environ.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASS", "")
+# Support both FROM_EMAIL and legacy SMTP_FROM
+SMTP_FROM = os.environ.get("FROM_EMAIL") or os.environ.get("SMTP_FROM") or SMTP_USER
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-_DEV_MODE = not SMTP_USER  # skip actual send if SMTP not configured
+# Dev mode: skip actual send when SMTP credentials are not fully configured
+_DEV_MODE = not (SMTP_USER and SMTP_PASS)
 
 
 def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = None, attachment_name: str = "application.pdf") -> bool:
     if _DEV_MODE:
-        logger.info(f"[EMAIL DEV] To: {to} | Subject: {subject}")
-        logger.info(f"[EMAIL DEV] Body (truncated): {html[:200]}")
-        return True
+        logger.warning(
+            f"[EMAIL DEV MODE] SMTP not configured — email NOT sent.\n"
+            f"  To: {to}\n  Subject: {subject}\n"
+            f"  Set SMTP_USER + SMTP_PASSWORD in .env to enable real delivery.\n"
+            f"  OTP fallback: 123456"
+        )
+        return False   # return False so callers know delivery didn't happen
     try:
         msg = MIMEMultipart("mixed")
         msg["From"] = SMTP_FROM
@@ -45,10 +52,10 @@ def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = 
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_FROM, to, msg.as_string())
-        logger.info(f"Email sent to {to}: {subject}")
+        logger.info(f"[EMAIL] Sent → {to} | {subject}")
         return True
     except Exception as e:
-        logger.error(f"Email send failed to {to}: {e}")
+        logger.error(f"[EMAIL] Send failed → {to} | {e}")
         return False
 
 
