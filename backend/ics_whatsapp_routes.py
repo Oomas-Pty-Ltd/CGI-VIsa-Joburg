@@ -23,17 +23,23 @@ Interactive WhatsApp features:
 ====================================================================
 """
 
+import asyncio
 import json
 import logging
 import os
 import re
+import smtplib
 import uuid
 from datetime import datetime, timezone
+from email import encoders as _email_encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional
 from urllib.parse import unquote_plus
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from database import get_database
@@ -68,6 +74,169 @@ router = APIRouter(prefix="/ics-whatsapp", tags=["ics-whatsapp"])
 logger = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+# =====================================================================
+# LANGUAGE SUPPORT  (mirrors consular_routes.py — keep in sync)
+# =====================================================================
+_LANG_NAMES: dict[str, str] = {
+    "en":  "English",
+    # Indian
+    "hi":  "Hindi",      "bn":  "Bengali",    "mr":  "Marathi",
+    "te":  "Telugu",     "ta":  "Tamil",      "gu":  "Gujarati",
+    "ur":  "Urdu",       "kn":  "Kannada",    "or":  "Odia",
+    "ml":  "Malayalam",  "pa":  "Punjabi",    "as":  "Assamese",
+    "mai": "Maithili",   "sa":  "Sanskrit",   "sat": "Santali",
+    "ks":  "Kashmiri",   "ne":  "Nepali",     "sd":  "Sindhi",
+    "doi": "Dogri",      "kok": "Konkani",    "mni": "Manipuri",
+    "brx": "Bodo",       "mwr": "Marwari",
+    # South African
+    "zu":  "Zulu",       "xh":  "Xhosa",      "af":  "Afrikaans",
+    "nso": "Sepedi",     "tn":  "Setswana",   "st":  "Sesotho",
+    "ts":  "Xitsonga",   "ss":  "siSwati",    "ve":  "Tshivenda",
+    "nr":  "isiNdebele",
+    # International
+    "ar":  "Arabic",     "fr":  "French",     "sw":  "Swahili",
+    "ha":  "Hausa",      "yo":  "Yoruba",     "ig":  "Igbo",
+    "am":  "Amharic",    "om":  "Oromo",
+}
+
+_LANG_SCRIPT_HINT: dict[str, str] = {
+    "hi":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script.",
+    "mr":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script.",
+    "ne":  "You MUST write in Devanagari script (देवनागरी).",
+    "sa":  "You MUST write in Devanagari script (देवनागरी).",
+    "doi": "You MUST write in Devanagari script (देवनागरी).",
+    "ur":  "You MUST write in Perso-Arabic script (اردو رسم الخط). Do NOT use Devanagari script.",
+    "pa":  "You MUST write in Gurmukhi script (ਗੁਰਮੁਖੀ). Do NOT use Shahmukhi/Perso-Arabic script.",
+    "ta":  "You MUST write in Tamil script (தமிழ் எழுத்து). Do NOT use any other South Indian script.",
+    "te":  "You MUST write in Telugu script (తెలుగు లిపి).",
+    "kn":  "You MUST write in Kannada script (ಕನ್ನಡ ಲಿಪಿ).",
+    "ml":  "You MUST write in Malayalam script (മലയാളം ലിപി).",
+    "gu":  "You MUST write in Gujarati script (ગુજરાતી લિપિ).",
+    "bn":  "You MUST write in Bengali script (বাংলা লিপি).",
+    "or":  "You MUST write in Odia script (ଓଡ଼ିଆ ଲିପି).",
+    "as":  "You MUST write in Bengali-Assamese script (অসমীয়া লিপি).",
+}
+
+# Ordered list used to build the numbered WhatsApp menu
+# (english_name, lang_code, native_script_display)
+_LANGUAGE_LIST = [
+    # Indian Languages
+    ("English",    "en",  "English"),
+    ("Hindi",      "hi",  "हिंदी"),
+    ("Bengali",    "bn",  "বাংলা"),
+    ("Marathi",    "mr",  "मराठी"),
+    ("Telugu",     "te",  "తెలుగు"),
+    ("Tamil",      "ta",  "தமிழ்"),
+    ("Gujarati",   "gu",  "ગુજરાતી"),
+    ("Urdu",       "ur",  "اردو"),
+    ("Kannada",    "kn",  "ಕನ್ನಡ"),
+    ("Odia",       "or",  "ଓଡ଼ିଆ"),
+    ("Malayalam",  "ml",  "മലയാളം"),
+    ("Punjabi",    "pa",  "ਪੰਜਾਬੀ"),
+    ("Assamese",   "as",  "অসমীয়া"),
+    ("Maithili",   "mai", "मैथिली"),
+    ("Sanskrit",   "sa",  "संस्कृत"),
+    ("Santali",    "sat", "ᱥᱟᱱᱛᱟᱲᱤ"),
+    ("Kashmiri",   "ks",  "کٲشُر"),
+    ("Nepali",     "ne",  "नेपाली"),
+    ("Sindhi",     "sd",  "سنڌي"),
+    ("Dogri",      "doi", "डोगरी"),
+    ("Konkani",    "kok", "कोंकणी"),
+    ("Manipuri",   "mni", "মৈতৈলোন্"),
+    ("Bodo",       "brx", "बड़ो"),
+    ("Marwari",    "mwr", "मारवाड़ी"),
+    # South African Languages
+    ("Zulu",       "zu",  "isiZulu"),
+    ("Xhosa",      "xh",  "isiXhosa"),
+    ("Afrikaans",  "af",  "Afrikaans"),
+    ("Sepedi",     "nso", "Sepedi"),
+    ("Setswana",   "tn",  "Setswana"),
+    ("Sesotho",    "st",  "Sesotho"),
+    ("Xitsonga",   "ts",  "Xitsonga"),
+    ("siSwati",    "ss",  "siSwati"),
+    ("Tshivenda",  "ve",  "Tshivenda"),
+    ("isiNdebele", "nr",  "isiNdebele"),
+    # International Languages
+    ("Arabic",     "ar",  "العربية"),
+    ("French",     "fr",  "Français"),
+    ("Swahili",    "sw",  "Kiswahili"),
+    ("Hausa",      "ha",  "Hausa"),
+    ("Yoruba",     "yo",  "Yorùbá"),
+    ("Igbo",       "ig",  "Igbo"),
+    ("Amharic",    "am",  "አማርኛ"),
+    ("Oromo",      "om",  "Oromoo"),
+]
+
+# number string → (english_name, lang_code)
+_LANGUAGES: dict[str, tuple] = {
+    str(i + 1): (eng, code) for i, (eng, code, _n) in enumerate(_LANGUAGE_LIST)
+}
+
+# name → (english_name, lang_code) for both English and native script input
+_LANG_BY_NAME: dict = {}
+for _li, (_le, _lc, _ln) in enumerate(_LANGUAGE_LIST):
+    _LANG_BY_NAME[_le.lower()] = (_le, _lc)
+    _LANG_BY_NAME[_ln]         = (_le, _lc)
+    if _ln.lower() != _le.lower():
+        _LANG_BY_NAME[_ln.lower()] = (_le, _lc)
+del _li, _le, _lc, _ln
+
+
+def _detect_language_input(text: str):
+    """
+    Returns (english_name, lang_code) if text is a number 1-42 or a language name
+    (English or native script).  Returns None if no match.
+    """
+    t = text.strip()
+    if t in _LANGUAGES:
+        eng, code = _LANGUAGES[t]
+        return eng, code
+    return _LANG_BY_NAME.get(t.lower()) or _LANG_BY_NAME.get(t)
+
+
+def _wa_lang_instruction(code: str) -> str:
+    """Return the LANGUAGE system-prompt line for the given language code."""
+    code = (code or "en").lower()
+    name = _LANG_NAMES.get(code, "English")
+    if code == "en":
+        return "LANGUAGE: Respond in English."
+    script_hint = _LANG_SCRIPT_HINT.get(code, "")
+    script_line = f" {script_hint}" if script_hint else ""
+    return (
+        f"LANGUAGE: The user has selected {name} as their preferred language. "
+        f"You MUST respond entirely in {name}.{script_line} "
+        f"Even if the user writes in English, always reply in {name}. "
+        f"Proper nouns, addresses, phone numbers, email addresses, URLs, and "
+        f"tracking IDs must remain unchanged (do not translate them)."
+    )
+
+
+def _build_language_menu() -> str:
+    lines = [
+        "🌐 *Choose your preferred language:*",
+        "Reply with the number or type the language name.\n",
+        "🇮🇳 *Indian Languages*",
+    ]
+    for i, (eng, _code, native) in enumerate(_LANGUAGE_LIST):
+        num = i + 1
+        if num == 25:
+            lines.append("\n🇿🇦 *South African Languages*")
+        elif num == 35:
+            lines.append("\n🌍 *International Languages*")
+        display = f"{native} ({eng})" if native != eng else eng
+        lines.append(f"{num}. {display}")
+    lines.append(
+        "\n👉 You can also type your language name (e.g., \"Hindi\", \"Tamil\", \"Zulu\").\n"
+        "\n⚙️ *Note:*\n"
+        "If no language is selected, the default language will be English.\n"
+        "Once selected, the entire conversation will continue in your chosen language."
+    )
+    return "\n".join(lines)
+
+
+_LANGUAGE_MENU = _build_language_menu()
+
 
 # =====================================================================
 # MODELS
@@ -250,7 +419,7 @@ def _truncate_body(text: str) -> str:
 # =====================================================================
 # LLM WITH KNOWLEDGE CONTEXT
 # =====================================================================
-async def _llm_response(user_message: str, session_id: str, context: str = "") -> str:
+async def _llm_response(user_message: str, session_id: str, context: str = "", lang_code: str = "en") -> str:
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
         return (
             "Thank you for your message. For detailed assistance please visit "
@@ -293,7 +462,7 @@ The data comes from: www.cgijoburg.gov.in, vfsglobal.com, and admin-uploaded doc
 Do NOT use general training knowledge. Do NOT invent or add information not in the data below.
 If the answer is not in the data, say so and direct the user to contact the Consulate directly.
 
-LANGUAGE: Always respond in English only, regardless of what language the user writes in.
+{_wa_lang_instruction(lang_code)}
 
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
@@ -422,6 +591,411 @@ def _normalize_phone(raw: str, waba_number: str = "") -> str:
 
 
 # =====================================================================
+# APPLICATION FLOW — WHATSAPP HELPERS
+# =====================================================================
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
+
+_SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+_SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+_SMTP_USER = os.environ.get("SMTP_USER", "")
+_SMTP_PASS = os.environ.get("SMTP_PASSWORD", "")
+
+# ── Type A services — Gov portal + reference number collection ────────
+_WA_TYPE_A = {
+    "passport": {
+        "name": "Passport Services",
+        "gov_url": "https://passportindia.gov.in",
+        "vfs_note": (
+            "Submit your completed application at *VFS Global* "
+            "(2nd Floor, Harrow Court, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007)\n"
+            "🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00"
+        ),
+        "documents": [
+            "Valid/Expired Indian Passport — original + photocopy of all pages",
+            "Completed application from passportindia.gov.in",
+            "3 recent passport-size photos (51×51 mm, white background)",
+            "Proof of South African address (utility bill/lease)",
+            "South African ID / valid visa / work permit",
+        ],
+    },
+    "visa": {
+        "name": "Indian Visa",
+        "gov_url": "https://indianvisaonline.gov.in",
+        "vfs_note": (
+            "Submit at *VFS Global Visa Centre* "
+            "(1st Floor, Rivonia Village Office Block, cnr Rivonia Blvd & Mutual Rd, JHB)\n"
+            "🕐 Mon–Fri 08:00–15:00"
+        ),
+        "documents": [
+            "Valid foreign passport (min. 6 months validity remaining)",
+            "Completed Visa Application Form from indianvisaonline.gov.in",
+            "2 recent passport-size photographs",
+            "Travel itinerary / confirmed tickets",
+            "Hotel bookings / invitation letter",
+            "Bank statement (last 3 months)",
+        ],
+    },
+    "pcc": {
+        "name": "Police Clearance Certificate (PCC)",
+        "gov_url": "https://portal5.passportindia.gov.in",
+        "vfs_note": (
+            "Submit at *VFS Global* "
+            "(2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007)\n"
+            "🕐 Submission: Mon–Fri 08:00–15:00"
+        ),
+        "documents": [
+            "Valid Indian Passport — original + photocopy",
+            "Completed PCC Application Form (portal5.passportindia.gov.in)",
+            "Proof of current South African residential address",
+            "Copy of SA Permanent Residence / Visa",
+            "2 passport-size photographs",
+            "Fee payment receipt",
+        ],
+    },
+}
+
+# Type A state fields — collected after gov reference
+_WA_TYPE_A_FIELDS = [
+    {"key": "full_name", "question": "Please enter your *full name* (as on your passport):"},
+    {"key": "email",     "question": "Please enter your *email address* (for PDF copy):"},
+]
+
+# Keywords that show "my applications" list
+_MY_APPS_WORDS = {
+    "my applications", "my application", "my apps", "applications",
+    "application list", "application status", "my status", "my forms",
+    "show applications", "list applications",
+}
+
+# Keywords that show the services menu
+_SERVICES_MENU_WORDS = {
+    "services", "service list", "what services", "available services",
+    "show services", "consular services", "what can you do",
+    "help me apply", "i want to apply", "how to apply",
+}
+
+# Active form-filling states — language detection must not interfere
+_FORM_ACTIVE_STATES = {"consent_pending", "collecting", "docs_uploading", "docs_pending", "paused"}
+
+
+async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
+    """Generate PDF bytes for a submitted application."""
+    try:
+        from services.pdf_service import generate_application_pdf
+        app = await db.applications.find_one(
+            {"tracking_id": tracking_id.upper()}, {"_id": 0}
+        )
+        if not app or app.get("service") not in SERVICES:
+            return None
+        service_name  = SERVICES[app["service"]]["name"]
+        uploaded_docs = [
+            {"name": d.get("name", "Document"), "status": d.get("status", "uploaded")}
+            for d in app.get("documents", [])
+        ]
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_application_pdf(
+                service_name=service_name,
+                form_data=app.get("form_data", {}),
+                tracking_id=tracking_id.upper(),
+                uploaded_docs=uploaded_docs,
+            ),
+        )
+    except Exception as exc:
+        logger.error("[WA PDF] Generation failed %s: %s", tracking_id, exc)
+        return None
+
+
+def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: bytes):
+    """Synchronous SMTP helper — run in executor."""
+    if not _SMTP_USER or not _SMTP_PASS:
+        logger.warning("[WA EMAIL] SMTP not configured — skipping email for %s", tracking_id)
+        return
+    safe   = service_name.lower().replace(" ", "_")
+    fname  = f"application_{safe}_{tracking_id}.pdf"
+    msg    = MIMEMultipart()
+    msg["From"]    = _SMTP_USER
+    msg["To"]      = to_email
+    msg["Subject"] = f"Seva Setu — {service_name} Application ({tracking_id})"
+    body = (
+        f"<html><body style='font-family:Arial,sans-serif'>"
+        f"<h2 style='color:#000080'>🇮🇳 Seva Setu — Application Submitted</h2>"
+        f"<p>Your <strong>{service_name}</strong> application has been received.</p>"
+        f"<table style='border-collapse:collapse'>"
+        f"<tr><td style='padding:6px 12px;border:1px solid #ddd'><strong>Tracking ID</strong></td>"
+        f"<td style='padding:6px 12px;border:1px solid #ddd'><code>{tracking_id}</code></td></tr>"
+        f"<tr><td style='padding:6px 12px;border:1px solid #ddd'><strong>Service</strong></td>"
+        f"<td style='padding:6px 12px;border:1px solid #ddd'>{service_name}</td></tr>"
+        f"</table>"
+        f"<p>Your application PDF is attached. Keep it for your records.</p>"
+        f"<p style='color:#666;font-size:12px'>Consulate General of India, Johannesburg<br>"
+        f"📞 +27 11-4828484 | ✉️ ccom.jburg@mea.gov.in</p>"
+        f"</body></html>"
+    )
+    msg.attach(MIMEText(body, "html"))
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(pdf_bytes)
+    _email_encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+    msg.attach(part)
+    try:
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as srv:
+            srv.starttls()
+            srv.login(_SMTP_USER, _SMTP_PASS)
+            srv.send_message(msg)
+        logger.info("[WA EMAIL] PDF sent to %s for %s", to_email, tracking_id)
+    except Exception as exc:
+        logger.error("[WA EMAIL] Failed → %s: %s", to_email, exc)
+
+
+async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
+    """
+    Called right after process_flow() returns step='submitted'.
+    Finds the application, generates PDF, sends it via WhatsApp document
+    and emails it to the applicant.
+    """
+    try:
+        app = await db.applications.find_one(
+            {"user_id": phone, "status": "submitted"},
+            {"_id": 0},
+            sort=[("submitted_at", -1)],
+        )
+        if not app:
+            app = await db.applications.find_one(
+                {"session_id": session_id, "status": "submitted"},
+                {"_id": 0},
+                sort=[("submitted_at", -1)],
+            )
+        if not app:
+            return
+
+        tracking_id  = app.get("tracking_id", "")
+        service_name = app.get("service_name") or SERVICES.get(app.get("service", ""), {}).get("name", "")
+        to_email     = app.get("form_data", {}).get("email", "")
+
+        pdf_bytes = await _wa_generate_pdf(tracking_id, db)
+        if not pdf_bytes:
+            return
+
+        # Send PDF as WhatsApp document if public URL is configured
+        if APP_BASE_URL:
+            safe  = (service_name or "application").lower().replace(" ", "_")
+            fname = f"application_{safe}_{tracking_id}.pdf"
+            pdf_url = f"{APP_BASE_URL}/api/ics-whatsapp/pdf/{tracking_id}"
+            result = await ics_waba.send_media(
+                to=phone,
+                media_type="document",
+                url=pdf_url,
+                caption=f"📄 Your *{service_name}* application PDF\n🔖 Tracking ID: `{tracking_id}`",
+                filename=fname,
+                from_override=waba_number,
+            )
+            if "error" not in result:
+                await _log_message(
+                    phone, "outbound", f"[PDF document: {fname}]",
+                    {"step": "pdf_delivery", "tracking_id": tracking_id}, db,
+                )
+
+        # Email PDF to applicant
+        if to_email and pdf_bytes:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, _smtp_send, to_email, service_name, tracking_id, pdf_bytes,
+            )
+            await ics_waba.send_text(
+                phone,
+                f"📧 A copy has also been emailed to *{to_email}*.",
+                from_override=waba_number,
+            )
+    except Exception as exc:
+        logger.error("[WA AFTER SUBMIT] phone=%s: %s", phone, exc)
+
+
+async def _wa_my_applications(phone: str, db) -> str:
+    """Return a formatted summary of the user's recent applications."""
+    apps = await db.applications.find(
+        {"user_id": phone},
+        {"_id": 0, "tracking_id": 1, "service_name": 1, "status": 1, "created_at": 1},
+        sort=[("created_at", -1)],
+    ).limit(5).to_list(5)
+
+    if not apps:
+        return (
+            "You have no applications on record.\n\n"
+            "To start, type the service name — e.g. *Passport*, *OCI*, *Visa*, *Attestation*."
+        )
+
+    lines = ["📋 *Your Recent Applications*\n"]
+    for i, a in enumerate(apps, 1):
+        status = a.get("status", "unknown").replace("_", " ").title()
+        svc    = a.get("service_name", "—")
+        tid    = a.get("tracking_id", "—")
+        dt     = (a.get("created_at") or "")[:10]
+        lines.append(f"{i}. *{svc}*\n   🔖 {tid}\n   📅 {dt}  ·  {status}")
+
+    lines.append(
+        "\n_Send a Tracking ID to view details or receive your PDF._\n"
+        "_Type *apply* + service name to start a new application._"
+    )
+    return "\n\n".join(lines)
+
+
+# =====================================================================
+# TYPE A STATE MACHINE HELPERS
+# =====================================================================
+async def _type_a_get(db, session_id: str) -> dict:
+    s = await db.chat_sessions.find_one({"id": session_id}, {"metadata.wa_type_a": 1})
+    return (s or {}).get("metadata", {}).get("wa_type_a", {})
+
+
+async def _type_a_save(db, session_id: str, **fields):
+    current = await _type_a_get(db, session_id)
+    current.update(fields)
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$set": {"metadata.wa_type_a": current}},
+    )
+
+
+async def _type_a_clear(db, session_id: str):
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$unset": {"metadata.wa_type_a": ""}},
+    )
+
+
+async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> str:
+    """
+    Finalise a Type A application: create DB record, generate PDF, deliver it.
+    Returns the tracking ID.
+    """
+    ta = await _type_a_get(db, session_id)
+    svc_key      = ta.get("service", "passport")
+    svc          = _WA_TYPE_A.get(svc_key, {})
+    service_name = svc.get("name", svc_key.title())
+    gov_ref      = ta.get("gov_reference", "")
+    form_data    = {
+        "full_name":             ta.get("full_name", ""),
+        "email":                 ta.get("email", ""),
+        "phone":                 phone,
+        "gov_reference_number":  gov_ref,
+    }
+    now        = datetime.now(timezone.utc)
+    app_id     = str(uuid.uuid4())
+    tracking_id = f"{svc_key.upper()}-{now.strftime('%Y%m%d')}-{app_id[:6].upper()}"
+    doc_list   = [{"name": d, "status": "required"} for d in svc.get("documents", [])]
+
+    await db.applications.insert_one({
+        "id":                 app_id,
+        "tracking_id":        tracking_id,
+        "session_id":         session_id,
+        "user_id":            phone,
+        "service":            svc_key,
+        "service_name":       service_name,
+        "category":           "TYPE_A",
+        "status":             "submitted",
+        "form_data":          form_data,
+        "documents":          doc_list,
+        "gov_reference":      gov_ref,
+        "created_at":         now.isoformat(),
+        "updated_at":         now.isoformat(),
+        "submitted_at":       now.isoformat(),
+    })
+
+    # Generate and deliver PDF
+    from services.pdf_service import generate_application_pdf
+    loop = asyncio.get_event_loop()
+    try:
+        pdf_bytes = await loop.run_in_executor(
+            None,
+            lambda: generate_application_pdf(
+                service_name=service_name,
+                form_data=form_data,
+                tracking_id=tracking_id,
+                uploaded_docs=doc_list,
+            ),
+        )
+        if pdf_bytes:
+            if APP_BASE_URL:
+                pdf_url  = f"{APP_BASE_URL}/api/ics-whatsapp/pdf/{tracking_id}"
+                safe     = service_name.lower().replace(" ", "_")
+                await ics_waba.send_media(
+                    to=phone, media_type="document", url=pdf_url,
+                    caption=f"📄 *{service_name}* Application Summary\n🔖 Tracking ID: `{tracking_id}`",
+                    filename=f"application_{safe}_{tracking_id}.pdf",
+                    from_override=waba_number,
+                )
+            if form_data.get("email"):
+                loop2 = asyncio.get_event_loop()
+                await loop2.run_in_executor(
+                    None, _smtp_send, form_data["email"], service_name, tracking_id, pdf_bytes,
+                )
+                await ics_waba.send_text(
+                    phone,
+                    f"📧 PDF also emailed to *{form_data['email']}*.",
+                    from_override=waba_number,
+                )
+    except Exception as exc:
+        logger.error("[TYPE_A SUBMIT] PDF error for %s: %s", tracking_id, exc)
+
+    await _type_a_clear(db, session_id)
+    return tracking_id
+
+
+def _wa_services_menu() -> str:
+    """Build the WhatsApp services menu showing all Type A and Type B services."""
+    lines = [
+        "🏛️ *Consular Services — Seva Setu Bot*\n",
+        "─────────────────────────────",
+        "🌐 *Type A — Apply via Government Portal*",
+        "_(Bot records your reference number & generates PDF)_\n",
+    ]
+    num = 1
+    for key, svc in _WA_TYPE_A.items():
+        lines.append(f"{num}. *{svc['name']}*\n   🔗 {svc['gov_url']}")
+        num += 1
+
+    lines.append(
+        "\n─────────────────────────────\n"
+        "📝 *Type B — Fill Form Directly Here*\n"
+        "_(Complete the form in this chat)_\n"
+    )
+    for key, svc in SERVICES.items():
+        if key not in _WA_TYPE_A:
+            lines.append(f"{num}. *{svc['name']}*")
+            num += 1
+
+    lines.append(
+        "\n─────────────────────────────\n"
+        "💬 Type the *service name* or *number* to begin.\n"
+        "📋 Type *my applications* to view your submissions."
+    )
+    return "\n".join(lines)
+
+
+# =====================================================================
+# SESSION LANGUAGE HELPERS
+# =====================================================================
+async def _set_session_language(db, session_id: str, lang_name: str, lang_code: str):
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$set": {
+            "metadata.language":      lang_code,
+            "metadata.language_name": lang_name,
+            "metadata.lang_pending":  False,
+        }},
+    )
+
+
+async def _set_lang_pending(db, session_id: str):
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {"$set": {"metadata.lang_pending": True, "metadata.greeted": True}},
+    )
+
+
+# =====================================================================
 # BOT LOGIC — process one incoming message and send reply
 # Uses the same process_flow() engine as the web ConsularBot.
 # =====================================================================
@@ -482,6 +1056,92 @@ async def _handle_message(
     else:
         clean_text = guardrail_service.validate_input(user_text).sanitized_text
     
+    # ── Get or create session EARLY — needed for language state checks ──
+    session = await session_manager.get_or_create_session(
+        channel="whatsapp",
+        user_identifier=phone,
+        metadata={"waba_number": waba_number},
+    )
+    session_id         = session["id"]
+    _meta              = session.get("metadata", {})
+    _lang_pending_flag = _meta.get("lang_pending", False)
+    _lang_code         = _meta.get("language", "en")
+    _lang_name         = _meta.get("language_name", "English")
+
+    # ── Active form state check — used to protect language and menu detection ──
+    _form_active = _current_flow.get("state") in _FORM_ACTIVE_STATES
+
+    # ── GLOBAL COMMANDS — works from any non-form state ─────────────────
+    if not _form_active and not selected_id:
+        _t_lower = clean_text.strip().lower()
+        if _t_lower in _MY_APPS_WORDS:
+            apps_msg = await _wa_my_applications(phone, db)
+            await _wa_send(phone, apps_msg, db, "my_apps", waba_number)
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", apps_msg)
+            return
+        if _t_lower in _SERVICES_MENU_WORDS:
+            menu_msg = _wa_services_menu()
+            await _wa_send(phone, menu_msg, db, "services_menu", waba_number)
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", menu_msg)
+            return
+
+    # ── LANGUAGE SELECTION — skip during active form filling ────────────────
+    # During lang_pending: numbers 1-42 AND typed names are treated as language picks.
+    # At any other time: only a bare typed language name switches the language.
+    if _lang_pending_flag and not _form_active:
+        lang_result = _detect_language_input(clean_text)
+        if lang_result:
+            eng_name, code = lang_result
+            await _set_session_language(db, session_id, eng_name, code)
+            _lang_name, _lang_code = eng_name, code
+            confirm_msg = f"✅ Language set to *{eng_name}*. I'll continue all responses in {eng_name}. 🙏"
+            await _wa_send(phone, confirm_msg, db, "lang_set", waba_number)
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", confirm_msg)
+            return
+        else:
+            # No valid selection — clear lang_pending but KEEP the previously chosen language
+            _existing_code = _meta.get("language", "en")
+            _existing_name = _meta.get("language_name", "English")
+            await _set_session_language(db, session_id, _existing_name, _existing_code)
+            _lang_code = _existing_code
+            _lang_name = _existing_name
+    elif not _form_active and not clean_text.strip().isdigit():
+        _t = clean_text.strip().lower()
+
+        # "language" / "change language" keywords → show language menu to re-select
+        _LANG_MENU_TRIGGERS = {
+            "language", "change language", "languages", "select language",
+            "choose language", "switch language", "भाषा", "langue", "lugha",
+        }
+        if _t in _LANG_MENU_TRIGGERS:
+            await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
+            await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+            await _set_lang_pending(db, session_id)
+            await session_manager.add_message(session_id, "user", user_text)
+            return
+
+        # Bare typed language name → confirm switch then show menu for re-selection
+        _name_match = (
+            _LANG_BY_NAME.get(_t)
+            or _LANG_BY_NAME.get(clean_text.strip())
+        )
+        if _name_match:
+            eng_name, code = _name_match
+            await _set_session_language(db, session_id, eng_name, code)
+            _lang_name, _lang_code = eng_name, code
+            confirm_msg = f"✅ Language switched to *{eng_name}*. I'll continue all responses in {eng_name}. 🙏"
+            await _wa_send(phone, confirm_msg, db, "lang_set", waba_number)
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", confirm_msg)
+            # Show menu again so user can change their mind
+            await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
+            await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+            await _set_lang_pending(db, session_id)
+            return
+
     # ── Numbered reply fallback (when interactive messages unsupported) ─
     # Context-aware: interpretation depends on current flow state
     _service_keys = list(SERVICES.keys())
@@ -529,38 +1189,48 @@ async def _handle_message(
             )
             await _log_message(phone, "outbound", "Sure! Please type your question and I'll do my best to answer it. 🙏", {"step": "qa"}, db)
             return
+        elif selected_id == "type_a_submit":
+            clean_text = "submit"   # handled by Type A state machine below
         elif selected_id.startswith("apply_"):
             # Extract the service key directly — more reliable than text matching
             _svc_key = selected_id[len("apply_"):]
-            clean_text = f"apply {_svc_key}"
-            # Pre-set the service in the flow so process_flow() picks it up even from idle state
-            _pre_session = await session_manager.get_or_create_session(
-                channel="whatsapp", user_identifier=phone, metadata={"waba_number": waba_number}
-            )
-            from services.application_flow import _get_flow, _save_flow
-            _pre_flow = await _get_flow(_pre_session["id"])
-            if _svc_key in SERVICES:
-                _pre_flow["state"]   = "info_shown"
-                _pre_flow["service"] = _svc_key
-                await _save_flow(_pre_session["id"], _pre_flow)
+            if _svc_key in _WA_TYPE_A:
+                # Type A service — will be intercepted by state machine below
+                clean_text = f"apply {_svc_key}"
+            else:
+                clean_text = f"apply {_svc_key}"
+                # Pre-set the service in the flow so process_flow() picks it up even from idle state
+                _pre_session = await session_manager.get_or_create_session(
+                    channel="whatsapp", user_identifier=phone, metadata={"waba_number": waba_number}
+                )
+                from services.application_flow import _get_flow, _save_flow
+                _pre_flow = await _get_flow(_pre_session["id"])
+                if _svc_key in SERVICES:
+                    _pre_flow["state"]   = "info_shown"
+                    _pre_flow["service"] = _svc_key
+                    await _save_flow(_pre_session["id"], _pre_flow)
         elif selected_id in SERVICES:
             clean_text = f"apply {selected_id}"
 
-    # ── Get or create session (shared with web bot via session_manager) ─
-    session = await session_manager.get_or_create_session(
-        channel="whatsapp",
-        user_identifier=phone,
-        metadata={"waba_number": waba_number},
-    )
-    session_id = session["id"]
-
     # ── SHOW MAIN MENU ────────────────────────────────────────────────
-    # Only shown for explicit greeting/menu words — NOT for any question or query.
+    # Shown for: first message, greeting words, OR 10-min idle.
     # Everything else (questions, apply intents, service names) goes to the bot engine.
     current_flow = await get_flow_state(session_id)
 
     _MENU_WORDS = {"menu", "hi", "hello", "start", "help", "/start", "hey", "namaste", "hola"}
-    is_menu_trigger = clean_text.lower().strip() in _MENU_WORDS
+    _is_new_session   = not _meta.get("greeted", False)
+    _is_greeting_word = clean_text.lower().strip() in _MENU_WORDS
+
+    _is_long_idle = False
+    _last_act = session.get("last_activity", "")
+    if _last_act and not _is_new_session:
+        try:
+            _la_dt = datetime.fromisoformat(_last_act.replace("Z", "+00:00"))
+            _is_long_idle = (datetime.now(timezone.utc) - _la_dt).total_seconds() > 600
+        except Exception:
+            pass
+
+    is_menu_trigger = _is_new_session or _is_greeting_word or _is_long_idle
 
     if is_menu_trigger and not selected_id:
         # Send greeting + advisory as plain text first
@@ -590,6 +1260,11 @@ async def _handle_message(
             "• If you receive such a call, note the caller's details and report the incident to your local police immediately."
         )
         await ics_waba.send_text(phone, greeting_text, from_override=waba_number)
+        await _log_message(phone, "outbound", greeting_text, {"step": "greeting"}, db)
+        # Always follow greeting with language menu (new session, greeting word, or 10-min idle).
+        await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
+        await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+        await _set_lang_pending(db, session_id)
         return
 
     # ── SERVICE SELECTED FROM LIST — show info card + apply buttons ───
@@ -627,6 +1302,124 @@ async def _handle_message(
         # Case 2: No service context — let LLM handle
         elif current_flow.get("state") == "idle":
             pass  # fall through to bot engine
+
+    # ── TYPE A: detect apply intent and start gov-portal flow ───────────
+    if not _form_active:
+        _ta = _meta.get("wa_type_a", {})
+        _ta_state = _ta.get("state", "")
+
+        # ── Step handler: active Type A application ──────────────────────
+        if _ta_state:
+            from services.application_flow import is_discard as _is_discard
+            _ta_svc  = _ta.get("service", "passport")
+            _ta_name = _WA_TYPE_A.get(_ta_svc, {}).get("name", _ta_svc.title())
+
+            if _ta_state == "awaiting_ref":
+                ref = clean_text.strip()
+                if len(ref) >= 4:
+                    await _type_a_save(db, session_id, gov_reference=ref, state="collecting_name")
+                    await _wa_send(
+                        phone,
+                        f"✅ Reference *{ref}* saved.\n\n" + _WA_TYPE_A_FIELDS[0]["question"],
+                        db, "type_a", waba_number,
+                    )
+                else:
+                    await _wa_send(
+                        phone,
+                        f"Please send your government reference number for *{_ta_name}*.\n"
+                        "Type *discard* to cancel.",
+                        db, "type_a", waba_number,
+                    )
+                await session_manager.add_message(session_id, "user", user_text)
+                return
+
+            elif _ta_state == "collecting_name":
+                if _is_discard(clean_text):
+                    await _type_a_clear(db, session_id)
+                    await _wa_send(phone, "Application cancelled. How else can I help?", db, "type_a", waba_number)
+                else:
+                    await _type_a_save(db, session_id, full_name=clean_text.strip(), state="collecting_email")
+                    await _wa_send(phone, _WA_TYPE_A_FIELDS[1]["question"], db, "type_a", waba_number)
+                await session_manager.add_message(session_id, "user", user_text)
+                return
+
+            elif _ta_state == "collecting_email":
+                if _is_discard(clean_text):
+                    await _type_a_clear(db, session_id)
+                    await _wa_send(phone, "Application cancelled. How else can I help?", db, "type_a", waba_number)
+                    await session_manager.add_message(session_id, "user", user_text)
+                    return
+                await _type_a_save(db, session_id, email=clean_text.strip(), state="submitting")
+                ta_now = await _type_a_get(db, session_id)
+                summary = (
+                    f"📋 *Review Your {_ta_name} Application*\n\n"
+                    f"👤 Name: {ta_now.get('full_name', '—')}\n"
+                    f"📧 Email: {ta_now.get('email', '—')}\n"
+                    f"📞 Phone: {phone}\n"
+                    f"🔖 Gov Reference: {ta_now.get('gov_reference', '—')}\n\n"
+                    f"Reply *submit* to confirm or *discard* to cancel."
+                )
+                await _wa_send(phone, summary, db, "type_a", waba_number)
+                await ics_waba.send_buttons(
+                    to=phone,
+                    body="Ready to submit?",
+                    buttons=[
+                        {"id": "type_a_submit", "title": "Submit"},
+                        {"id": "btn_cancel",    "title": "Cancel"},
+                    ],
+                    header=_ta_name,
+                    from_override=waba_number,
+                )
+                await session_manager.add_message(session_id, "user", user_text)
+                return
+
+            elif _ta_state == "submitting":
+                if _is_discard(clean_text) or selected_id == "btn_cancel":
+                    await _type_a_clear(db, session_id)
+                    await _wa_send(phone, "Application cancelled.", db, "type_a", waba_number)
+                    await session_manager.add_message(session_id, "user", user_text)
+                    return
+                if "submit" in clean_text.lower() or selected_id == "type_a_submit":
+                    tracking_id = await _type_a_submit(phone, session_id, waba_number, db)
+                    confirm = (
+                        f"🎉 *Application Submitted!*\n\n"
+                        f"🔖 Tracking ID: `{tracking_id}`\n\n"
+                        f"Your PDF summary has been sent. The Consulate will contact you.\n\n"
+                        f"📞 +27 11-4828484 | 📧 cons.jburg@mea.gov.in"
+                    )
+                    await _wa_send(phone, confirm, db, "type_a_submitted", waba_number)
+                    await session_manager.add_message(session_id, "user", user_text)
+                    await session_manager.add_message(session_id, "assistant", confirm)
+                    return
+
+        # ── Detect new Type A apply intent ───────────────────────────────
+        if not _ta_state:
+            _det_svc = detect_service(clean_text)
+            _ta_trigger = None
+            if _det_svc in _WA_TYPE_A and is_apply_intent(clean_text):
+                _ta_trigger = _det_svc
+            elif is_apply_intent(clean_text) and current_flow.get("service") in _WA_TYPE_A:
+                _ta_trigger = current_flow.get("service")
+            if _ta_trigger:
+                svc_info = _WA_TYPE_A[_ta_trigger]
+                docs_text = "\n".join(f"  • {d}" for d in svc_info["documents"])
+                info_msg = _md_to_wa(
+                    f"*{svc_info['name']}*\n\n"
+                    f"Apply via the official government portal:\n"
+                    f"🌐 {svc_info['gov_url']}\n\n"
+                    f"*Required Documents:*\n{docs_text}\n\n"
+                    f"{svc_info.get('vfs_note', '')}\n\n"
+                    f"*Steps:*\n"
+                    f"1️⃣ Complete your application at {svc_info['gov_url']}\n"
+                    f"2️⃣ Submit documents at VFS Global / Consulate\n"
+                    f"3️⃣ Return here and send your *government reference number*\n"
+                    f"   (Bot will record it and generate your application PDF)"
+                )
+                await _wa_send(phone, info_msg, db, "type_a_info", waba_number)
+                await _type_a_save(db, session_id, service=_ta_trigger, state="awaiting_ref")
+                await session_manager.add_message(session_id, "user", user_text)
+                await session_manager.add_message(session_id, "assistant", info_msg)
+                return
 
     # ── LOAD KNOWLEDGE BASE FOR CONTEXT (mirrors web bot exactly) ───────
     context_info    = ""
@@ -736,7 +1529,7 @@ async def _handle_message(
                 llm_context = llm_context + "\n\n---\n\n" + flow_response
             else:
                 llm_context = flow_response
-        raw_llm = await _llm_response(clean_text, session_id, llm_context)
+        raw_llm = await _llm_response(clean_text, session_id, llm_context, lang_code=_lang_code)
         # Append flow guidance suffix (same as web bot)
         suffix = flow_suffix(step, detect_service(clean_text), channel="whatsapp")
         if suffix:
@@ -797,17 +1590,43 @@ async def _handle_message(
             from_override=wa,
         )
 
-    elif step in ("submitted", "tracking"):
+    elif step == "submitted":
         await _wa_send(phone, bot_text, db, step, wa)
+        # Generate PDF and send via WhatsApp document + email
+        await _wa_after_submit(phone, session_id, wa, db)
+
+    elif step == "tracking":
+        await _wa_send(phone, bot_text, db, step, wa)
+        # Offer to resend PDF for this tracking ID if we can find it
+        _tid_match = re.search(r'([A-Z]+-\d{8}-[A-Z0-9]+)', clean_text.upper())
+        if _tid_match:
+            _tid = _tid_match.group(1)
+            await ics_waba.send_buttons(
+                to=phone,
+                body=f"Would you like to receive the PDF for *{_tid}*?",
+                buttons=[{"id": f"pdf_{_tid}", "title": "Send PDF"}],
+                from_override=wa,
+            )
 
     elif step in ("idle", "escalated", "error", "complete"):
         await _wa_send(phone, bot_text, db, step, wa)
 
     elif step == "info_shown":
-        # Service info was shown — always follow with Apply Now / Ask a Question buttons.
-        # This eliminates the need to type "Apply" and avoids the race condition where
-        # the flow state hasn't been saved yet when the user quickly types "Apply".
         await _wa_send(phone, bot_text, db, step, wa)
+        # Show Apply / Ask a Question / My Applications buttons after service info
+        _svc = current_flow.get("service") or detect_service(clean_text)
+        if _svc and _svc in SERVICES:
+            await ics_waba.send_buttons(
+                to=phone,
+                body=f"Would you like to apply for *{SERVICES[_svc]['name']}*?",
+                buttons=[
+                    {"id": f"apply_{_svc}", "title": "Apply Now"},
+                    {"id": "ask_question",  "title": "Ask a Question"},
+                    {"id": "main_menu",     "title": "Main Menu"},
+                ],
+                header="Next Steps",
+                from_override=wa,
+            )
 
     elif step == "docs_uploading":
         await _wa_send(phone, bot_text, db, step, wa)
@@ -818,10 +1637,52 @@ async def _handle_message(
     else:
         await _wa_send(phone, bot_text, db, step, wa)
 
+    # ── Handle "Send PDF" button reply for tracking queries ─────────────
+    if selected_id and selected_id.startswith("pdf_"):
+        _req_tid = selected_id[4:]
+        _pdf = await _wa_generate_pdf(_req_tid, db)
+        if _pdf and APP_BASE_URL:
+            _pdf_url = f"{APP_BASE_URL}/api/ics-whatsapp/pdf/{_req_tid}"
+            await ics_waba.send_media(
+                to=phone,
+                media_type="document",
+                url=_pdf_url,
+                caption=f"📄 Application PDF — {_req_tid}",
+                filename=f"application_{_req_tid}.pdf",
+                from_override=wa,
+            )
+        elif not APP_BASE_URL:
+            await ics_waba.send_text(
+                phone,
+                "⚠️ PDF delivery is not configured on this server. "
+                "Please contact the Consulate to request your application copy.",
+                from_override=wa,
+            )
+
 
 # =====================================================================
 # ENDPOINTS
 # =====================================================================
+
+@router.get("/pdf/{tracking_id}")
+async def serve_application_pdf(tracking_id: str):
+    """
+    Serve the generated application PDF by tracking ID.
+    Used by ICS WABA to deliver the document to WhatsApp users.
+    Set APP_BASE_URL env var so the WhatsApp bot can construct this URL.
+    """
+    db        = await get_database()
+    pdf_bytes = await _wa_generate_pdf(tracking_id, db)
+    if not pdf_bytes:
+        return Response(content="Application not found.", status_code=404, media_type="text/plain")
+    safe     = tracking_id.upper().replace("/", "_")
+    filename = f"application_{safe}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
 
 @router.get("/webhook")
 async def ics_incoming_webhook(

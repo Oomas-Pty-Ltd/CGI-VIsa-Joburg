@@ -222,7 +222,7 @@ SERVICES: Dict[str, Dict] = {
         ],
     },
     "renunciation": {
-        "name": "Renunciation of Indian Citizenship",
+        "name": "Renunciation / Surrender of Indian Citizenship",
         "description": (
             "Indian nationals who have acquired citizenship of another country (including South Africa) "
             "are required by law to renounce their Indian citizenship and surrender their Indian passport. "
@@ -246,6 +246,59 @@ SERVICES: Dict[str, Dict] = {
             {"key": "new_passport",       "question": "Please enter your **new foreign passport number**:"},
             {"key": "phone",              "question": "Please enter your **phone number**:"},
             {"key": "email",              "question": "Please enter your **email address**:"},
+        ],
+    },
+    "ec_death": {
+        "name": "EC / Death Certificate",
+        "description": (
+            "The Consulate General of India, Johannesburg issues Emergency Certificates (EC) and "
+            "assists with death registration for Indian nationals. "
+            "An EC is issued when the Indian passport is lost/expired and the person needs to travel back to India urgently. "
+            "Death registration is required when an Indian national passes away in South Africa. "
+            "Contact: cons.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800."
+        ),
+        "documents": [
+            "Indian Passport of the deceased / applicant (copy)",
+            "South African Death Certificate (original + notarised copy) — for death registration",
+            "Proof of relationship to deceased",
+            "Applicant's valid Indian Passport or OCI card",
+            "Two passport-size photographs of applicant",
+            "Police report (in case of unnatural death)",
+        ],
+        "fields": [
+            {"key": "full_name",       "question": "Please enter your **full name** (applicant):"},
+            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
+            {"key": "passport_number", "question": "Please enter your **passport / OCI number**:"},
+            {"key": "phone",           "question": "Please enter your **phone number**:"},
+            {"key": "email",           "question": "Please enter your **email address**:"},
+            {"key": "doc_type",        "question": "What do you require? (Emergency Certificate or Death Certificate registration):"},
+            {"key": "doc_purpose",     "question": "Please briefly describe the **purpose / relationship to deceased** (if applicable):"},
+        ],
+    },
+    "misc": {
+        "name": "Miscellaneous / Other Consular Services",
+        "description": (
+            "The Consulate General of India, Johannesburg handles various miscellaneous consular matters "
+            "including affidavits, document authentication, general power of attorney (GPA/PoA), "
+            "life certificates, and other services not covered under standard categories. "
+            "Contact the Consulate to confirm your specific requirement: "
+            "cons.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800."
+        ),
+        "documents": [
+            "Valid Indian Passport or OCI card (copy)",
+            "Relevant supporting documents (case-specific)",
+            "Two passport-size photographs",
+            "Completed applicable form",
+            "Affidavit / Notarised documents (where required)",
+            "Fee payment receipt (if applicable)",
+        ],
+        "fields": [
+            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
+            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
+            {"key": "passport_number", "question": "Please enter your **passport / OCI number**:"},
+            {"key": "phone",           "question": "Please enter your **phone number**:"},
+            {"key": "email",           "question": "Please enter your **email address**:"},
+            {"key": "doc_purpose",     "question": "Please describe the **nature / purpose** of your request:"},
         ],
     },
 }
@@ -383,17 +436,31 @@ _SERVICE_PATTERNS: Dict[str, list] = {
         "renunciation", "renounce", "surrender passport", "give up citizenship",
         "renounce indian citizenship", "surrender indian passport",
         "change citizenship", "foreign citizenship", "new citizenship",
-        "took south african citizenship", "naturalisation",
+        "took south african citizenship", "naturalisation", "surrender",
+        "surrender citizenship", "surrender indian citizenship",
+    ],
+    "ec_death": [
+        "emergency certificate", "ec certificate", "death certificate",
+        "death registration", "register death", "deceased", "passed away",
+        "death abroad", "indian died", "indian national died",
+        "emergency travel document", "lost passport emergency",
+        "ec for travel", "emergency cert",
+    ],
+    "misc": [
+        "miscellaneous", "misc", "other service", "other consular",
+        "affidavit", "power of attorney", "poa", "gpa", "general power of attorney",
+        "life certificate", "jeevan pramaan", "attestation",
+        "apostille", "notarization", "document authentication", "legalization",
+        "stamp document", "certify document", "degree attestation",
+        "certificate attestation", "attest document", "other form",
+        "other document", "other request",
     ],
 }
 
 # Services that can be detected from website keywords even if not in SERVICES
 _WEBSITE_ONLY_KEYWORDS: Dict[str, str] = {
-    "life certificate":     "Life Certificate (Jeevan Pramaan)",
     "income certificate":   "Income Certificate",
     "domicile":             "Domicile Certificate",
-    "emergency certificate": "Emergency Certificate of Identity",
-    "death certificate":    "Death Registration",
     "nri":                  "NRI Services",
     "pension":              "Pension Services",
 }

@@ -47,9 +47,15 @@ def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = 
             encoders.encode_base64(part)
             part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
             msg.attach(part)
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        if SMTP_PORT == 465:
+            ctx = __import__('ssl').create_default_context()
+            smtp_cls = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15, context=ctx)
+        else:
+            smtp_cls = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15)
+        with smtp_cls as server:
             server.ehlo()
-            server.starttls()
+            if SMTP_PORT != 465:
+                server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_FROM, to, msg.as_string())
         logger.info(f"[EMAIL] Sent → {to} | {subject}")
