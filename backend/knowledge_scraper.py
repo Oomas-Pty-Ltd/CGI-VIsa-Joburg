@@ -933,28 +933,99 @@ async def _probe_playwright() -> None:
         logger.info(f"[FETCH] Playwright unavailable ({type(e).__name__}) — using httpx only")
 
 
+BLOCKED_SENTINEL = "__BLOCKED__"
+
+
+def filter_blocked_lines(text: str, blocked: set) -> str:
+    """Remove every line that contains any blocked keyword (case-insensitive)."""
+    if not blocked or not text:
+        return text
+    result = []
+    for line in text.splitlines():
+        line_lower = line.lower()
+        if not any(bk in line_lower for bk in blocked):
+            result.append(line)
+    return "\n".join(result)
+
+
+def blocked_prohibition(blocked: set) -> str:
+    """Return an LLM instruction that forbids mentioning blocked topics."""
+    if not blocked:
+        return ""
+    topics = ", ".join(sorted(blocked))
+    return (
+        f"\nSTRICT RESTRICTION — ADMINISTRATOR OVERRIDE: Do NOT mention, reference, "
+        f"or provide any information about the following topics under any circumstances, "
+        f"even if the user asks directly or the information appears elsewhere in this prompt: "
+        f"{topics}. If the user asks about these topics, reply: "
+        f"\"I'm sorry, I don't have information on that topic. Please contact the Consulate directly.\"\n"
+    )
+
+_blocked_kw_cache: Set[str] = set()
+_blocked_kw_cache_time: Optional[datetime] = None
+_BLOCKED_KW_TTL = 60  # seconds — short so unblocks propagate quickly
+
+
+async def _get_blocked_keywords() -> Set[str]:
+    """Return the current set of blocked keywords from MongoDB (lowercased), with in-memory cache."""
+    global _blocked_kw_cache, _blocked_kw_cache_time
+    now = datetime.now(timezone.utc)
+    if _blocked_kw_cache_time is not None and (now - _blocked_kw_cache_time).total_seconds() < _BLOCKED_KW_TTL:
+        return _blocked_kw_cache
+    try:
+        from database import get_database
+        db = await get_database()
+        docs = await db.blocked_keywords.find({}, {"_id": 0, "keyword": 1}).to_list(500)
+        _blocked_kw_cache = {d["keyword"].lower() for d in docs if d.get("keyword")}
+        _blocked_kw_cache_time = now
+        return _blocked_kw_cache
+    except Exception:
+        return _blocked_kw_cache  # return stale cache on DB error
+
+
+def _entry_matches_blocked(entry: dict, blocked: Set[str]) -> bool:
+    """Return True if any blocked keyword appears in entry title, keywords, or answer."""
+    if not blocked:
+        return False
+    title = (entry.get("title") or "").lower()
+    answer = (entry.get("answer") or "").lower()
+    kws = [k.lower() for k in (entry.get("keywords") or [])]
+    for bk in blocked:
+        if bk in title or bk in answer or any(bk in k for k in kws):
+            return True
+    return False
+
+
 async def _fetch_uploaded_docs_content() -> str:
     """
     Fetch all active PDF-uploaded knowledge entries from MongoDB and
     concatenate their text so the scraper cache includes uploaded documents.
+    Entries matching any blocked keyword are silently excluded.
     Returns empty string if DB is unavailable.
     """
     try:
         from database import get_database
         db = await get_database()
+        blocked = await _get_blocked_keywords()
         cursor = db.knowledge_base.find(
             {"source": {"$regex": "^pdf_upload:"}, "status": "active"},
-            {"_id": 0, "title": 1, "answer": 1, "pdf_doc_title": 1}
+            {"_id": 0, "title": 1, "answer": 1, "pdf_doc_title": 1, "keywords": 1}
         ).sort("created_at", -1).limit(200)
         entries = await cursor.to_list(length=200)
         if not entries:
             return ""
         parts = []
+        skipped = 0
         for e in entries:
+            if _entry_matches_blocked(e, blocked):
+                skipped += 1
+                continue
             doc_title = e.get("pdf_doc_title") or e.get("title", "")
             answer = (e.get("answer") or "").strip()
             if answer:
                 parts.append(f"[Uploaded: {doc_title}]\n{answer}")
+        if skipped:
+            logger.info(f"[SCRAPE] Skipped {skipped} blocked-keyword entries from uploaded docs")
         logger.info(f"[SCRAPE] Loaded {len(parts)} uploaded-doc sections into scraper cache")
         return "\n\n".join(parts)
     except Exception as exc:
@@ -1064,8 +1135,9 @@ async def get_realtime_knowledge() -> Dict:
 
 def invalidate_knowledge_cache():
     """Force the next call to get_realtime_knowledge() to trigger a fresh scrape."""
-    global _knowledge_cache_time
+    global _knowledge_cache_time, _blocked_kw_cache_time
     _knowledge_cache_time = None
+    _blocked_kw_cache_time = None  # also clear blocked-keywords cache
     logger.info("[SCRAPE] Knowledge cache invalidated — will refresh on next request")
 
 

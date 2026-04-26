@@ -225,6 +225,18 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     keywords = _extract_keywords(query)
     cache_key = "_".join(sorted(set(keywords[:6]))) if keywords else "general"
 
+    # ── Blocked keyword guard — return sentinel so callers bypass LLM ─
+    try:
+        from knowledge_scraper import _get_blocked_keywords, BLOCKED_SENTINEL
+        blocked = await _get_blocked_keywords()
+        if blocked:
+            q_lower = query.lower()
+            if any(bk in q_lower for bk in blocked):
+                logger.info(f"[HYBRID] Query '{cache_key}' matches blocked keyword — returning sentinel")
+                return BLOCKED_SENTINEL
+    except Exception:
+        pass
+
     # ── Layer 1: MongoDB knowledge_base ──────────────────────────────
     try:
         from services.knowledge_service import knowledge_service

@@ -4,7 +4,7 @@ import {
   Building2, Plus, Settings, TrendingUp, LogOut,
   MessageSquare, Shield, Download, ChevronLeft, ChevronRight,
   X, RefreshCw, Copy, Check, BookOpen, Upload, Trash2, FileText,
-  Calendar, Clock, AlertCircle
+  Calendar, Clock, AlertCircle, Files, Search, Ban, Unlock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -44,6 +44,7 @@ const TABS = [
   { key: "dashboard", label: "Dashboard", icon: TrendingUp },
   { key: "conversations", label: "Conversations", icon: MessageSquare },
   { key: "audit-logs", label: "Audit Logs", icon: Shield },
+  { key: "seva-applications", label: "Seva Applications", icon: Files },
   { key: "knowledge", label: "Knowledge Base", icon: BookOpen },
   { key: "settings", label: "Settings", icon: Settings },
 ];
@@ -962,7 +963,539 @@ function KnowledgeTab({ token }) {
 }
 
 
+// ─── Keyword Blocker panel ────────────────────────────────────────────────────
+function BlockedKeywordsPanel({ token }) {
+  const [query, setQuery]               = useState("");
+  const [searching, setSearching]       = useState(false);
+  const [searchResults, setSearchResults] = useState(null);
+  const [blocked, setBlocked]           = useState([]);
+  const [loadingBlocked, setLoadingBlocked] = useState(true);
+  const [blocking, setBlocking]         = useState(false);
+
+  const fetchBlocked = useCallback(async () => {
+    setLoadingBlocked(true);
+    try {
+      const { data } = await axios.get(`${API}/super-admin/knowledge/blocked-keywords`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setBlocked(data.keywords || []);
+    } catch {
+      toast.error("Failed to load blocked keywords");
+    } finally {
+      setLoadingBlocked(false);
+    }
+  }, [token]);
+
+  useEffect(() => { fetchBlocked(); }, [fetchBlocked]);
+
+  const handleSearch = async (e) => {
+    e?.preventDefault();
+    if (!query.trim()) return;
+    setSearching(true);
+    try {
+      const { data } = await axios.get(`${API}/super-admin/knowledge/keyword-search`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { q: query.trim() },
+      });
+      setSearchResults(data);
+    } catch {
+      toast.error("Search failed");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleBlock = async () => {
+    const kw = query.trim().toLowerCase();
+    if (!kw) return;
+    setBlocking(true);
+    try {
+      const { data } = await axios.post(
+        `${API}/super-admin/knowledge/blocked-keywords`,
+        { keyword: kw },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success(`"${kw}" blocked — ${data.matches_count} entries suppressed.`);
+      setQuery("");
+      setSearchResults(null);
+      fetchBlocked();
+    } catch (err) {
+      const msg = err.response?.data?.detail || "Failed to block keyword";
+      toast.error(msg);
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  const handleUnblock = async (kw) => {
+    try {
+      await axios.delete(`${API}/super-admin/knowledge/blocked-keywords/${encodeURIComponent(kw)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success(`"${kw}" unblocked.`);
+      fetchBlocked();
+    } catch {
+      toast.error("Failed to unblock keyword");
+    }
+  };
+
+  const isAlreadyBlocked = blocked.some(b => b.keyword === query.trim().toLowerCase());
+
+  return (
+    <div className="bg-white rounded-xl shadow-md p-6 space-y-6">
+      <h2 className="text-xl font-bold text-[#1A2E40] flex items-center gap-2">
+        <Ban className="w-5 h-5 text-red-500" />
+        Keyword Blocker
+      </h2>
+      <p className="text-sm text-gray-500">
+        Search for a keyword across all knowledge base entries, then block it. When a user asks
+        the bot about a blocked keyword, the bot will return no information.
+      </p>
+
+      {/* Search bar */}
+      <form onSubmit={handleSearch} className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setSearchResults(null); }}
+            placeholder="Type a keyword to search (e.g. visa fee, oci, passport)"
+            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+          />
+        </div>
+        <Button type="submit" disabled={searching || !query.trim()} variant="outline" className="h-[38px]">
+          {searching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+          <span className="ml-1">Search</span>
+        </Button>
+        <Button
+          type="button"
+          disabled={blocking || !query.trim() || isAlreadyBlocked}
+          onClick={handleBlock}
+          className="h-[38px] bg-red-600 hover:bg-red-700 text-white"
+        >
+          <Ban className="w-4 h-4 mr-1" />
+          {isAlreadyBlocked ? "Already Blocked" : "Block Keyword"}
+        </Button>
+      </form>
+
+      {/* Search results */}
+      {searchResults && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-gray-700">
+              {searchResults.total} knowledge entries match
+              <span className="ml-1 px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 font-mono text-xs">
+                "{searchResults.query}"
+              </span>
+            </p>
+            {searchResults.total > 0 && !isAlreadyBlocked && (
+              <span className="text-xs text-red-500">
+                Blocking this keyword will suppress all {searchResults.total} entries from the bot.
+              </span>
+            )}
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-3 text-left">Title</th>
+                  <th className="px-4 py-3 text-left">Category</th>
+                  <th className="px-4 py-3 text-left">Source</th>
+                  <th className="px-4 py-3 text-left">Keywords</th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchResults.matches.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="text-center py-8 text-gray-400">
+                      No knowledge entries found for this keyword.
+                    </td>
+                  </tr>
+                )}
+                {searchResults.matches.map((entry) => (
+                  <tr key={entry.id} className="border-t border-gray-100 hover:bg-red-50 transition-colors">
+                    <td className="px-4 py-3 text-[#1A2E40] font-medium max-w-[220px] truncate" title={entry.title}>
+                      {entry.title}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                        {entry.category || "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px] truncate" title={entry.pdf_filename || entry.source}>
+                      {entry.pdf_filename || entry.source || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(entry.keywords || []).slice(0, 5).map((kw) => (
+                          <span key={kw} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">{kw}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Blocked keywords list */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+            <Ban className="w-4 h-4 text-red-400" />
+            Blocked Keywords
+            {blocked.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                {blocked.length}
+              </span>
+            )}
+          </h3>
+          <Button variant="outline" size="sm" onClick={fetchBlocked} className="h-7">
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+          </Button>
+        </div>
+
+        {loadingBlocked && <p className="text-gray-400 text-sm py-4 text-center">Loading…</p>}
+
+        {!loadingBlocked && blocked.length === 0 && (
+          <div className="border border-dashed border-gray-200 rounded-lg p-8 text-center text-gray-400 text-sm">
+            No keywords blocked yet. Search and block keywords above.
+          </div>
+        )}
+
+        {!loadingBlocked && blocked.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-4 py-3 text-left">Keyword</th>
+                  <th className="px-4 py-3 text-center">Entries Suppressed</th>
+                  <th className="px-4 py-3 text-left">Blocked At</th>
+                  <th className="px-4 py-3 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blocked.map((b) => (
+                  <tr key={b.keyword} className="border-t border-gray-100 hover:bg-red-50 transition-colors">
+                    <td className="px-4 py-3 font-mono font-semibold text-red-700">
+                      <span className="flex items-center gap-1.5">
+                        <Ban className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                        {b.keyword}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        {b.matches_count ?? "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                      {formatDate(b.blocked_at)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-green-600 hover:bg-green-50 hover:text-green-800 gap-1"
+                        onClick={() => handleUnblock(b.keyword)}
+                        title="Unblock keyword"
+                      >
+                        <Unlock className="w-3.5 h-3.5" /> Unblock
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main dashboard ───────────────────────────────────────────────────────────
+// ─── Seva Setu Applications tab ──────────────────────────────────────────────────
+function SevaApplicationsTab({ token }) {
+  const [applications, setApplications] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [selectedApp, setSelectedApp] = useState(null);
+  const [documentPreview, setDocumentPreview] = useState(null);
+
+  const limit = 50;
+
+  const fetchApplications = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await axios.get(`${API}/super-admin/seva-setu/applications`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { page, limit, with_documents: true },
+      });
+      setApplications(data.applications);
+      setTotal(data.total);
+    } catch {
+      toast.error("Failed to load applications");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, token]);
+
+  useEffect(() => { fetchApplications(); }, [fetchApplications]);
+
+  const handleCsvDownload = async () => {
+    try {
+      const res = await fetch(`${API}/super-admin/seva-setu/applications-export/csv?with_documents=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `applications_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("CSV export failed");
+    }
+  };
+
+  const STATUS_COLORS = {
+    draft: "bg-gray-100 text-gray-700",
+    submitted: "bg-blue-100 text-blue-700",
+    confirmed: "bg-green-100 text-green-700",
+    completed: "bg-green-200 text-green-800",
+    rejected: "bg-red-100 text-red-700",
+  };
+
+  return (
+    <div>
+      {/* Filters row */}
+      <div className="flex flex-wrap items-end gap-3 mb-5">
+        <Button variant="outline" size="sm" onClick={fetchApplications} className="h-9">
+          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+        </Button>
+        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-[#2E8B57] hover:bg-[#246b43] text-white ml-auto">
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+            <tr>
+              <th className="px-4 py-3 text-left">Reference ID</th>
+              <th className="px-4 py-3 text-left">Service</th>
+              <th className="px-4 py-3 text-left">User</th>
+              <th className="px-4 py-3 text-center">Status</th>
+              <th className="px-4 py-3 text-center">Docs</th>
+              <th className="px-4 py-3 text-left">Created</th>
+              <th className="px-4 py-3 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
+            )}
+            {!loading && applications.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-10 text-gray-400">No applications with documents found.</td></tr>
+            )}
+            {!loading && applications.map((app, i) => (
+              <tr key={app.id || i} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-3 font-mono text-xs text-gray-700">{shortId(app.reference_id)}</td>
+                <td className="px-4 py-3 text-gray-700">{app.service_name || app.service_type}</td>
+                <td className="px-4 py-3 text-xs text-gray-600">{shortId(app.user_id)}</td>
+                <td className="px-4 py-3 text-center">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[app.status] || "bg-gray-100 text-gray-600"}`}>
+                    {app.status || "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${app.document_count > 0 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                    {app.document_count}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(app.created_at)}</td>
+                <td className="px-4 py-3 text-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-blue-600 hover:bg-blue-50"
+                    onClick={() => setSelectedApp(app)}
+                    title="View details"
+                  >
+                    <FileText className="w-4 h-4" />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination page={page} total={total} limit={limit} onChange={setPage} />
+
+      {/* Application detail modal */}
+      {selectedApp && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedApp(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-bold text-[#1A2E40] text-lg">Application Details</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{selectedApp.reference_id}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setSelectedApp(null)}><X className="w-5 h-5" /></Button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold">Service</p>
+                  <p className="text-sm text-gray-800">{selectedApp.service_name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold">Status</p>
+                  <p className={`text-sm px-2 py-0.5 rounded-full inline-block font-medium ${STATUS_COLORS[selectedApp.status] || "bg-gray-100 text-gray-600"}`}>
+                    {selectedApp.status}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold">User ID</p>
+                  <p className="text-sm text-gray-800 font-mono">{selectedApp.user_id}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold">Created</p>
+                  <p className="text-sm text-gray-800">{formatDate(selectedApp.created_at)}</p>
+                </div>
+              </div>
+
+              {selectedApp.form_data_fields > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold mb-2">Form Fields ({selectedApp.form_data_fields})</p>
+                  <div className="bg-gray-50 rounded p-3 text-xs text-gray-700 max-h-48 overflow-y-auto">
+                    <pre>{JSON.stringify(selectedApp.form_data || {}, null, 2).slice(0, 500)}</pre>
+                  </div>
+                </div>
+              )}
+
+              {selectedApp.documents && selectedApp.documents.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 font-semibold mb-2">Uploaded Documents ({selectedApp.documents.length})</p>
+                  <div className="space-y-2">
+                    {selectedApp.documents.map((doc) => (
+                      <div key={doc.id} className="bg-blue-50 border border-blue-200 rounded p-3">
+                        <div className="flex items-center gap-2 justify-between">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-800 truncate">{doc.name}</p>
+                              <p className="text-xs text-gray-500">{doc.content_type} · {formatDate(doc.uploaded_at)}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${doc.status === "uploaded" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                              {doc.status}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-blue-600 hover:bg-blue-100"
+                              onClick={() => setDocumentPreview(doc)}
+                              title="View document"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </Button>
+                            {doc.file_url && (
+                              <a
+                                href={doc.file_url}
+                                download={doc.name}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 p-1.5"
+                                title="Download document"
+                              >
+                                <Download className="w-4 h-4" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document preview modal */}
+      {documentPreview && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDocumentPreview(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-bold text-[#1A2E40] text-lg">Document Preview</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{documentPreview.name}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setDocumentPreview(null)}><X className="w-5 h-5" /></Button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5 flex items-center justify-center bg-gray-100">
+              {documentPreview.content_type === "application/pdf" ? (
+                <div className="text-center">
+                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-3" />
+                  <p className="text-gray-600 mb-4">PDF Document</p>
+                  {documentPreview.file_url && (
+                    <a
+                      href={documentPreview.file_url}
+                      download={documentPreview.name}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download PDF
+                    </a>
+                  )}
+                </div>
+              ) : documentPreview.content_type?.startsWith("image/") ? (
+                <img
+                  src={documentPreview.file_url || documentPreview.data_url}
+                  alt={documentPreview.name}
+                  className="max-w-full max-h-full object-contain rounded"
+                />
+              ) : (
+                <div className="text-center">
+                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-3" />
+                  <p className="text-gray-600 mb-2">{documentPreview.content_type}</p>
+                  {documentPreview.file_url && (
+                    <a
+                      href={documentPreview.file_url}
+                      download={documentPreview.name}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download File
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── Main SuperAdminDashboard component ───────────────────────────────────────
 export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -1181,11 +1714,24 @@ export default function SuperAdminDashboard() {
           </>
         )}
 
+        {/* ── Seva Setu Applications tab ── */}
+        {activeTab === "seva-applications" && (
+          <>
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Seva Setu Applications</h1>
+            <div className="bg-white rounded-xl shadow-md p-6">
+              <SevaApplicationsTab token={token} />
+            </div>
+          </>
+        )}
+
         {/* ── Knowledge Base tab ── */}
         {activeTab === "knowledge" && (
           <>
             <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Knowledge Base</h1>
             <KnowledgeTab token={token} />
+            <div className="mt-8">
+              <BlockedKeywordsPanel token={token} />
+            </div>
           </>
         )}
 

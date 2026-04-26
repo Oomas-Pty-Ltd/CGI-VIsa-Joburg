@@ -33,7 +33,7 @@ from typing import Optional
 from urllib.parse import unquote_plus
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
 from database import get_database
@@ -41,7 +41,10 @@ from security.input_sanitizer import sanitize_user_input
 from security.guardrail import guardrail_service, sanitize_logs
 from security.session_manager import session_manager
 from services.ics_waba_service import ics_waba
-from knowledge_scraper import get_realtime_knowledge, extract_service_content
+from knowledge_scraper import (
+    get_realtime_knowledge, extract_service_content, BLOCKED_SENTINEL,
+    _get_blocked_keywords, filter_blocked_lines, blocked_prohibition,
+)
 from services.hybrid_retrieval import hybrid_search
 from services.application_flow import (
     SERVICES,
@@ -254,6 +257,8 @@ async def _llm_response(user_message: str, session_id: str, context: str = "") -
             "https://www.cgijoburg.gov.in or call +27 11 581 9800."
         )
 
+    _blocked_kws = await _get_blocked_keywords()
+
     # Build service-specific document hint (same as web bot)
     detected_svc = detect_service(user_message)
     svc_docs_hint = ""
@@ -262,8 +267,26 @@ async def _llm_response(user_message: str, session_id: str, context: str = "") -
         docs = "\n".join(f"  • {d}" for d in svc["documents"])
         svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
 
-    system_prompt = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg. You are replying via WhatsApp.
+    _clean_ctx      = filter_blocked_lines(context, _blocked_kws)
+    _clean_hint     = filter_blocked_lines(svc_docs_hint, _blocked_kws)
+    _prohibition    = blocked_prohibition(_blocked_kws)
+    _consulate_facts = filter_blocked_lines(
+        "- Acting Consul General: Mr. Harish Kumar\n"
+        "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+        "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
+        "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
+        "- Website: www.cgijoburg.gov.in\n"
+        "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
+        "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa\n"
+        "- Social Media: Twitter/X @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg\n"
+        "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
+        "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
+        "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
+        _blocked_kws,
+    )
 
+    system_prompt = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg. You are replying via WhatsApp.
+{_prohibition}
 CRITICAL — DATA SOURCE RULE:
 Answer ONLY using the OFFICIAL DATA provided below.
 The data comes from: www.cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents (FAQs, events, notices).
@@ -282,20 +305,10 @@ RESPONSE STYLE:
 - Never ask for money or claim the consulate calls asking for payments.
 
 KEY CONSULATE FACTS (always use these for contact/location questions):
-- Acting Consul General: Mr. Harish Kumar
-- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
-- Website: www.cgijoburg.gov.in
-- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
-- Social Media: Twitter/X @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg
-- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
-- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
-- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
-{svc_docs_hint}
+{_consulate_facts}
+{_clean_hint}
 OFFICIAL DATA (cgijoburg.gov.in | vfsglobal.com | uploaded documents):
-{context}
+{_clean_ctx}
 
 IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
   📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
@@ -624,6 +637,14 @@ async def _handle_message(
 
         # hybrid_search always runs — same as web bot (context_info goes to LLM)
         context_info = await hybrid_search(clean_text, knowledge_base)
+
+        # Blocked keyword: reply with canned message and skip LLM entirely
+        if context_info == BLOCKED_SENTINEL:
+            _blocked_reply = "I'm sorry, I don't have information on that topic. For assistance please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", _blocked_reply)
+            await _wa_send(phone, _blocked_reply, db, "idle", waba_number)
+            return JSONResponse({"status": "ok"})
 
         # scraped_summary is service-specific — goes to process_flow
         active_service = detect_service(clean_text) or current_flow.get("service")

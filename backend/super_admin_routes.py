@@ -908,3 +908,266 @@ async def list_uploaded_pdfs(payload: dict = Depends(verify_super_admin)):
         "pdf_filename", {"source": {"$regex": "^pdf_upload:"}}
     )
     return {"files": sorted(f for f in filenames if f)}
+
+
+# ─── Seva Setu Applications with Documents ───────────────────────────────────
+
+@router.get("/seva-setu/applications")
+async def get_all_applications_with_documents(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    with_documents: bool = Query(True, description="Filter only applications with documents"),
+    payload: dict = Depends(verify_super_admin),
+):
+    """
+    List all Seva Setu applications with optional document filtering.
+    Superadmin can view all applications across all users.
+    """
+    db = await get_database()
+    
+    # Query to get applications with documents if requested
+    query = {}
+    if with_documents:
+        query = {"documents": {"$exists": True, "$ne": []}}
+    
+    skip = (page - 1) * limit
+    total = await db.seva_setu_applications.count_documents(query)
+    
+    applications = await (
+        db.seva_setu_applications.find(query, {"_id": 0})
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+        .to_list(limit)
+    )
+    
+    # Format applications with document summaries
+    formatted_apps = []
+    for app in applications:
+        docs = app.get("documents", [])
+        formatted_app = {
+            "id": app.get("id"),
+            "reference_id": app.get("reference_id"),
+            "user_id": app.get("user_id"),
+            "service_type": app.get("service_type"),
+            "service_name": app.get("service_name"),
+            "status": app.get("status"),
+            "created_at": app.get("created_at"),
+            "updated_at": app.get("updated_at"),
+            "document_count": len(docs),
+            "documents": [
+                {
+                    "id": doc.get("id"),
+                    "name": doc.get("name"),
+                    "filename": doc.get("filename"),
+                    "content_type": doc.get("content_type"),
+                    "status": doc.get("status"),
+                    "uploaded_at": doc.get("uploaded_at"),
+                }
+                for doc in docs
+            ],
+            "form_data_fields": len(app.get("form_data", {})),
+        }
+        formatted_apps.append(formatted_app)
+    
+    return {
+        "applications": formatted_apps,
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
+
+
+@router.get("/seva-setu/applications/{app_id}")
+async def get_application_with_documents(
+    app_id: str,
+    payload: dict = Depends(verify_super_admin),
+):
+    """
+    Get a specific Seva Setu application with all document details.
+    """
+    db = await get_database()
+    
+    app = await db.seva_setu_applications.find_one(
+        {"id": app_id},
+        {"_id": 0}
+    )
+    
+    if not app:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found"
+        )
+    
+    # Format with full document details
+    docs = app.get("documents", [])
+    formatted_app = {
+        "id": app.get("id"),
+        "reference_id": app.get("reference_id"),
+        "user_id": app.get("user_id"),
+        "service_type": app.get("service_type"),
+        "service_name": app.get("service_name"),
+        "service_category": app.get("service_category"),
+        "status": app.get("status"),
+        "created_at": app.get("created_at"),
+        "updated_at": app.get("updated_at"),
+        "submitted_at": app.get("submitted_at"),
+        "confirmed_at": app.get("confirmed_at"),
+        "form_data": app.get("form_data", {}),
+        "documents": [
+            {
+                "id": doc.get("id"),
+                "name": doc.get("name"),
+                "filename": doc.get("filename"),
+                "path": doc.get("path"),
+                "content_type": doc.get("content_type"),
+                "status": doc.get("status"),
+                "uploaded_at": doc.get("uploaded_at"),
+            }
+            for doc in docs
+        ],
+        "edit_token": app.get("edit_token"),
+    }
+    
+    return formatted_app
+
+
+# ─── Keyword search & blocking ───────────────────────────────────────────────
+
+class BlockKeywordRequest(BaseModel):
+    keyword: str
+
+@router.get("/knowledge/keyword-search")
+async def search_knowledge_by_keyword(
+    q: str = Query(..., min_length=1),
+    payload: dict = Depends(verify_super_admin),
+):
+    """Search all knowledge base entries containing the given keyword."""
+    db = await get_database()
+    q_lower = q.strip().lower()
+    cursor = db.knowledge_base.find(
+        {"$or": [
+            {"keywords": {"$elemMatch": {"$regex": q_lower, "$options": "i"}}},
+            {"title": {"$regex": q_lower, "$options": "i"}},
+            {"question": {"$regex": q_lower, "$options": "i"}},
+            {"answer": {"$regex": q_lower, "$options": "i"}},
+        ]},
+        {"_id": 0, "id": 1, "title": 1, "category": 1, "keywords": 1,
+         "pdf_filename": 1, "source": 1, "event_status": 1},
+    ).limit(100)
+    entries = await cursor.to_list(100)
+    return {"query": q, "matches": entries, "total": len(entries)}
+
+
+@router.get("/knowledge/blocked-keywords")
+async def list_blocked_keywords(payload: dict = Depends(verify_super_admin)):
+    """Return all currently blocked keywords."""
+    db = await get_database()
+    keywords = await db.blocked_keywords.find({}, {"_id": 0}).sort("blocked_at", -1).to_list(500)
+    return {"keywords": keywords}
+
+
+@router.post("/knowledge/blocked-keywords")
+async def block_keyword(body: BlockKeywordRequest, payload: dict = Depends(verify_super_admin)):
+    """Add a keyword to the blocked list so the bot returns no information for it."""
+    keyword = body.keyword.strip().lower()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="Keyword cannot be empty.")
+    db = await get_database()
+    existing = await db.blocked_keywords.find_one({"keyword": keyword})
+    if existing:
+        raise HTTPException(status_code=409, detail="Keyword is already blocked.")
+    match_count = await db.knowledge_base.count_documents({"$or": [
+        {"keywords": {"$elemMatch": {"$regex": keyword, "$options": "i"}}},
+        {"title": {"$regex": keyword, "$options": "i"}},
+    ]})
+    await db.blocked_keywords.insert_one({
+        "keyword": keyword,
+        "blocked_at": datetime.now(timezone.utc).isoformat(),
+        "blocked_by": "super_admin",
+        "matches_count": match_count,
+    })
+    invalidate_knowledge_cache()
+    return {"success": True, "keyword": keyword, "matches_count": match_count}
+
+
+@router.delete("/knowledge/blocked-keywords/{keyword:path}")
+async def unblock_keyword(keyword: str, payload: dict = Depends(verify_super_admin)):
+    """Remove a keyword from the blocked list."""
+    db = await get_database()
+    result = await db.blocked_keywords.delete_one({"keyword": keyword.lower()})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Keyword not found in blocked list.")
+    invalidate_knowledge_cache()
+    return {"success": True, "keyword": keyword}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/seva-setu/applications-export/csv")
+async def export_applications_with_documents_csv(
+    with_documents: bool = Query(True, description="Export only applications with documents"),
+    payload: dict = Depends(verify_super_admin),
+):
+    """
+    Export all applications with documents to CSV format.
+    """
+    db = await get_database()
+    
+    query = {}
+    if with_documents:
+        query = {"documents": {"$exists": True, "$ne": []}}
+    
+    applications = await db.seva_setu_applications.find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).to_list(10000)
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header row
+    writer.writerow([
+        "Application ID",
+        "Reference ID",
+        "User ID",
+        "Service Type",
+        "Service Name",
+        "Status",
+        "Document Count",
+        "Documents",
+        "Form Fields",
+        "Created At",
+        "Updated At",
+        "Submitted At",
+        "Confirmed At",
+    ])
+    
+    # Data rows
+    for app in applications:
+        docs = app.get("documents", [])
+        doc_names = "; ".join([doc.get("name", "") for doc in docs])
+        
+        writer.writerow([
+            app.get("id", ""),
+            app.get("reference_id", ""),
+            app.get("user_id", ""),
+            app.get("service_type", ""),
+            app.get("service_name", ""),
+            app.get("status", ""),
+            len(docs),
+            doc_names,
+            len(app.get("form_data", {})),
+            app.get("created_at", ""),
+            app.get("updated_at", ""),
+            app.get("submitted_at", ""),
+            app.get("confirmed_at", ""),
+        ])
+    
+    output.seek(0)
+    filename = f"applications_with_documents_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

@@ -293,7 +293,7 @@ export default function ChatWidget() {
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
-  const [isSwitchingLang, setIsSwitchingLang] = useState(false);
+  const isSwitchingLang = false;
   const [docViewModal, setDocViewModal] = useState(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showAuthDiscardConfirm, setShowAuthDiscardConfirm] = useState(false);
@@ -1170,32 +1170,63 @@ export default function ChatWidget() {
 
   // ── Voice input ────────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
+    // Pick the first MIME type the browser actually supports
+    // (iOS Safari only supports audio/mp4; Chrome/Firefox prefer audio/webm)
+    const MIME_CANDIDATES = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      '',  // empty string = let browser choose
+    ];
+    const supportedMime = MIME_CANDIDATES.find(
+      m => !m || (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m))
+    ) ?? '';
+
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
       });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      const chunks = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        stream.getTracks().forEach(t => t.stop());
-        try {
-          const formData = new FormData();
-          formData.append('audio', blob, 'recording.webm');
-          formData.append('language', currentLangRef.current);
-          const resp = await axios.post(`${API}/consular/voice-input`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-          if (resp.data.success && resp.data.transcription) {
-            setInput(resp.data.transcription);
-          } else { fallbackSTT(); }
-        } catch { fallbackSTT(); }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setIsRecording(true);
-    } catch {}
+    } catch {
+      fallbackSTT();
+      return;
+    }
+
+    let recorder;
+    try {
+      recorder = supportedMime
+        ? new MediaRecorder(stream, { mimeType: supportedMime })
+        : new MediaRecorder(stream);
+    } catch {
+      stream.getTracks().forEach(t => t.stop());
+      fallbackSTT();
+      return;
+    }
+
+    const chunks = [];
+    const actualMime = recorder.mimeType || supportedMime || 'audio/webm';
+    const ext = actualMime.includes('mp4') ? 'm4a' : actualMime.includes('ogg') ? 'ogg' : 'webm';
+
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      const blob = new Blob(chunks, { type: actualMime });
+      stream.getTracks().forEach(t => t.stop());
+      try {
+        const formData = new FormData();
+        formData.append('audio', blob, `recording.${ext}`);
+        formData.append('language', currentLangRef.current);
+        const resp = await axios.post(`${API}/consular/voice-input`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        if (resp.data.success && resp.data.transcription) {
+          setInput(resp.data.transcription);
+        } else { fallbackSTT(); }
+      } catch { fallbackSTT(); }
+    };
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    setIsRecording(true);
   }, []);
 
   const fallbackSTT = () => {

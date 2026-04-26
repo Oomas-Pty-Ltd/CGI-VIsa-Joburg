@@ -17,6 +17,10 @@ from knowledge_scraper import (
     get_realtime_knowledge,
     search_knowledge,
     extract_service_content,
+    BLOCKED_SENTINEL,
+    _get_blocked_keywords,
+    filter_blocked_lines,
+    blocked_prohibition,
 )
 from services.hybrid_retrieval import hybrid_search
 from voice_service import voice_service
@@ -376,6 +380,13 @@ async def chat(request: ChatRequest, http_request: Request):
     )
     current_state = current_flow.get("state", "idle")
 
+    # ── Blocked keyword: return immediately without calling LLM ────────
+    if context_info == BLOCKED_SENTINEL:
+        bot_response = "I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+        await session_manager.add_message(session_id, "user", sanitized_message)
+        await session_manager.add_message(session_id, "assistant", bot_response)
+        return JSONResponse({"response": bot_response, "session_id": session_id})
+
     # ── If in docs_uploading and an image was sent, mark as uploaded ──
     image_doc_data: dict | None = None
     if current_state == "docs_uploading" and request.image_base64:
@@ -448,8 +459,34 @@ async def chat(request: ChatRequest, http_request: Request):
                     f"and IDs unchanged):\n{_translate_source}\n"
                 )
 
-        _base_system_message = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+        _blocked_kws = await _get_blocked_keywords()
+        _clean_ctx = filter_blocked_lines(context_info, _blocked_kws)
+        _clean_svc_hint = filter_blocked_lines(svc_docs_hint, _blocked_kws)
+        _prohibition = blocked_prohibition(_blocked_kws)
 
+        _consulate_facts = filter_blocked_lines(
+            "- Acting Consul General: Mr. Harish Kumar\n"
+            "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+            "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
+            "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
+            "- Website: www.cgijoburg.gov.in\n"
+            "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
+            "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces\n"
+            "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
+            "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
+            "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
+            _blocked_kws,
+        )
+        _footer_contact = filter_blocked_lines(
+            "  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in\n"
+            "  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+            "  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
+            "  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/",
+            _blocked_kws,
+        )
+
+        _base_system_message = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+{_prohibition}
 {_lang_instruction(request.language or "en")}
 
 RESPONSE STYLE:
@@ -464,25 +501,13 @@ RESPONSE STYLE:
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
 CONSULATE FACTS:
-- Acting Consul General: Mr. Harish Kumar
-- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
-- Website: www.cgijoburg.gov.in
-- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces
-- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
-- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
-- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
-{svc_docs_hint}
+{_consulate_facts}
+{_clean_svc_hint}
 ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
-{context_info}
+{_clean_ctx}
 
 IF the answer is not in any of the data above, say so briefly and direct the user to:
-  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
-  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/{_flow_translate_hint}"""
+{_footer_contact}{_flow_translate_hint}"""
 
         api_key = os.environ.get('EMERGENT_LLM_KEY')
         chat_instance = LlmChat(
@@ -624,6 +649,17 @@ async def chat_stream(request: ChatRequest):
     )
     current_state = current_flow.get("state", "idle")
 
+    # ── Blocked keyword: stream canned response without calling LLM ───
+    if context_info == BLOCKED_SENTINEL:
+        _blocked_msg = "I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+        await session_manager.add_message(session_id, "user", sanitized_message)
+        await session_manager.add_message(session_id, "assistant", _blocked_msg)
+        import json as _json
+        async def _blocked_stream():
+            yield f"data: {_json.dumps({'chunk': _blocked_msg})}\n\n"
+            yield f"data: {_json.dumps({'done': True, 'session_id': session_id, 'step': 'idle'})}\n\n"
+        return StreamingResponse(_blocked_stream(), media_type="text/event-stream")
+
     # ── Virus scan + mark as uploaded ────────────────────────────────
     image_doc_data = None
     if request.image_base64:
@@ -704,8 +740,33 @@ async def chat_stream(request: ChatRequest):
                 f"and IDs unchanged):\n{_stream_translate_source}\n"
             )
 
-    system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+    _s_blocked_kws = await _get_blocked_keywords()
+    _s_clean_ctx = filter_blocked_lines(llm_context, _s_blocked_kws)
+    _s_clean_hint = filter_blocked_lines(svc_docs_hint, _s_blocked_kws)
+    _s_prohibition = blocked_prohibition(_s_blocked_kws)
+    _s_facts = filter_blocked_lines(
+        "- Acting Consul General: Mr. Harish Kumar\n"
+        "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+        "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
+        "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
+        "- Website: www.cgijoburg.gov.in\n"
+        "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
+        "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces\n"
+        "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
+        "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
+        "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
+        _s_blocked_kws,
+    )
+    _s_footer = filter_blocked_lines(
+        "  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in\n"
+        "  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
+        "  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
+        "  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/",
+        _s_blocked_kws,
+    )
 
+    system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+{_s_prohibition}
 {_lang_instruction(request.language or "en")}
 
 RESPONSE STYLE:
@@ -720,25 +781,13 @@ RESPONSE STYLE:
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
 CONSULATE FACTS:
-- Acting Consul General: Mr. Harish Kumar
-- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
-- Website: www.cgijoburg.gov.in
-- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces
-- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
-- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
-- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00
-{svc_docs_hint}
+{_s_facts}
+{_s_clean_hint}
 ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
-{llm_context}
+{_s_clean_ctx}
 
 IF the answer is not in any of the data above, say so and direct the user to:
-  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
-  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/{_stream_flow_translate_hint}"""
+{_s_footer}{_stream_flow_translate_hint}"""
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     chat_instance = LlmChat(
