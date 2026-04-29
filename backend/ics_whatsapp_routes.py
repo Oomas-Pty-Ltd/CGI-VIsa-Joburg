@@ -237,6 +237,32 @@ def _build_language_menu() -> str:
 
 _LANGUAGE_MENU = _build_language_menu()
 
+_WA_GREETING_TEXT = (
+    "🙏 नमस्ते भाईयो और बहनो!\n\n"
+    "मैं हूं \"सेवा सेतु स्वचालित सहायक (बॉट)\", आपकी सेवा में सदैव तत्पर।\n\n"
+    "🗣 भारतीय काउंसलर सर्विसेज के साथ हाज़िर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
+    "आज मैं आपकी मदद करने में सक्षम हूं।\n\n"
+    "Namaste, brothers and sisters!\n\n"
+    "I am \"Seva Setu Automated Assistant (Bot)\", always ready to serve you.\n\n"
+    "🗣 Here to assist with your Indian consular service queries. "
+    "Please let me know how I can help you today. I am fully equipped to assist you.\n\n"
+    "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*\n"
+    "The Consulate does not make phone calls demanding money for fines, penalties, or any other reason. "
+    "It is not within our mandate to conduct criminal investigations.\n\n"
+    "Do not engage with such callers under any circumstance.\n\n"
+    "• Do not share any personal or financial information.\n"
+    "• If you receive a suspicious call, note the caller's number and any details.\n"
+    "• Report it immediately to your local police station.\n\n"
+    "Be vigilant. Stay safe.\n\n"
+    "🗣 *Fraud Alert: Extortion Calls Using Spoofed Numbers*\n"
+    "It has come to our attention that certain individuals are fraudulently spoofing the Consulate General's "
+    "phone numbers to contact persons of Indian origin. These calls attempt to intimidate recipients with "
+    "false legal threats and demand payments, claiming affiliation with the Consulate General or Government of India agencies.\n\n"
+    "Please be advised:\n\n"
+    "• No representative of the Consulate General will call to request payments for any governmental purpose.\n"
+    "• If you receive such a call, note the caller's details and report the incident to your local police immediately."
+)
+
 
 # =====================================================================
 # MODELS
@@ -281,6 +307,10 @@ _WA_REPLACEMENTS = [
     (r'Type\s+\*\*?cancel\*\*?',    'Reply *cancel*'),
     (r'type\s+\*\*?cancel\*\*?',    'reply *cancel*'),
     (r'Type\s+\*\*menu\*\*',        'Reply *menu*'),
+    # docs_pending: replace web-only "Preview PDF" button reference
+    (r'Click \*\*?Preview PDF\*\*? to download an editable preview of your form\.', 'Reply *preview* to see your filled-in form summary.'),
+    (r'  • To correct any field, type: `correct field name: new value`', 'To edit a field, tap *Edit Field* below or reply: *correct fieldname: new value*'),
+    (r'\*\(e\.g\. `correct name:.*?`\)\*', ''),
 ]
 
 
@@ -677,6 +707,11 @@ _SERVICES_MENU_WORDS = {
 # Active form-filling states — language detection must not interfere
 _FORM_ACTIVE_STATES = {"consent_pending", "collecting", "docs_uploading", "docs_pending", "paused"}
 
+# Ordered service key list that matches _wa_services_menu() display order:
+# Type A first (passport, visa, pcc), then Type B (oci, marriage, …)
+# Used by the numbered-reply fallback so "4" = OCI, not pcc.
+_WA_MENU_SVCKEYS: list = []   # populated lazily on first use (SERVICES not yet defined here)
+
 
 async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
     """Generate PDF bytes for a submitted application."""
@@ -740,8 +775,16 @@ def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: by
     part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
     msg.attach(part)
     try:
-        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as srv:
-            srv.starttls()
+        import ssl as _ssl
+        if _SMTP_PORT == 465:
+            _ctx = _ssl.create_default_context()
+            _srv_cm = smtplib.SMTP_SSL(_SMTP_HOST, _SMTP_PORT, context=_ctx)
+        else:
+            _srv_cm = smtplib.SMTP(_SMTP_HOST, _SMTP_PORT)
+        with _srv_cm as srv:
+            srv.ehlo()
+            if _SMTP_PORT != 465:
+                srv.starttls()
             srv.login(_SMTP_USER, _SMTP_PASS)
             srv.send_message(msg)
         logger.info("[WA EMAIL] PDF sent to %s for %s", to_email, tracking_id)
@@ -839,6 +882,135 @@ async def _wa_my_applications(phone: str, db) -> str:
         "_Type *apply* + service name to start a new application._"
     )
     return "\n\n".join(lines)
+
+
+# =====================================================================
+# TYPE B — WHATSAPP REVIEW / EDIT HELPERS
+# =====================================================================
+
+def _wa_field_review(service_key: str, data: dict) -> str:
+    """Return a numbered field-by-field summary of the collected form data."""
+    svc = SERVICES[service_key]
+    lines = [f"📋 *Your {svc['name']} Application — Review*\n"]
+    for i, f in enumerate(svc["fields"]):
+        val = data.get(f["key"], "—")
+        label = f["key"].replace("_", " ").title()
+        lines.append(f"{i + 1}. *{label}:* {val}")
+    lines.append("\n_Tap *Edit Field* to correct any entry before submitting._")
+    return "\n".join(lines)
+
+
+async def _wa_edit_get(db, session_id: str) -> str:
+    s = await db.chat_sessions.find_one({"id": session_id}, {"metadata.wa_edit": 1})
+    return (s or {}).get("metadata", {}).get("wa_edit", "")
+
+
+async def _wa_edit_set(db, session_id: str, value: str):
+    await db.chat_sessions.update_one(
+        {"id": session_id}, {"$set": {"metadata.wa_edit": value}}
+    )
+
+
+async def _wa_edit_clear(db, session_id: str):
+    await db.chat_sessions.update_one(
+        {"id": session_id}, {"$unset": {"metadata.wa_edit": ""}}
+    )
+
+
+async def _wa_save_on_timeout(db, session_id: str):
+    """
+    Persist any in-progress application data to the DB before session reset,
+    so partial work is not silently lost on a 10-minute timeout.
+
+    Type B — existing application record is updated with status='timeout'.
+    Type A — partial data is inserted as a new record with status='timeout'.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    # ── Type B: update existing in-progress application record ──────────
+    try:
+        from services.application_flow import _get_flow as _af_get_flow
+        flow    = await _af_get_flow(session_id)
+        app_id  = flow.get("application_id")
+        state   = flow.get("state", "idle")
+        if app_id and state not in ("idle", "submitted"):
+            await db.applications.update_one(
+                {"id": app_id},
+                {"$set": {
+                    "status":       "timeout",
+                    "form_data":    flow.get("data", {}),
+                    "documents":    flow.get("uploaded_docs", []),
+                    "last_state":   state,
+                    "abandoned_at": now,
+                    "updated_at":   now,
+                }},
+            )
+            logger.info(
+                "[WA TIMEOUT] Saved Type-B app %s state=%s as timeout", app_id, state
+            )
+    except Exception as exc:
+        logger.error("[WA TIMEOUT] Failed to save Type-B app: %s", exc)
+
+    # ── Type A: insert partial collected data if any ─────────────────────
+    try:
+        sess = await db.chat_sessions.find_one(
+            {"id": session_id}, {"metadata.wa_type_a": 1}
+        )
+        ta = (sess or {}).get("metadata", {}).get("wa_type_a", {})
+        if ta and ta.get("state") and ta.get("service"):
+            svc_key  = ta["service"]
+            svc_meta = _WA_TYPE_A.get(svc_key, {})
+            form_data = {
+                "full_name":            ta.get("full_name", ""),
+                "email":                ta.get("email", ""),
+                "gov_reference_number": ta.get("gov_reference", ""),
+            }
+            if any(form_data.values()):
+                new_id     = str(uuid.uuid4())
+                new_tid    = (
+                    f"{svc_key.upper()}-"
+                    f"{datetime.now(timezone.utc).strftime('%Y%m%d')}-"
+                    f"{new_id[:6].upper()}-TIMEOUT"
+                )
+                await db.applications.insert_one({
+                    "id":           new_id,
+                    "tracking_id":  new_tid,
+                    "session_id":   session_id,
+                    "service":      svc_key,
+                    "service_name": svc_meta.get("name", svc_key.title()),
+                    "category":     "TYPE_A",
+                    "status":       "timeout",
+                    "form_data":    form_data,
+                    "last_state":   ta.get("state", ""),
+                    "abandoned_at": now,
+                    "created_at":   now,
+                    "updated_at":   now,
+                })
+                logger.info(
+                    "[WA TIMEOUT] Saved Type-A partial app %s as timeout", new_tid
+                )
+    except Exception as exc:
+        logger.error("[WA TIMEOUT] Failed to save Type-A partial app: %s", exc)
+
+
+async def _wa_reset_session(db, session_id: str):
+    """
+    Destroy all active conversation state after a 10-minute idle timeout.
+    Saves any in-progress application data first, then clears:
+    application flow, Type-A state, edit state, lang-pending flag,
+    and the greeted flag (so the next interaction is treated as brand-new).
+    Language preference is intentionally preserved.
+    """
+    await _wa_save_on_timeout(db, session_id)
+    from services.application_flow import _clear_flow as _af_clear_flow
+    await _af_clear_flow(session_id)
+    await db.chat_sessions.update_one(
+        {"id": session_id},
+        {
+            "$set":   {"metadata.greeted": False, "metadata.lang_pending": False},
+            "$unset": {"metadata.wa_type_a": "", "metadata.wa_edit": ""},
+        },
+    )
 
 
 # =====================================================================
@@ -1068,6 +1240,30 @@ async def _handle_message(
     _lang_code         = _meta.get("language", "en")
     _lang_name         = _meta.get("language_name", "English")
 
+    # ── SESSION TIMEOUT: destroy state after 10 min idle ─────────────
+    # Applies only to sessions that were previously active (greeted=True).
+    # Any message after timeout gets a fresh session — greeting + language menu.
+    _was_greeted  = _meta.get("greeted", False)
+    _last_activity = session.get("last_activity", "")
+    if _was_greeted and _last_activity:
+        try:
+            _idle_seconds = (
+                datetime.now(timezone.utc)
+                - datetime.fromisoformat(_last_activity.replace("Z", "+00:00"))
+            ).total_seconds()
+            if _idle_seconds > 600:
+                await _wa_reset_session(db, session_id)
+                await _log_message(
+                    phone, "system", "[session reset — idle timeout]",
+                    {"step": "timeout_reset", "idle_seconds": int(_idle_seconds)}, db,
+                )
+                await ics_waba.send_text(phone, _WA_GREETING_TEXT, from_override=waba_number)
+                await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
+                await _set_lang_pending(db, session_id)
+                return
+        except Exception:
+            pass
+
     # ── Active form state check — used to protect language and menu detection ──
     _form_active = _current_flow.get("state") in _FORM_ACTIVE_STATES
 
@@ -1109,7 +1305,8 @@ async def _handle_message(
             _lang_code = _existing_code
             _lang_name = _existing_name
     elif not _form_active and not clean_text.strip().isdigit():
-        _t = clean_text.strip().lower()
+        # Strip trailing punctuation so "change language?" / "language ?" work the same as without
+        _t = clean_text.strip().lower().rstrip("?!. ")
 
         # "language" / "change language" keywords → show language menu to re-select
         _LANG_MENU_TRIGGERS = {
@@ -1143,30 +1340,60 @@ async def _handle_message(
             return
 
     # ── Numbered reply fallback (when interactive messages unsupported) ─
-    # Context-aware: interpretation depends on current flow state
-    _service_keys = list(SERVICES.keys())
+    # Context-aware: interpretation depends on current flow state.
+    # Build (once) the ordered key list that matches _wa_services_menu():
+    #   Type A first (passport, visa, pcc), then Type B — same order the user sees.
+    global _WA_MENU_SVCKEYS
+    if not _WA_MENU_SVCKEYS:
+        _WA_MENU_SVCKEYS = list(_WA_TYPE_A.keys()) + [
+            k for k in SERVICES.keys() if k not in _WA_TYPE_A
+        ]
+
+    # Pre-load wa_edit state for docs_pending so the numbered fallback below can
+    # distinguish "field-selecting" mode (numbers = field indices) from normal mode
+    # (numbers = Submit / Edit / Cancel).
+    _wa_edit_early = ""
+    if _current_flow.get("state") == "docs_pending":
+        _wa_edit_early = await _wa_edit_get(db, session_id)
+
     if not selected_id and clean_text.strip().isdigit():
         user_choice = int(clean_text.strip())
-        
-        # If in info_shown state with a service: map to secondary menu (Apply/Question/Menu)
+
+        # info_shown → secondary menu: 1=Apply Now, 2=Ask Question, 3=Main Menu
         if _current_flow.get("state") == "info_shown" and _current_flow.get("service"):
-            if user_choice == 1:  # "Apply Now"
+            if user_choice == 1:
                 selected_id = f"apply_{_current_flow.get('service')}"
-            elif user_choice == 2:  # "Ask a Question"
+            elif user_choice == 2:
                 selected_id = "ask_question"
-            elif user_choice == 3:  # "Main Menu"
+            elif user_choice == 3:
                 selected_id = "main_menu"
-        # If in consent_pending state: map to yes/no
+        # consent_pending → 1=Yes, 2=No
         elif _current_flow.get("state") == "consent_pending":
-            if user_choice == 1:  # Yes
+            if user_choice == 1:
                 selected_id = "consent_yes"
-            elif user_choice == 2:  # No
+            elif user_choice == 2:
                 selected_id = "consent_no"
-        # Default: map to service menu (idle or first-time users)
+        # docs_pending → 1=Submit, 2=Edit Field, 3=Cancel
+        # UNLESS we're in field-selecting mode, where numbers are field indices
+        # and must fall through to the docs_pending handler unchanged.
+        elif _current_flow.get("state") == "docs_pending" and _wa_edit_early != "selecting":
+            if user_choice == 1:
+                selected_id = "btn_submit"
+            elif user_choice == 2:
+                selected_id = "wa_edit"
+            elif user_choice == 3:
+                selected_id = "btn_cancel"
+        # paused → 1=Continue, 2=Cancel
+        elif _current_flow.get("state") == "paused":
+            if user_choice == 1:
+                selected_id = "consent_yes"   # maps to "continue"
+            elif user_choice == 2:
+                selected_id = "btn_cancel"
+        # Default: main service menu (idle / new user types "4" for OCI, etc.)
         else:
             n = user_choice - 1
-            if 0 <= n < len(_service_keys):
-                selected_id = _service_keys[n]
+            if 0 <= n < len(_WA_MENU_SVCKEYS):
+                selected_id = _WA_MENU_SVCKEYS[n]
 
     # ── Map button/list IDs to text understood by process_flow() ─────
     # This bridges WhatsApp interactive buttons to the shared state machine.
@@ -1213,55 +1440,20 @@ async def _handle_message(
             clean_text = f"apply {selected_id}"
 
     # ── SHOW MAIN MENU ────────────────────────────────────────────────
-    # Shown for: first message, greeting words, OR 10-min idle.
-    # Everything else (questions, apply intents, service names) goes to the bot engine.
+    # Shown for: first message (new session) or greeting words.
+    # 10-min idle is handled early above — by the time we reach here the
+    # session has already been reset and control returned to the caller.
     current_flow = await get_flow_state(session_id)
 
     _MENU_WORDS = {"menu", "hi", "hello", "start", "help", "/start", "hey", "namaste", "hola"}
     _is_new_session   = not _meta.get("greeted", False)
     _is_greeting_word = clean_text.lower().strip() in _MENU_WORDS
 
-    _is_long_idle = False
-    _last_act = session.get("last_activity", "")
-    if _last_act and not _is_new_session:
-        try:
-            _la_dt = datetime.fromisoformat(_last_act.replace("Z", "+00:00"))
-            _is_long_idle = (datetime.now(timezone.utc) - _la_dt).total_seconds() > 600
-        except Exception:
-            pass
-
-    is_menu_trigger = _is_new_session or _is_greeting_word or _is_long_idle
+    is_menu_trigger = _is_new_session or _is_greeting_word
 
     if is_menu_trigger and not selected_id:
-        # Send greeting + advisory as plain text first
-        greeting_text = (
-            "🙏 नमस्ते भाईयो और बहनो!\n\n"
-            "मैं हूं \"सेवा सेतु स्वचालित सहायक (बॉट)\", आपकी सेवा में सदैव तत्पर।\n\n"
-            "🗣 भारतीय काउंसलर सर्विसेज के साथ हाज़िर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
-            "आज मैं आपकी मदद करने में सक्षम हूं।\n\n"
-            "Namaste, brothers and sisters!\n\n"
-            "I am \"Seva Setu Automated Assistant (Bot)\", always ready to serve you.\n\n"
-            "🗣 Here to assist with your Indian consular service queries. "
-            "Please let me know how I can help you today. I am fully equipped to assist you.\n\n"
-            "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*\n"
-            "The Consulate does not make phone calls demanding money for fines, penalties, or any other reason. "
-            "It is not within our mandate to conduct criminal investigations.\n\n"
-            "Do not engage with such callers under any circumstance.\n\n"
-            "• Do not share any personal or financial information.\n"
-            "• If you receive a suspicious call, note the caller's number and any details.\n"
-            "• Report it immediately to your local police station.\n\n"
-            "Be vigilant. Stay safe.\n\n"
-            "🗣 *Fraud Alert: Extortion Calls Using Spoofed Numbers*\n"
-            "It has come to our attention that certain individuals are fraudulently spoofing the Consulate General's "
-            "phone numbers to contact persons of Indian origin. These calls attempt to intimidate recipients with "
-            "false legal threats and demand payments, claiming affiliation with the Consulate General or Government of India agencies.\n\n"
-            "Please be advised:\n\n"
-            "• No representative of the Consulate General will call to request payments for any governmental purpose.\n"
-            "• If you receive such a call, note the caller's details and report the incident to your local police immediately."
-        )
-        await ics_waba.send_text(phone, greeting_text, from_override=waba_number)
-        await _log_message(phone, "outbound", greeting_text, {"step": "greeting"}, db)
-        # Always follow greeting with language menu (new session, greeting word, or 10-min idle).
+        await ics_waba.send_text(phone, _WA_GREETING_TEXT, from_override=waba_number)
+        await _log_message(phone, "outbound", _WA_GREETING_TEXT, {"step": "greeting"}, db)
         await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
         await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
         await _set_lang_pending(db, session_id)
@@ -1276,14 +1468,28 @@ async def _handle_message(
             f"{svc['description']}\n\n"
             f"*Required documents:*\n{docs_text}"
         )
-        # Save info_shown + service to the shared flow so "Apply Now" works correctly
+        # Save info_shown + service so "Apply Now" works correctly
         from services.application_flow import _get_flow, _save_flow
         _flow = await _get_flow(session_id)
         _flow["state"]   = "info_shown"
         _flow["service"] = selected_id
         await _save_flow(session_id, _flow)
 
-        await ics_waba.send_text(phone, info_text, from_override=waba_number)
+        await _wa_send(phone, info_text, db, "info_shown", waba_number)
+        await session_manager.add_message(session_id, "user", user_text)
+        await session_manager.add_message(session_id, "assistant", info_text)
+        # Always follow with Apply Now / Ask a Question / Main Menu buttons
+        await ics_waba.send_buttons(
+            to=phone,
+            body=f"Would you like to apply for *{svc['name']}*?",
+            buttons=[
+                {"id": f"apply_{selected_id}", "title": "Apply Now"},
+                {"id": "ask_question",          "title": "Ask a Question"},
+                {"id": "main_menu",             "title": "Main Menu"},
+            ],
+            header="Next Steps",
+            from_override=waba_number,
+        )
         return
 
     # ── "Apply" intent handling — context-aware routing ─
@@ -1421,6 +1627,94 @@ async def _handle_message(
                 await session_manager.add_message(session_id, "assistant", info_msg)
                 return
 
+    # ── TYPE B — WA EDIT / PREVIEW FLOW ─────────────────────────────────
+    # Intercept edit-field and preview commands while in docs_pending state
+    # so users can review and correct their form data before submitting.
+    if current_flow.get("state") == "docs_pending":
+        _eb_svc   = current_flow.get("service")
+        _eb_data  = current_flow.get("data", {})
+        _eb_fields = SERVICES.get(_eb_svc, {}).get("fields", []) if _eb_svc else []
+        _wa_edit  = await _wa_edit_get(db, session_id)
+
+        # "Edit Field" button tapped → show numbered field list
+        if selected_id == "wa_edit":
+            await _wa_edit_set(db, session_id, "selecting")
+            lines = [f"✏️ *Edit a Field — {SERVICES[_eb_svc]['name']}*\n"]
+            for i, f in enumerate(_eb_fields):
+                val   = _eb_data.get(f["key"], "—")
+                label = f["key"].replace("_", " ").title()
+                lines.append(f"{i + 1}. *{label}:* {val}")
+            lines.append("\nReply with the *field number* to edit.")
+            _edit_list = "\n".join(lines)
+            await _wa_send(phone, _edit_list, db, "wa_edit_list", waba_number)
+            await session_manager.add_message(session_id, "user", user_text)
+            return
+
+        # "Preview" button tapped or user typed "preview"
+        if selected_id == "wa_preview" or clean_text.strip().lower() == "preview":
+            _review_text = _wa_field_review(_eb_svc, _eb_data)
+            _tid = current_flow.get("tracking_id", "")
+            await _wa_send(phone, _review_text, db, "wa_preview", waba_number)
+            await ics_waba.send_buttons(
+                to=phone,
+                body=f"🔖 Tracking ID: `{_tid}`\nReady to submit?",
+                buttons=[
+                    {"id": "btn_submit", "title": "Submit Application"},
+                    {"id": "wa_edit",    "title": "Edit Field"},
+                    {"id": "btn_cancel", "title": "Cancel"},
+                ],
+                header="Review & Submit",
+                footer="Tap 'Edit Field' to correct any entry.",
+                from_override=waba_number,
+            )
+            await session_manager.add_message(session_id, "user", user_text)
+            return
+
+        # Format hints shown below the current value when editing a field
+        _EDIT_HINTS: dict = {
+            "dob":            "Format: DD/MM/YYYY  (e.g. 26/07/1990)",
+            "marriage_date":  "Format: DD/MM/YYYY",
+            "travel_dates":   "Format: DD/MM/YYYY – DD/MM/YYYY  (e.g. 01/06/2026 – 20/06/2026)",
+            "email":          "Format: name@example.com",
+            "phone":          "Format: +27 72 641 3058",
+            "passport_number":"e.g. A1234567  (Indian passport) or your foreign passport number",
+            "indian_passport":"e.g. A1234567",
+            "new_passport":   "e.g. your foreign passport number",
+            "father_passport":"e.g. A1234567",
+        }
+
+        # User is in "selecting" mode — waiting for a field number
+        if _wa_edit == "selecting" and clean_text.strip().isdigit():
+            idx = int(clean_text.strip()) - 1
+            if 0 <= idx < len(_eb_fields):
+                fkey   = _eb_fields[idx]["key"]
+                flabel = fkey.replace("_", " ").title()
+                cur    = _eb_data.get(fkey, "—")
+                hint   = _EDIT_HINTS.get(fkey, "")
+                hint_line = f"\n_{hint}_" if hint else ""
+                await _wa_edit_set(db, session_id, f"field_{fkey}")
+                await _wa_send(
+                    phone,
+                    f"✏️ *Edit {flabel}*\n\nCurrent value: *{cur}*{hint_line}\n\nPlease send the new value:",
+                    db, "wa_edit_field", waba_number,
+                )
+            else:
+                await _wa_send(
+                    phone,
+                    f"Please reply with a number between 1 and {len(_eb_fields)}.",
+                    db, "wa_edit", waba_number,
+                )
+            await session_manager.add_message(session_id, "user", user_text)
+            return
+
+        # User has sent the new value for a field
+        if _wa_edit.startswith("field_"):
+            fkey = _wa_edit[len("field_"):]
+            await _wa_edit_clear(db, session_id)
+            # Rewrite as a process_flow correction command
+            clean_text = f"correct {fkey.replace('_', ' ')}: {clean_text.strip()}"
+            # Fall through to process_flow with the correction command
+
     # ── LOAD KNOWLEDGE BASE FOR CONTEXT (mirrors web bot exactly) ───────
     context_info    = ""
     scraped_summary = ""
@@ -1529,7 +1823,9 @@ async def _handle_message(
                 llm_context = llm_context + "\n\n---\n\n" + flow_response
             else:
                 llm_context = flow_response
-        raw_llm = await _llm_response(clean_text, session_id, llm_context, lang_code=_lang_code)
+        # Use a language-scoped LLM session so history from a previous language
+        # (e.g. Tamil) does not bleed into a newly selected language (e.g. Hindi).
+        raw_llm = await _llm_response(clean_text, f"{session_id}_{_lang_code}", llm_context, lang_code=_lang_code)
         # Append flow guidance suffix (same as web bot)
         suffix = flow_suffix(step, detect_service(clean_text), channel="whatsapp")
         if suffix:
@@ -1565,16 +1861,25 @@ async def _handle_message(
         )
 
     elif step == "docs_pending":
+        # Reload flow to get the latest data (process_flow may have just updated it)
+        _dp_flow = await get_flow_state(session_id)
+        _dp_svc  = _dp_flow.get("service")
+        _dp_data = _dp_flow.get("data", {})
+        _dp_tid  = _dp_flow.get("tracking_id", "")
+        # Prepend numbered form-field review so user can see what they entered
+        if _dp_svc and _dp_data:
+            await _wa_send(phone, _wa_field_review(_dp_svc, _dp_data), db, "docs_pending_review", wa)
         await _wa_send(phone, bot_text, db, step, wa)
         await ics_waba.send_buttons(
             to=phone,
-            body="All information collected. Ready to submit?",
+            body=f"🔖 Tracking ID: `{_dp_tid}`\nReady to submit?",
             buttons=[
                 {"id": "btn_submit", "title": "Submit Application"},
+                {"id": "wa_edit",    "title": "Edit Field"},
                 {"id": "btn_cancel", "title": "Cancel"},
             ],
             header="Review & Submit",
-            footer="A tracking ID will be sent on submission.",
+            footer="Tap 'Edit Field' to correct any entry.",
             from_override=wa,
         )
 
@@ -1614,7 +1919,9 @@ async def _handle_message(
     elif step == "info_shown":
         await _wa_send(phone, bot_text, db, step, wa)
         # Show Apply / Ask a Question / My Applications buttons after service info
-        _svc = current_flow.get("service") or detect_service(clean_text)
+        # Prioritise service detected in the current message (handles auto-discard case
+        # where current_flow still holds the old service); fall back to flow context.
+        _svc = detect_service(clean_text) or current_flow.get("service")
         if _svc and _svc in SERVICES:
             await ics_waba.send_buttons(
                 to=phone,

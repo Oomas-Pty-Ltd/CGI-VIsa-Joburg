@@ -1171,6 +1171,18 @@ async def process_flow(
             await _clear_flow(session_id)
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
         if is_question(message) or _is_info_query(message):
+            if channel == "whatsapp":
+                asked_svc = detect_service(message)
+                if app_id:
+                    await _update_application(app_id, {"status": "discarded"})
+                if asked_svc and asked_svc in SERVICES:
+                    new_flow = dict(_EMPTY_FLOW)
+                    new_flow["state"]   = "info_shown"
+                    new_flow["service"] = asked_svc
+                    await _save_flow(session_id, new_flow)
+                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                await _clear_flow(session_id)
+                return (None, True, "idle")
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -1198,6 +1210,18 @@ async def process_flow(
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
 
         if (is_question(message) or _is_info_query(message)) and not has_image:
+            if channel == "whatsapp":
+                asked_svc = detect_service(message)
+                if app_id:
+                    await _update_application(app_id, {"status": "discarded"})
+                if asked_svc and asked_svc in SERVICES:
+                    new_flow = dict(_EMPTY_FLOW)
+                    new_flow["state"]   = "info_shown"
+                    new_flow["service"] = asked_svc
+                    await _save_flow(session_id, new_flow)
+                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                await _clear_flow(session_id)
+                return (None, True, "idle")
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -1317,6 +1341,18 @@ async def process_flow(
 
         # ── Normal collecting flow ────────────────────────────────────
         if (is_question(message) or _is_info_query(message)) and not _looks_like_answer(message, fields[fi]["key"]):
+            if channel == "whatsapp":
+                asked_svc = detect_service(message)
+                if app_id:
+                    await _update_application(app_id, {"status": "discarded"})
+                if asked_svc and asked_svc in SERVICES:
+                    new_flow = dict(_EMPTY_FLOW)
+                    new_flow["state"]   = "info_shown"
+                    new_flow["service"] = asked_svc
+                    await _save_flow(session_id, new_flow)
+                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                await _clear_flow(session_id)
+                return (None, True, "idle")
             flow["state"]             = "paused"
             flow["paused_question"]   = message
             flow["paused_field_index"]= fi
@@ -1425,14 +1461,6 @@ async def process_flow(
             svc = detected_svc
 
         if svc:
-            if channel == "whatsapp":
-                svc_name = SERVICES[svc]["name"]
-                return (
-                    f"To apply for *{svc_name}*, please visit the official CGI Johannesburg website or contact the consulate directly.\n\n"
-                    f"🌐 https://www.cgijoburg.gov.in\n\n"
-                    f"{CONTACT_INFO}",
-                    False, "info_shown",
-                )
             flow["state"]   = "consent_pending"
             flow["service"] = svc
             await _save_flow(session_id, flow)
@@ -1440,13 +1468,6 @@ async def process_flow(
 
         # Apply intent detected but no recognisable service — ask the user
         if is_apply_intent(message) and not svc:
-            if channel == "whatsapp":
-                return (
-                    f"To apply for consular services, please visit:\n\n"
-                    f"🌐 https://www.cgijoburg.gov.in\n\n"
-                    f"{CONTACT_INFO}",
-                    False, "idle",
-                )
             svc_list = "\n".join(f"• {v['name']}" for v in SERVICES.values())
             return (
                 f"I'd be happy to help you apply! Which service are you looking for?\n\n{svc_list}\n\n"
@@ -1480,6 +1501,13 @@ async def process_flow(
         return (_website_only_info_page(website_svc_label, scraped_summary), True, "info_shown")
 
     # Default: let LLM handle
+    # WhatsApp: if in info_shown with no service detected, clear service context so
+    # option buttons are not shown for non-service queries
+    if channel == "whatsapp" and state == "info_shown":
+        flow["state"]   = "idle"
+        flow["service"] = None
+        await _save_flow(session_id, flow)
+        return (None, True, "idle")
     return (None, True, state)
 
 
