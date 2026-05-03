@@ -36,10 +36,11 @@ from config import get_company_id
 
 # Services imports
 from services.intent_classifier import (
-    intent_classifier, 
-    classify_intent, 
+    intent_classifier,
+    classify_intent,
     get_deterministic_response,
-    IntentCategory
+    detect_target_language,
+    IntentCategory,
 )
 from services.escalation_service import (
     escalation_service,
@@ -603,19 +604,28 @@ async def chat_stream(request: ChatRequest):
     intent_result  = classify_intent(sanitized_message)
     deterministic  = get_deterministic_response(intent_result)
 
-    async def _stream_deterministic(text: str, sid: str, step: str, pdf_url: str = None) -> AsyncGenerator:
+    async def _stream_deterministic(text: str, sid: str, step: str, pdf_url: str = None, lang_switch: str = None) -> AsyncGenerator:
         yield f"data: {json.dumps({'chunk': text})}\n\n"
         done_event = {'done': True, 'session_id': sid, 'step': step}
         if pdf_url:
             done_event['pdf_url'] = pdf_url
+        if lang_switch:
+            done_event['lang_switch'] = lang_switch
         yield f"data: {json.dumps(done_event)}\n\n"
+
+    # ── Language-switch intent: detect target language, return signal ──
+    _lang_switch_code = None
+    if intent_result.category == IntentCategory.LANGUAGE_SWITCH and not intent_result.requires_llm:
+        _lang_switch_code = detect_target_language(sanitized_message)
 
     # Only use deterministic shortcut for pure greetings / FAQs with NO active
     # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
     # reach process_flow so the application state-machine runs correctly.
-    # Skip for non-English — deterministic strings are English-only; let LLM translate.
+    # Language-switch is always handled deterministically regardless of UI language.
+    # Other deterministic responses skip for non-English — let LLM translate.
+    _is_lang_switch = intent_result.category == IntentCategory.LANGUAGE_SWITCH and not intent_result.requires_llm
     if (deterministic and not is_apply_intent(sanitized_message) and not is_tracking_query(sanitized_message)
-            and (not request.language or request.language == "en")):
+            and (_is_lang_switch or not request.language or request.language == "en")):
         # Quick peek at flow state — skip deterministic if user is mid-flow
         _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
         if _quick_flow.get("state", "idle") == "idle":
@@ -625,7 +635,7 @@ async def chat_stream(request: ChatRequest):
                 metadata={"language": request.language}
             )
             return StreamingResponse(
-                _stream_deterministic(deterministic, session["id"], "complete"),
+                _stream_deterministic(deterministic, session["id"], "complete", lang_switch=_lang_switch_code),
                 media_type="text/event-stream"
             )
 
@@ -765,17 +775,25 @@ async def chat_stream(request: ChatRequest):
         _s_blocked_kws,
     )
 
+    _is_walkthrough = bool(re.search(
+        r"step\s+by\s+step|walk\s+me\s+through|entire\s+process|from\s+start\s+to\s+(finish|end)|"
+        r"full\s+process|complete\s+process|beginning\s+to\s+end|guide\s+me|first\s+explain.*then|"
+        r"explain.*then\s+tell|first.*then\s+guide|walk\s+through",
+        sanitized_message, re.IGNORECASE
+    ))
+
     system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 {_s_prohibition}
 {_lang_instruction(request.language or "en")}
 
 RESPONSE STYLE:
-- Be concise, accurate, and helpful.
+{"- This is a step-by-step walkthrough or multi-part question. Provide a COMPLETE, DETAILED response covering ALL parts of the question in order. Use numbered steps. Do not skip any step. Be thorough." if _is_walkthrough else "- Be concise, accurate, and helpful."}
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
 - Do NOT ask clarifying questions like "What information do you need?" — provide the complete relevant answer directly.
-- Use bullet points only when listing multiple items.
+- Use bullet points when listing multiple items; use numbered steps for processes.
 - Do NOT repeat information already shown in the conversation.
+- When the user asks a multi-part question (e.g. "first explain X, then tell me Y"), answer ALL parts in sequence without asking which to cover first.
 - When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
 
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.

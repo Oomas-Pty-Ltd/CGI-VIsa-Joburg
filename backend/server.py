@@ -364,10 +364,11 @@ class HSTSMiddleware(BaseHTTPMiddleware):
 app.add_middleware(HSTSMiddleware)
 app.add_middleware(BodySizeLimitMiddleware)
 
+_cors_origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ['*'],
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
-.seva-widget * { box-sizing: border-box; margin: 0; padding: 0; }
+.seva-widget * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Poppins', sans-serif; }
+.seva-widget svg { display: inline-block; flex-shrink: 0; max-width: none; max-height: none; vertical-align: middle; }
 
 /* FAB */
 .seva-fab {
@@ -26,6 +27,56 @@
   background: rgba(255,255,255,.7); animation: seva-ping 1.6s ease-out infinite;
 }
 @keyframes seva-ping { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.2); opacity: 0; } }
+
+/* FAB WELCOME TIP — floats to the LEFT of the bot icon */
+.seva-fab-tip {
+  position: fixed;
+  bottom: 34px;
+  right: 108px;
+  z-index: 9998;
+  background: #fff;
+  color: #1A2E40;
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 32px 10px 14px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.18), 0 1px 6px rgba(0,0,0,.1);
+  border: 1.5px solid rgba(232,93,26,.25);
+  max-width: 335px;
+  line-height: 1.4;
+  animation: seva-tip-in .35s cubic-bezier(.34,1.56,.64,1);
+  white-space: nowrap;
+}
+/* Arrow points RIGHT toward the FAB */
+.seva-fab-tip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 16px;
+  background: #fff;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.seva-fab-tip-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1;
+  padding: 2px;
+}
+.seva-fab-tip-close:hover { color: #374151; }
+@keyframes seva-tip-in {
+  from { opacity: 0; transform: translateX(10px) scale(.92); }
+  to   { opacity: 1; transform: translateX(0)    scale(1); }
+}
 
 /* POPUP */
 .seva-popup {
@@ -283,13 +334,45 @@
 .seva-bubble-bot .seva-msg-hindi, .seva-bubble-bot .msg-hindi { 
   font-size: 12px; color: #5B6B7D; margin-bottom: 7px; line-height: 1.5;
 }
-.seva-bubble-bot .prose { font-size: 13px; color: #374151; line-height: 1.6; }
+.seva-bubble-bot .prose { font-family: 'Poppins', sans-serif; font-size: 13px; color: #374151; line-height: 1.6; }
 .seva-bubble-bot .prose p { margin: 5px 0; }
-.seva-bubble-bot .prose ul, .seva-bubble-bot .prose ol { 
+.seva-bubble-bot .prose ul, .seva-bubble-bot .prose ol {
   padding-left: 18px; margin: 7px 0; font-size: 13px; color: #374151;
 }
 .seva-bubble-bot .prose li { margin: 3px 0; }
 .seva-bubble-bot .prose strong { font-weight: 600; color: #0B1F3A; }
+.seva-bubble-bot .prose h1,
+.seva-bubble-bot .prose h2 {
+  font-size: 13.5px; font-weight: 700; color: #0B1F3A;
+  margin: 8px 0 4px; padding-bottom: 3px;
+  border-bottom: 1px solid #E5E7EB; line-height: 1.4;
+}
+.seva-bubble-bot .prose h3 {
+  font-size: 13px; font-weight: 600; color: #1A2E40;
+  margin: 6px 0 3px; line-height: 1.4;
+}
+.seva-bubble-bot .prose h4,
+.seva-bubble-bot .prose h5,
+.seva-bubble-bot .prose h6 {
+  font-size: 12.5px; font-weight: 600; color: #374151;
+  margin: 4px 0 2px; line-height: 1.4;
+}
+.seva-bubble-bot .prose table {
+  width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0;
+}
+.seva-bubble-bot .prose th {
+  background: #F3F4F6; color: #0B1F3A; font-weight: 600;
+  padding: 5px 8px; text-align: left; border: 1px solid #E5E7EB; font-size: 11.5px;
+}
+.seva-bubble-bot .prose td {
+  padding: 5px 8px; border: 1px solid #E5E7EB; color: #374151; vertical-align: top;
+}
+.seva-bubble-bot .prose tr:nth-child(even) td { background: #F9FAFB; }
+.seva-bubble-bot .prose blockquote {
+  border-left: 3px solid #E85D1A; margin: 6px 0; padding: 4px 10px;
+  background: #FFF7F3; border-radius: 0 6px 6px 0; font-size: 12px; color: #6B7280;
+}
+.seva-bubble-bot .prose hr { border: none; border-top: 1px solid #E5E7EB; margin: 8px 0; }
 
 .seva-msg-time { 
   font-size: 10px; color: #B0B8C4; margin-top: 5px; text-align: right; 
@@ -1193,6 +1276,10 @@
   padding: 10px 13px;
   max-width: calc(100% - 48px);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  font-family: 'Poppins', sans-serif;
+  font-size: 12.5px;
+  color: #374151;
+  line-height: 1.65;
 }
 .msg-bubble-bot .msg-hi {
   font-size: 13px;
@@ -1224,6 +1311,79 @@
   font-weight: 600;
   color: #0B1F3A;
 }
+
+/* Normalize markdown headings inside bot bubbles — prevent browser-default huge sizes */
+.msg-bubble-bot h1,
+.msg-bubble-bot h2 {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0B1F3A;
+  line-height: 1.4;
+  margin: 8px 0 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #E5E7EB;
+}
+.msg-bubble-bot h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1A2E40;
+  line-height: 1.4;
+  margin: 6px 0 3px;
+}
+.msg-bubble-bot h4,
+.msg-bubble-bot h5,
+.msg-bubble-bot h6 {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #374151;
+  line-height: 1.4;
+  margin: 4px 0 2px;
+}
+
+/* Tables inside bot bubbles */
+.msg-bubble-bot table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.msg-bubble-bot th {
+  background: #F3F4F6;
+  color: #0B1F3A;
+  font-weight: 600;
+  padding: 5px 8px;
+  text-align: left;
+  border: 1px solid #E5E7EB;
+  font-size: 11.5px;
+}
+.msg-bubble-bot td {
+  padding: 5px 8px;
+  border: 1px solid #E5E7EB;
+  color: #374151;
+  vertical-align: top;
+}
+.msg-bubble-bot tr:nth-child(even) td {
+  background: #F9FAFB;
+}
+
+/* Blockquotes inside bot bubbles */
+.msg-bubble-bot blockquote {
+  border-left: 3px solid #E85D1A;
+  margin: 6px 0;
+  padding: 4px 10px;
+  background: #FFF7F3;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  color: #6B7280;
+}
+
+/* Horizontal rule inside bot bubbles */
+.msg-bubble-bot hr {
+  border: none;
+  border-top: 1px solid #E5E7EB;
+  margin: 8px 0;
+}
+
 .msg-bubble-bot .msg-hindi {
   font-size: 12px;
   color: #6B7280;
@@ -1507,4 +1667,44 @@
       max-height: calc(100vh - 100px);
     }
   }
+}
+
+/* ── HOST-PAGE ISOLATION — prevent parent page styles from breaking the widget ── */
+#seva-chatwidget-root *,
+.seva-widget-container * {
+  box-sizing: border-box !important;
+}
+
+#seva-chatwidget-root .chat-input-row,
+.seva-widget-container .message-input-wrapper {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+#seva-chatwidget-root input[type="text"],
+#seva-chatwidget-root textarea {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
+
+#seva-chatwidget-root button,
+.seva-widget-container .send-btn,
+.seva-widget-container .mic-btn,
+.seva-widget-container .camera-btn {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: fit-content !important;
+}
+
+/* Restore fixed dimensions for the circular send button — overrides the width:auto above */
+#seva-chatwidget-root .wa-send,
+.wa-send {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  border-radius: 50% !important;
+  aspect-ratio: 1 !important;
 }

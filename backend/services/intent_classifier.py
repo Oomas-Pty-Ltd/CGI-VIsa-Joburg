@@ -34,6 +34,9 @@ class IntentCategory(Enum):
     OFFICE_INFO = "office_info"
     ESCALATION = "escalation"
     GREETING = "greeting"
+    CAPABILITIES = "capabilities"
+    LANGUAGE_SWITCH = "language_switch"
+    PLATFORM_INFO = "platform_info"
     UNKNOWN = "unknown"
 
 
@@ -260,6 +263,82 @@ INTENT_PATTERNS = {
             r"^(thanks|thank you|bye|goodbye)[\s!?.]*$"
         ],
         "response_key": "greeting"
+    },
+
+    IntentCategory.LANGUAGE_SWITCH: {
+        "keywords": [
+            "switch language", "change language", "speak hindi", "respond in hindi",
+            "in hindi", "in english", "in tamil", "in telugu", "in bengali",
+            "in marathi", "in gujarati", "in urdu", "in kannada", "in malayalam",
+            "in punjabi", "in odia", "in assamese", "in nepali", "in arabic",
+            "in french", "in swahili", "in zulu", "in xhosa", "in afrikaans",
+            "language change", "set language", "mujhe hindi mein", "hindi mein baat",
+        ],
+        "patterns": [
+            r"(switch|change|set)\s+(the\s+)?language\s*(to\s+\w+)?",
+            r"(speak|respond|reply|answer|talk)\s+(to\s+me\s+)?(in|using)\s+\w+",
+            r"(in|use)\s+(hindi|english|bengali|marathi|telugu|tamil|gujarati|urdu|kannada|malayalam|punjabi|odia|assamese|nepali|arabic|french|swahili|zulu|xhosa|afrikaans|sesotho|setswana)",
+            r"(mujhe\s+)?(hindi|bengali|marathi)\s+(mein|me)\s+(baat|jawab|batao)",
+            r"^(hindi|english|tamil|telugu|bengali|marathi|gujarati|urdu|kannada|malayalam|french|arabic|swahili|zulu|afrikaans)[\s!?.]*$",
+        ],
+        "response_key": "language_switch"
+    },
+
+    IntentCategory.PLATFORM_INFO: {
+        "keywords": [
+            "pricing plan", "pricing plans", "price plan", "subscription",
+            "customize", "customise", "custom services", "personalize", "personalise",
+            "trust", "trustworthy", "reliable", "secure", "safe", "legitimate", "official",
+            "sign up", "signup", "register", "create account", "get started", "onboard",
+            "how to use", "how does this work", "how do i begin", "getting started",
+            "platform", "bot policy", "data privacy", "privacy policy",
+            "do you offer", "is this free", "free to use", "no cost",
+            "different from others", "unique", "better than", "stand out", "advantage",
+            "why choose", "what makes you", "special about", "compared to", "versus",
+            "unique features", "key benefits", "value proposition", "why use",
+            "competitive", "compared to others", "sets you apart", "differentiator",
+        ],
+        "patterns": [
+            r"(do\s+you|is\s+there)\s+(offer|have)\s+(pricing|plans?|subscription)",
+            r"(pricing|price)\s+(plan|plans?|tier|tiers?|structure)",
+            r"(can|how)\s+(i|do\s+i)\s+(customize|customise|personalize|personalise)",
+            r"why\s+(should|can)\s+i\s+trust",
+            r"(is|are)\s+(this|you|your\s+platform)\s+(safe|secure|official|legitimate|reliable|trustworthy)",
+            r"(help|guide|walk)\s+me\s+(to\s+)?(sign\s*up|register|get\s+started|onboard)",
+            r"(how\s+(do|can)\s+i\s+)?(sign\s*up|register|get\s+started|start\s+using)",
+            r"^(get\s+started|sign\s*up|register)[\s!?.]*$",
+            r"(is\s+(this|it)\s+free|free\s+to\s+use|no\s+charge\s+for\s+bot)",
+            r"(what\s+makes?\s+(your?|this)\s+(platform|bot|service|you)\s+(different|unique|special|better))",
+            r"(how\s+(are|is)\s+(you|this|your?\s+\w+)\s+different\s+(from|than|to))",
+            r"(why\s+(should|would|do)\s+i\s+(use|choose|pick|prefer|trust)\s+(you|this|your?\s+\w+))",
+            r"(what\s+(sets?\s+you|makes?\s+you)\s+apart)",
+            r"(different|unique|better|special)\s+(from|than|to|compared)",
+            r"(advantage|benefit|benefit|unique\s+feature|key\s+feature)",
+            r"(compare|versus|vs\.?)\s+(other|another)",
+        ],
+        "response_key": "platform_info"
+    },
+
+    IntentCategory.CAPABILITIES: {
+        "keywords": [
+            "features", "services", "what can you do", "what do you do",
+            "help me", "how can you help", "capabilities", "what can i ask",
+            "what do you offer", "what are you", "tell me about yourself",
+            "what services", "menu", "options", "assist", "support"
+        ],
+        "patterns": [
+            r"what\s+(can|do)\s+you\s+(do|offer|help|provide|assist)",
+            r"(list|show|tell me).*(services?|features?|options?|capabilities?)",
+            r"(services?|features?|capabilities?).*(available|offer|provide)",
+            r"how\s+can\s+(you|i).*(help|assist|use)",
+            r"what\s+(services?|help|assistance)\s+(do\s+you|can\s+you|are)\s+",
+            r"^(help|menu|options?)[\s!?.]*$",
+            r"(what|which)\s+(can|do)\s+i\s+(ask|do|get|request)",
+            r"what\s+are\s+(your\s+)?(services?|features?|options?|capabilities?)",
+            r"(show|tell|list)\s+(me\s+)?(your\s+)?(services?|features?|options?|capabilities?)",
+            r"^(services?|features?)[\s!?.]*$",
+        ],
+        "response_key": "capabilities"
     }
 }
 
@@ -268,167 +347,564 @@ INTENT_PATTERNS = {
 # STRUCTURED RESPONSES (Deterministic)
 # =====================================================================
 STRUCTURED_RESPONSES = {
+
     "passport_info": {
-        "title": "Passport Services",
-        "content": """**Indian Passport Services at CGI Johannesburg:**
+        "title": "🛂 Passport Services",
+        "content": """**🛂 Indian Passport Services**
+*Consulate General of India, Johannesburg*
 
-**Types of Applications:**
-• New Passport
-• Renewal/Re-issue
-• Lost/Damaged Passport
-• Tatkal (Urgent)
+---
 
-**Fees:**
-• Normal: R1,200 (new), R800 (renewal)
-• Tatkal: R2,400 (new), R1,600 (renewal)
+**📋 Types of Applications**
 
-**Processing Time:**
-• Normal: 4-6 weeks
-• Tatkal: 1-2 weeks
+| Type | Description |
+|---|---|
+| New Passport | First-time applicants |
+| Renewal / Re-issue | Expired or expiring passport |
+| Lost / Damaged | FIR (police report) required |
+| Tatkal | Urgent processing |
 
-**How to Apply:**
-1. Book appointment: passportindia.gov.in
-2. Fill online application
-3. Visit with documents & payment
+---
 
-**Documents Required:**
-• Current passport (if renewal)
-• Proof of address in SA
-• Valid visa/permit
-• Passport photos""",
-        "source": "CGI Johannesburg Official"
+**💰 Fee Schedule**
+
+| Application Type | Fee (ZAR) |
+|---|---|
+| 36-page passport | ZAR 2,280 |
+| 60-page passport | ZAR 2,655 |
+| Minor / Emergency passport | ZAR 780 |
+| Tatkal surcharge | Additional fees apply |
+
+> All fees include ICWF charge of ZAR 30.
+
+---
+
+**⏱ Processing Time**
+
+- Normal: Up to one month
+- Tatkal: 1–2 weeks
+
+---
+
+**🔗 How to Apply**
+
+1. Apply online at embassy.passportindia.gov.in
+2. Complete the online application form
+3. Pay the fee and save your receipt
+4. Book appointment via VFS Global Johannesburg
+5. Visit VFS with all original documents
+6. Collect your passport when ready
+
+> ⚠️ Applications are **not** accepted directly at the Consulate — all go through **VFS Global**.
+
+---
+
+**📁 Documents Required**
+
+- ✅ Completed online application form
+- ✅ Original current / expired passport
+- ✅ 3 passport-size photos (5×5 cm, white background)
+- ✅ Proof of residential address in South Africa
+- ✅ Original proof of payment (no photocopies)
+- ✅ Valid South African visa / permit
+- ✅ FIR / Police Report *(lost or stolen only)*
+
+---
+
+**🏢 VFS Global — Passport / PCC**
+
+📍 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB 2198
+📞 012 425 3007 / 011 484 0327
+🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
+
+---
+
+📞 **Consulate:** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in""",
+        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
     },
-    
+
     "visa_info": {
-        "title": "Indian Visa Information",
-        "content": """**Indian Visa Services:**
+        "title": "✈️ Indian Visa Information",
+        "content": """**✈️ Indian Visa Services**
+*Consulate General of India, Johannesburg*
 
-**Visa Types:**
-• Tourist Visa (up to 10 years)
-• Business Visa
-• Student Visa
-• Medical Visa
-• E-Visa (online)
+---
 
-**Apply Online:** indianvisaonline.gov.in
+**🗂 Visa Types Available**
 
-**Processing Time:** 3-5 working days
+| Visa Type | Notes |
+|---|---|
+| Tourist | Up to 10 years, multiple entry |
+| Business | For trade / corporate visits |
+| Student | For study programmes in India |
+| Medical | For treatment in India |
+| Employment | For working in India |
+| Conference / Research | Short-duration visits |
+| Transit | Passing through India |
+| e-Visa | Online — available at 30+ airports |
 
-**General Requirements:**
-• Valid passport (6+ months validity)
-• Completed application form
-• Passport photos
-• Proof of travel
-• Supporting documents (varies by type)""",
-        "source": "VFS Global / CGI Johannesburg"
+---
+
+**💰 Visa Fees**
+
+> 🎉 **South African nationals receive Indian visa GRATIS (free of charge).**
+> For other nationalities, fees are as per MEA notification.
+
+---
+
+**⏱ Processing Time**
+
+- Regular visa: 3–5 working days
+- e-Visa: Apply minimum **5 working days** before departure
+
+---
+
+**🔗 How to Apply**
+
+*Regular Visa:*
+1. Apply online at indianvisaonline.gov.in
+2. Fill the form and upload photos
+3. Pay the visa fee online
+4. Book appointment at VFS Global (Visa)
+5. Submit biometrics and documents at VFS
+6. Collect visa when ready
+
+*e-Visa:*
+1. Apply at indianvisaonline.gov.in/evisa
+2. Upload documents and photo
+3. Pay online — receive e-Visa by email
+
+---
+
+**📁 Documents Required**
+
+- ✅ Valid passport — min **6 months** validity from departure
+- ✅ At least **2 blank pages** in passport
+- ✅ Completed application form
+- ✅ Recent passport-size photographs
+- ✅ Proof of travel (tickets / itinerary)
+- ✅ Supporting documents *(varies by visa type)*
+
+---
+
+**🏢 VFS Global — Visa Submission**
+
+> ⚠️ **No visa applications at the Consulate** — all through VFS only.
+
+📍 1st Floor, Rivonia Village Office Block, Rivonia, JHB
+📞 012 425 3007
+🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
+
+---
+
+📞 **Consulate:** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in""",
+        "source": "VFS Global / CGI Johannesburg Official"
     },
-    
+
     "oci_info": {
-        "title": "OCI Card Information",
-        "content": """**OCI (Overseas Citizen of India):**
+        "title": "🇮🇳 OCI Card Information",
+        "content": """**🇮🇳 OCI Card — Overseas Citizen of India**
+*Consulate General of India, Johannesburg*
 
-**What is OCI?**
-Multi-purpose, multi-entry life-long visa to India.
+---
 
-**Eligibility:**
-• Persons who were citizens of India on or after 26 Jan 1950
-• Persons whose parents or grandparents were Indian citizens
-• Spouse of Indian citizen or OCI holder (married for ≥2 years)
-• Minor children of Indian citizens
+**ℹ️ What is OCI?**
 
-**How to Apply:**
+An OCI Card is a **multi-purpose, multi-entry, lifelong visa** to India. It grants:
+
+- ✅ Unlimited entry to India for any purpose
+- ✅ No need to report to police on arrival
+- ✅ Parity with NRIs for economic, financial & educational purposes
+- ✅ No expiry — valid for life
+
+---
+
+**✅ Eligibility**
+
+You may apply if:
+- You were an **Indian citizen on or after 26 January 1950**, OR
+- Your **parent, grandparent or great-grandparent** was Indian, OR
+- You are the **spouse of an Indian citizen / OCI holder** (married ≥ 2 years)
+- You are a **minor child** of an Indian citizen
+
+*Not eligible:* Pakistan / Bangladesh nationals; foreign military personnel.
+
+---
+
+**💰 Fees**
+
+> Fees are **as per MEA notification** — contact Consulate for current rates.
+> 📧 cons.jburg@mea.gov.in
+
+---
+
+**🔗 How to Apply**
+
 1. Apply online at ociservices.gov.in
-2. Submit documents in person at the Consulate
-3. Book appointment via cons.jburg@mea.gov.in
+2. Upload all required documents
+3. Email cons.jburg@mea.gov.in to book appointment
+4. Visit the Consulate with all original documents
+5. Collect your OCI card when ready
 
-**Fees:** As per MEA notification
+---
 
-**Requirements:**
-• Current foreign passport (original + copies of all pages)
-• Proof of Indian origin (old Indian passport / parent's Indian passport / Indian birth certificate)
-• South African ID / permanent residence / work permit
-• Recent passport-size photographs
-• Marriage certificate (if applying as spouse)""",
+**📁 Documents Required**
+
+- ✅ Current foreign passport (original + all page copies)
+- ✅ Renunciation / Surrender Certificate
+- ✅ Proof of Indian origin (old Indian passport / birth / school cert)
+- ✅ Proof of SA residential address
+- ✅ SA ID / Permanent Residence / Work Permit
+- ✅ 2 recent passport-size photos (51×51 mm)
+- ✅ Marriage certificate *(if applying as spouse)*
+
+---
+
+**🏢 Consulate Office**
+
+📍 No. 1, Eton Road, Park Town 2193, Johannesburg
+📞 +27 11-4828484 | 📧 cons.jburg@mea.gov.in
+🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)""",
         "source": "CGI Johannesburg Official — cgijoburg.gov.in"
     },
-    
+
     "office_info": {
-        "title": "CGI Johannesburg Office",
-        "content": """**Consulate General of India, Johannesburg:**
+        "title": "🏢 CGI Johannesburg Office",
+        "content": """**🏢 Consulate General of India, Johannesburg**
 
-- **Acting Consul General:** Mr. Harish Kumar
-- **Address:** No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg
-- **Phone:** +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-- **Email:** ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)
-- **Website:** www.cgijoburg.gov.in
-- **Office Hours:** Mon–Fri 08:30–17:00 (Lunch break: 13:00–13:30)
-- **Jurisdiction:** Gauteng, North West, Limpopo and Mpumalanga provinces
-- **VFS Global (Passport/PCC):** 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007
-- **VFS Global (Visa):** 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007
-- **VFS Hours:** Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00""",
+---
+
+**📌 Contact Details**
+
+| Field | Details |
+|---|---|
+| Acting Consul General | Mr. Harish Kumar |
+| Address | No. 1, Eton Road, Park Town 2193, Johannesburg |
+| Phone | +27 11-4828484 / +27 11-4828485 / +27 11-4828486 |
+| Emergency | +27 11 581 9800 |
+| General Email | ccom.jburg@mea.gov.in |
+| Consular / OCI Email | cons.jburg@mea.gov.in |
+| Website | www.cgijoburg.gov.in |
+
+---
+
+**🕐 Office Hours**
+
+| Day | Hours |
+|---|---|
+| Monday – Friday | 08:30 – 17:00 |
+| Lunch Break | 13:00 – 13:30 |
+| Saturday – Sunday | Closed |
+| Public Holidays | Closed |
+
+---
+
+**🗺 Jurisdiction**
+
+Gauteng · North West · Limpopo · Mpumalanga
+
+---
+
+**🏢 VFS Global — Passport / PCC**
+
+📍 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB 2198
+📞 012 425 3007 / 011 484 0327
+🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
+
+---
+
+**🏢 VFS Global — Visa**
+
+📍 1st Floor, Rivonia Village Office Block, Rivonia, JHB
+📞 012 425 3007
+🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
+
+---
+
+> ⚠️ **FRAUD ALERT:** The Consulate NEVER requests money over phone or SMS.""",
         "source": "CGI Johannesburg Official — cgijoburg.gov.in"
     },
-    
+
     "emergency_contact": {
-        "title": "Emergency Assistance",
-        "content": """**🚨 EMERGENCY CONTACT:**
+        "title": "🚨 Emergency Assistance",
+        "content": """**🚨 Emergency Consular Assistance**
 
-**24/7 Emergency Helpline:**
-📞 (+27) 11 581 9800
+---
 
-**For:**
-• Indian citizens in distress
-• Lost/stolen passport
-• Medical emergencies
-• Arrest/detention
-• Death of Indian national
-• Natural disasters
+**📞 24/7 Emergency Helpline**
 
-**Regular Hours:**
-📞 +27 11 783 0202
-📧 cons.joburg@mea.gov.in
+> **+27 11 581 9800**
+> *Available around the clock for Indian citizens in distress*
 
-⚠️ **FRAUD ALERT:** The Consulate NEVER calls asking for money.""",
+---
+
+**🆘 When to Call**
+
+- 🔴 Lost or stolen passport
+- 🔴 Arrest or detention
+- 🔴 Medical emergency
+- 🔴 Death of an Indian national
+- 🔴 Natural disaster / civil unrest
+- 🔴 Stranded without funds or documents
+
+---
+
+**🕐 Regular Office Hours**
+
+📞 +27 11-4828484 / +27 11-4828485 / +27 11-4828486
+📧 ccom.jburg@mea.gov.in
+🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
+
+---
+
+**🏢 Consulate Address**
+
+📍 No. 1, Eton Road, Park Town 2193, Johannesburg
+
+---
+
+> ⚠️ **FRAUD ALERT:** The Consulate **NEVER** calls asking for money. Hang up and report to ccom.jburg@mea.gov.in immediately.""",
         "source": "CGI Johannesburg Official",
         "escalation": True
     },
-    
+
     "escalation": {
-        "title": "Human Assistance",
-        "content": """**Connecting you to human assistance...**
+        "title": "👤 Human Assistance",
+        "content": """**👤 Connecting You to Human Assistance**
 
-Your request has been flagged for human review.
+Your request has been noted and flagged for human review.
 
-**While you wait:**
-📞 Call: +27 11 783 0202
-📧 Email: cons.joburg@mea.gov.in
-🌐 Visit: https://www.cgijoburg.gov.in
+---
 
-**Office Hours:**
-Mon-Fri: 9:00 AM - 5:30 PM
+**📞 Contact the Consulate Directly**
 
-A consular officer will review your query.""",
+| Channel | Details |
+|---|---|
+| Phone | +27 11-4828484 / +27 11-4828485 / +27 11-4828486 |
+| Emergency | +27 11 581 9800 *(24/7)* |
+| General Email | ccom.jburg@mea.gov.in |
+| Consular / OCI | cons.jburg@mea.gov.in |
+| Website | www.cgijoburg.gov.in |
+
+---
+
+**🕐 Office Hours**
+
+Mon–Fri **08:30–17:00** | Lunch: 13:00–13:30
+Saturday, Sunday & Public Holidays — Closed
+
+---
+
+**🏢 Walk-In Address**
+
+📍 No. 1, Eton Road, Park Town 2193, Johannesburg
+
+---
+
+> A consular officer will review your query and respond as soon as possible.""",
         "source": "CGI Johannesburg",
         "escalation": True
     },
-    
+
     "greeting": {
         "title": "Welcome",
-        "content": """🙏 **Namaste! Welcome to Seva Setu Bot.**
+        "content": """🙏 **Namaste! Welcome to Seva Setu Bot**
+*Your official AI assistant for Indian consular services in South Africa*
 
-I'm your AI assistant for Indian consular services in South Africa.
+---
 
-**I can help with:**
-• Passport services
-• Visa information
-• OCI/PIO cards
-• Document attestation
-• Office hours & contact
+**🏛️ I Can Help You With**
 
-**How can I assist you today?**""",
+| Service | |
+|---|---|
+| 🛂 Passport | New, renewal, lost/damaged, Tatkal |
+| ✈️ Indian Visa | Tourist, business, student, e-Visa |
+| 🇮🇳 OCI / PIO Card | Lifelong visa for persons of Indian origin |
+| 📋 Police Clearance (PCC) | For immigration or employment abroad |
+| 📄 EC / Death Certificate | Emergency certificate and attestation |
+| 📜 Surrender / Renunciation | Surrender Indian passport |
+| 💍 Marriage Certificate | Registration and attestation |
+| 🗂️ Miscellaneous | Affidavits, power of attorney, apostille |
+| 🏢 Office Info | Hours, address, contact numbers |
+
+---
+
+Just type your question or say **"help"** to see everything I can do!""",
+        "source": "Seva Setu Bot"
+    },
+
+    "capabilities": {
+        "title": "Services & Features",
+        "content": """🤖 **Seva Setu Bot — Complete Guide**
+*Official AI assistant for the Consulate General of India, Johannesburg*
+
+---
+
+**🏛️ Consular Services**
+
+| # | Service | What It Covers |
+|---|---|---|
+| 1 | 🛂 Passport | New, renewal, lost/damaged, Tatkal — via VFS Global |
+| 2 | ✈️ Indian Visa | Tourist, business, student, medical, e-Visa — via VFS Global |
+| 3 | 📋 PCC | Police Clearance Certificate for immigration / employment |
+| 4 | 🇮🇳 OCI Card | Lifelong multi-entry visa — processed at the Consulate |
+| 5 | 📄 EC / Death Cert | Emergency Certificate and Death Certificate attestation |
+| 6 | 📜 Renunciation | Surrender Indian passport after acquiring foreign nationality |
+| 7 | 💍 Marriage Cert | Register or attest South African marriage for India |
+| 8 | 🗂️ Miscellaneous | Affidavits, power of attorney, apostille, name correction |
+
+---
+
+**💬 What You Can Ask Me**
+
+- 📁 Required documents for any service
+- 💰 Fees and processing times
+- 📅 How to book an appointment
+- 🔍 Track your application status
+- 🏢 Office address, timings, and contact info
+- 🚨 Emergency consular assistance
+
+---
+
+**✨ Extra Features**
+
+| Feature | Details |
+|---|---|
+| 🌐 20+ Languages | Hindi, Tamil, Zulu, Xhosa, Afrikaans, Arabic, French & more |
+| 🎤 Voice Input | Speak your question in your language |
+| 📷 Document Upload | Auto-scan and extract fields from your documents |
+| 📄 PDF Receipt | Get a tracking ID and PDF summary after each application |
+| 📱 WhatsApp | Same bot available on WhatsApp |
+| 🔒 Secure | All uploads are virus-scanned; sessions are private |
+
+---
+
+📞 **Need human help?** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in
+🕐 Mon–Fri 08:30–17:00""",
+        "source": "Seva Setu Bot"
+    },
+
+    "platform_info": {
+        "title": "About Seva Setu Bot",
+        "content": """🌟 **What Makes Seva Setu Bot Different?**
+*The only official AI assistant for the Consulate General of India, Johannesburg*
+
+---
+
+**🏆 Seva Setu Bot vs Other Chatbots**
+
+| Feature | ✅ Seva Setu Bot | ❌ Generic Chatbots |
+|---|---|---|
+| Official source | CGI Johannesburg verified | Third-party / unverified |
+| Live consulate data | Scraped from cgijoburg.gov.in | Static or outdated |
+| Guided application flow | Step-by-step + PDF output | Information only |
+| Document upload & scan | Auto-extracts fields | Not supported |
+| 20+ languages | Hindi, Tamil, Zulu, Xhosa & more | English only |
+| Voice input | Speak in your language | Rarely available |
+| WhatsApp support | Same bot on WhatsApp | Web only |
+| Emergency helpline | 24/7 emergency contact | Not available |
+| Cost | 100% Free | Often paid |
+
+---
+
+**💰 Pricing — Is This Free?**
+
+> ✅ **Seva Setu Bot is completely free.** No subscription, no sign-up fee, no hidden charges.
+
+The government consulate services have official fees:
+
+| Service | Fee (ZAR) |
+|---|---|
+| Passport 36-page | ZAR 2,280 |
+| Passport 60-page | ZAR 2,655 |
+| Minor / Emergency Passport | ZAR 780 |
+| Indian Visa | Gratis for South African nationals |
+| Birth Registration | Gratis (free) |
+| OCI Card | As per MEA notification |
+| Attestation / Other | As per consular schedule |
+
+---
+
+**🔧 Can I Customise the Services?**
+
+These are official government processes — requirements cannot be changed. However, you can personalise your experience:
+
+- 🌐 Choose from **20+ languages**
+- 🎤 Use **voice input** in your language
+- 📷 **Upload documents** for auto-scanning
+- 📋 Follow a **guided step-by-step** application flow
+- 🔍 Ask **specific questions** about your situation
+
+---
+
+**🔒 Why Trust This Platform?**
+
+- ✅ **Official** — The only AI assistant endorsed by CGI Johannesburg
+- ✅ **Government-backed** — Data from CGI Joburg, VFS Global & MEA notifications
+- ✅ **Secure** — Every document is virus-scanned before processing
+- ✅ **Private** — Conversations never sold or shared
+- ✅ **Transparent** — Always directs to official government portals
+- ⚠️ **Fraud Alert** — The Consulate NEVER calls asking for money.
+
+---
+
+**🚀 How to Get Started**
+
+1. **Select language** — click the 🌐 flag button at the top
+2. **Ask your question** — type naturally, e.g. *"I need to renew my passport"*
+3. **Follow the guided flow** — the bot collects your details step by step
+4. **Upload documents** — use the 📷 camera or 📎 upload button when prompted
+5. **Receive your PDF** — get a tracking ID and summary upon submission
+
+---
+
+📞 **Consulate:** +27 11-4828484 / +27 11 581 9800 *(24/7 emergency)*
+📧 ccom.jburg@mea.gov.in | 🕐 Mon–Fri 08:30–17:00""",
+        "source": "Seva Setu Bot — CGI Johannesburg Official"
+    },
+
+    "language_switch": {
+        "title": "Language Switch",
+        "content": "🌐 Switching language for you...",
         "source": "Seva Setu Bot"
     }
 }
+
+
+# Maps common language names (lower-case) → language code used by the frontend
+LANGUAGE_NAME_TO_CODE = {
+    "english": "en",
+    "hindi": "hi", "हिंदी": "hi", "हिन्दी": "hi",
+    "bengali": "bn", "bangla": "bn", "বাংলা": "bn",
+    "marathi": "mr", "मराठी": "mr",
+    "telugu": "te", "తెలుగు": "te",
+    "tamil": "ta", "தமிழ்": "ta",
+    "gujarati": "gu", "ગુજરાતી": "gu",
+    "urdu": "ur", "اردو": "ur",
+    "kannada": "kn", "ಕನ್ನಡ": "kn",
+    "malayalam": "ml", "മലയാളം": "ml",
+    "punjabi": "pa", "ਪੰਜਾਬੀ": "pa",
+    "odia": "or", "oriya": "or", "ଓଡ଼ିଆ": "or",
+    "assamese": "as", "অসমীয়া": "as",
+    "nepali": "ne", "नेपाली": "ne",
+    "arabic": "ar", "العربية": "ar",
+    "french": "fr", "français": "fr",
+    "swahili": "sw", "kiswahili": "sw",
+    "zulu": "zu", "isizulu": "zu",
+    "xhosa": "xh", "isixhosa": "xh",
+    "afrikaans": "af",
+    "sesotho": "st", "sotho": "st",
+    "setswana": "tn", "tswana": "tn",
+}
+
+
+def detect_target_language(text: str):
+    """Extract the target language code from a language-switch message. Returns None if not found."""
+    text_lower = text.lower()
+    for name, code in LANGUAGE_NAME_TO_CODE.items():
+        if name in text_lower:
+            return code
+    return None
 
 
 class IntentClassifier:
@@ -474,7 +950,18 @@ class IntentClassifier:
         
         # Determine if we need LLM
         requires_llm = best_score < 0.5  # Less than 50% confidence
-        
+
+        # For greetings, capabilities, platform info, and language-switch, any pattern
+        # match is unambiguous — serve the deterministic response without calling the LLM.
+        for _exact_cat in (IntentCategory.GREETING, IntentCategory.CAPABILITIES,
+                           IntentCategory.PLATFORM_INFO, IntentCategory.LANGUAGE_SWITCH):
+            if best_match == _exact_cat:
+                for pat in self.patterns[_exact_cat].get("patterns", []):
+                    if re.search(pat, text_lower, re.IGNORECASE):
+                        requires_llm = False
+                        break
+                break
+
         if requires_llm:
             self.llm_fallback_count += 1
         

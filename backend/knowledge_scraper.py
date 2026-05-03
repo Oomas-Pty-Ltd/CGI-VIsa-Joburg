@@ -1442,24 +1442,30 @@ def get_fallback_knowledge() -> Dict:
 _SERVICE_KEYWORDS = {
     "visa":        ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline",
                     "e_visa", "evisa", "visa fee", "visa fees", "visa cost", "visa price", "visa charges",
-                    "visa application", "how much visa", "tourist fee", "business fee"],
+                    "visa application", "how much visa", "tourist fee", "business fee",
+                    "visa process", "visa steps", "apply visa", "visa procedure", "visa guide"],
     "passport":    ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document",
                     "passport seva", "passport fee", "passport fees", "passport cost", "passport charges",
                     "how much passport", "lost passport", "stolen passport", "damaged passport",
                     "lost", "stolen", "damaged", "reissue", "re-issue", "fir", "police report",
-                    "emergency travel", "emergency document"],
+                    "emergency travel", "emergency document",
+                    "passport process", "passport steps", "apply passport", "passport procedure",
+                    "passport guide", "passport pricing", "renew passport steps"],
     "oci":         ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin",
-                    "ociservices", "oci fee", "oci fees", "oci cost"],
+                    "ociservices", "oci fee", "oci fees", "oci cost",
+                    "oci process", "oci steps", "apply oci", "oci procedure"],
     "pcc":         ["pcc", "police clearance", "clearance certificate", "criminal record", "character certificate",
-                    "pcc fee", "pcc fees"],
+                    "pcc fee", "pcc fees", "pcc process", "pcc steps", "pcc procedure"],
     "marriage":    ["marriage", "matrimonial", "spouse", "wedding", "nikah", "marry", "marriage certificate",
-                    "marriage fee"],
+                    "marriage fee", "marriage process", "marriage steps"],
     "birth":       ["birth", "born", "newborn", "child registration", "birth certificate"],
     "attestation": ["attestation", "apostille", "notary", "affidavit", "power of attorney", "legalization",
                     "legalisation", "attestation fee", "apostille fee"],
     "renunciation":["renunciation", "renounce", "surrender passport", "citizenship", "give up citizenship"],
     "fees":        ["fees", "fee", "cost", "price", "charges", "how much", "payment", "zar", "rand",
-                    "rate", "amount", "tariff"],
+                    "rate", "amount", "tariff", "pricing", "pricing plan", "plans", "price list",
+                    "service charges", "cost overview", "all fees", "complete fees", "fee schedule",
+                    "fee structure", "what does it cost"],
     "noc":         ["noc", "no objection", "no objection certificate", "south african citizenship",
                     "child passport india", "noc child", "noc citizenship"],
     "non_impediment": ["non-impediment", "non impediment", "impediment", "free to marry", "marriage letter",
@@ -1477,6 +1483,11 @@ _SERVICE_KEYWORDS = {
                     "business meeting", "buyer seller", "bsm"],
     "emergency_contact": ["emergency", "distress", "stranded", "arrested", "hospital", "accident",
                           "urgent help", "crisis", "indians in distress", "helpline"],
+    "process_guide": ["step by step", "walk me through", "entire process", "from start to finish",
+                      "how do i start", "get started", "guide me", "beginning to end", "full process",
+                      "complete process", "walkthrough", "procedure", "how to apply", "how to begin",
+                      "first step", "next step", "sign up", "signup", "onboard", "use your service",
+                      "use this bot", "how does this work", "explain the process", "what are the steps"],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1847,7 +1858,8 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
     return fallback if fallback else _search_knowledge_sync(query, knowledge_base)
 
 
-_FEE_WORDS = {"fee", "fees", "cost", "price", "charges", "how much", "payment", "zar", "rand", "rate", "amount"}
+_FEE_WORDS = {"fee", "fees", "cost", "price", "charges", "how much", "payment", "zar", "rand", "rate", "amount",
+              "pricing", "plan", "plans", "tariff", "schedule"}
 
 
 def _fallback_for_keywords(keywords: List[str], query: str) -> str:
@@ -1860,14 +1872,35 @@ def _fallback_for_keywords(keywords: List[str], query: str) -> str:
     kw_set    = set(keywords)
     is_fee_query = bool(kw_set & _FEE_WORDS) or any(w in query_low for w in _FEE_WORDS)
 
-    # Find the matching service (skip the generic "fees" bucket — handled below)
+    # Find the matching service (skip generic buckets — handled specially below)
+    _SKIP_GENERIC = {"fees", "process_guide"}
     matched_svc = None
     for svc_key, kws in _SERVICE_KEYWORDS.items():
-        if svc_key == "fees":
+        if svc_key in _SKIP_GENERIC:
             continue
         if any(k in query_low for k in kws) or any(k in kw_set for k in kws):
             matched_svc = svc_key
             break
+
+    # process_guide: return all services summary so the LLM can walk through them
+    _is_process_query = any(k in query_low for k in _SERVICE_KEYWORDS.get("process_guide", []))
+    if _is_process_query and not matched_svc:
+        all_svcs = fallback.get("services", {})
+        summary_lines = ["[All Services — Process Overview]"]
+        for svc_key, svc_data in all_svcs.items():
+            desc = svc_data.get("description", "")
+            online = svc_data.get("apply_online", "")
+            fee = svc_data.get("fees_zar", svc_data.get("fee", ""))
+            proc = svc_data.get("processing_time", "")
+            line = f"\n{svc_key.upper().replace('_',' ')}: {desc}"
+            if online:
+                line += f" | Apply: {online}"
+            if fee:
+                line += f" | Fee: {fee}"
+            if proc:
+                line += f" | Time: {proc}"
+            summary_lines.append(line)
+        return "\n".join(summary_lines)
 
     parts = []
 

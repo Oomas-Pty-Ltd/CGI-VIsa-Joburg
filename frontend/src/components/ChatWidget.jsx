@@ -5,28 +5,30 @@ import axios from 'axios';
 import { GREETING_MESSAGE, ADVISORY_MESSAGES } from '../config/botMessages';
 import './ChatWidget.css';
 
-// ── Inline SVG icons (no external dependency needed) ──────────────────────────
+// ── Inline SVG icons ───────────────────────────────────────────────────────────
+// style prop overrides host-page CSS resets (e.g. Bootstrap/Tailwind svg{max-width:100%})
+const _svgStyle = (size) => ({ display:'inline-block', width:size, height:size, minWidth:size, minHeight:size, maxWidth:'none', maxHeight:'none', flexShrink:0, verticalAlign:'middle', overflow:'visible' });
 const MicIcon = ({ size = 20, className = '' }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+  <svg xmlns="http://www.w3.org/2000/svg" style={_svgStyle(size)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
     <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
     <line x1="12" x2="12" y1="19" y2="22" />
   </svg>
 );
 const CameraIcon = ({ size = 20, className = '' }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+  <svg xmlns="http://www.w3.org/2000/svg" style={_svgStyle(size)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
     <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
     <circle cx="12" cy="13" r="3" />
   </svg>
 );
 const SendIcon = ({ size = 20, className = '' }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+  <svg xmlns="http://www.w3.org/2000/svg" style={_svgStyle(size)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
     <path d="m22 2-7 20-4-9-9-4Z" />
     <path d="M22 2 11 13" />
   </svg>
 );
 const FileTextIcon = ({ size = 20, className = '' }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+  <svg xmlns="http://www.w3.org/2000/svg" style={_svgStyle(size)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
     <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
     <path d="M14 2v4a2 2 0 0 0 2 2h4" />
     <path d="M10 9H8" />
@@ -35,14 +37,10 @@ const FileTextIcon = ({ size = 20, className = '' }) => (
   </svg>
 );
 
-// window.SEVA_CONFIG.api lets the embeddable widget be pointed at any backend
-const API_BASE = (typeof window !== 'undefined' && window.SEVA_CONFIG?.api)
-  || process.env.REACT_APP_BACKEND_URL
-  || '';
+const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${API_BASE}/api`;
 
-const BOT_IMAGE = 'https://static.prod-images.emergentagent.com/jobs/41ee56b6-38da-4112-8da3-b4cf6bfcfd91/images/1fc401012f88731c201ca30b4be56212c44bad84c995e7ed04da381c8740f43b.png';
-
+const BOT_IMAGE = 'https://www.image2url.com/r2/default/images/1777573167951-14d72ab0-5694-47e9-91f4-318ff86d81c1.jpeg?v=2';
 const ALL_LANGS = [
   { code: 'en',  name: 'English',                flag: '🇬🇧' },
   { code: 'hi',  name: 'हिंदी (Hindi)',            flag: '🇮🇳' },
@@ -77,7 +75,7 @@ const SPEECH_LANG_MAP = {
 };
 
 const LANG_PLACEHOLDERS = {
-  en:  'Type your message in हिंदी (Hindi) or English...',
+  en:  'Type your message ...',
   hi:  'अपना प्रश्न हिंदी या English में लिखें...',
   bn:  'আপনার প্রশ্ন বাংলায় বা ইংরেজিতে লিখুন...',
   mr:  'तुमचा प्रश्न मराठी किंवा English मध्ये टाइप करा...',
@@ -221,7 +219,7 @@ const TypeACard = ({ msg, onFinalize }) => {
         rel="noopener noreferrer"
         className="seva-svc-primary-btn"
       >
-        🔗 Open Government Portal
+        🔗 Open application Portal
       </a>
       {!submitted ? (
         <div>
@@ -278,6 +276,7 @@ const ServiceInfoCard = ({ svc, onApply }) => (
 
 export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
+  const [showTip, setShowTip] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const sessionIdRef = useRef(localStorage.getItem('consular_session_id') || null);
@@ -1130,6 +1129,9 @@ export default function ChatWidget() {
               }]);
             }
             if (voiceOnRef.current && fullText) speakWithBackend(fullText);
+            if (evt.lang_switch) {
+              setTimeout(() => changeLang(evt.lang_switch), 800);
+            }
           }
         }
       }
@@ -1526,10 +1528,22 @@ export default function ChatWidget() {
 
   return (
     <div className="seva-widget">
+      {/* WELCOME TIP — disappears when chat is opened */}
+      {showTip && !isOpen && (
+        <div className="seva-fab-tip">
+          <button
+            className="seva-fab-tip-close"
+            onClick={e => { e.stopPropagation(); setShowTip(false); }}
+            aria-label="Dismiss"
+          >✕</button>
+          🇮🇳 Team India in South Africa Welcomes you
+        </div>
+      )}
+
       {/* FAB */}
       <button
         className={`seva-fab${isSpeaking ? ' speaking' : ''}`}
-        onClick={() => setIsOpen(o => !o)}
+        onClick={() => { setShowTip(false); setIsOpen(o => !o); }}
         title="Chat with Seva Setu"
         aria-label="Open Seva Setu chatbot"
       >
@@ -2360,8 +2374,8 @@ export default function ChatWidget() {
 
           {/* Normal Textarea Input — shown when not mid-auth/form AND no active in-progress app */}
            {(!sevaAuthStep || sevaAuthStep === 'done') && sevaFormMode === null && !sevaCurrentApp && (
-            <div className="wa-bar">
-              <button className="wa-attach" title="Attach document" onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:'#F0F2F5',borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
+              <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
               <textarea
                 ref={textareaRef}
                 className="wa-text"
@@ -2373,18 +2387,19 @@ export default function ChatWidget() {
                 onInput={autoResize}
                 onKeyDown={handleKey}
                 disabled={isLoading}
+                style={{flex:'1 1 0',minWidth:0,width:'auto',boxSizing:'border-box'}}
               />
-              <button className="wa-cam" title="Camera" onClick={startCamera}><CameraIcon size={18} /></button>
-              <button className={`wa-mic${isRecording ? ' active' : ''}`} id="micBtn" title="Voice input" onClick={handleVoiceInput}><MicIcon size={18} /></button>
-              <button className="wa-send" id="sendBtn" onClick={() => sendMsg()} disabled={isLoading || !input.trim()}><SendIcon size={18} /></button>
+              <button className="wa-cam" title="Camera" style={{flexShrink:0}} onClick={startCamera}><CameraIcon size={18} /></button>
+              <button className={`wa-mic${isRecording ? ' active' : ''}`} id="micBtn" title="Voice input" style={{flexShrink:0}} onClick={handleVoiceInput}><MicIcon size={18} /></button>
+              <button className="wa-send" id="sendBtn" style={{flexShrink:0}} onClick={() => sendMsg()} disabled={isLoading || !input.trim()}><SendIcon size={18} /></button>
               <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleFileUpload} />
             </div>
           )} 
 
           {/* Form upload mode textarea */}
           {sevaAuthStep === 'done' && sevaFormMode === 'upload' && (
-            <div className="wa-bar">
-              <button className="wa-attach" title="Attach document" onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:'#F0F2F5',borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
+              <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
               <textarea
                 ref={textareaRef}
                 className="wa-text"
@@ -2396,8 +2411,9 @@ export default function ChatWidget() {
                 onInput={autoResize}
                 onKeyDown={handleKey}
                 disabled={isLoading}
+                style={{flex:'1 1 0',minWidth:0,width:'auto',boxSizing:'border-box'}}
               />
-              <button className="wa-send" id="sendBtn" onClick={() => sendMsg()} disabled={isLoading || !input.trim()}><SendIcon size={18} /></button>
+              <button className="wa-send" id="sendBtn" style={{flexShrink:0}} onClick={() => sendMsg()} disabled={isLoading || !input.trim()}><SendIcon size={18} /></button>
               <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleFileUpload} />
             </div>
           )}

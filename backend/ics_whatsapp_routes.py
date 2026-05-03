@@ -62,6 +62,11 @@ from services.application_flow import (
     detect_website_service,
     is_apply_intent,
 )
+from services.intent_classifier import (
+    classify_intent,
+    get_deterministic_response,
+    IntentCategory,
+)
 
 # LLM for open-ended Q&A
 try:
@@ -1796,6 +1801,20 @@ async def _handle_message(
                 return
 
     image_doc_data = {"filename": "whatsapp_doc", "file_id": media_id, "status": "uploaded"} if has_doc else None
+
+    # ── Deterministic intent shortcuts (mirrors web ChatWidget bot) ────────
+    # Greeting and language-switch are already handled above; skip them here.
+    # Only fire when the user is idle (not mid-form, not mid-flow).
+    _SKIP_INTENTS = {IntentCategory.GREETING, IntentCategory.LANGUAGE_SWITCH}
+    if not _form_active and current_flow.get("state", "idle") == "idle" and not is_apply_intent(clean_text):
+        _intent_result = classify_intent(clean_text)
+        _det_text = get_deterministic_response(_intent_result)
+        if _det_text and _intent_result.category not in _SKIP_INTENTS:
+            _wa_det = _md_to_wa(_det_text)
+            await session_manager.add_message(session_id, "user", user_text)
+            await session_manager.add_message(session_id, "assistant", _wa_det)
+            await _wa_send(phone, _wa_det, db, _intent_result.category.value, waba_number)
+            return
 
     flow_response, needs_llm, step = await process_flow(
         session_id=session_id,
