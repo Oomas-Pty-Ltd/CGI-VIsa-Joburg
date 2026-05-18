@@ -118,7 +118,7 @@ SERVICES: Dict[str, Dict] = {
             "A Police Clearance Certificate (PCC) is required by Indian nationals for immigration, "
             "change of nationality, employment abroad, or longer stay in another country. "
             "PCC service is outsourced to VFS Global — do NOT apply at the Consulate directly. "
-            "Apply online at https://portal5.passportindia.gov.in, select CGI Johannesburg, "
+            "Apply online at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/, select CGI Johannesburg, "
             "and submit at VFS Global Johannesburg (2nd Floor, Harrow Court 1, Isle of Houghton, Park Town). "
             "VFS submission hours: 08:00–15:00, Mon–Fri. "
             "VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/"
@@ -281,6 +281,8 @@ SERVICES: Dict[str, Dict] = {
             "The Consulate General of India, Johannesburg handles various miscellaneous consular matters "
             "including affidavits, document authentication, general power of attorney (GPA/PoA), "
             "life certificates, and other services not covered under standard categories. "
+            "📄 Miscellaneous application form (PDF): "
+            "https://www.cgijoburg.gov.in//docs/1771050896misc%20application%20form-new.pdf\n"
             "Contact the Consulate to confirm your specific requirement: "
             "cons.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800."
         ),
@@ -288,7 +290,7 @@ SERVICES: Dict[str, Dict] = {
             "Valid Indian Passport or OCI card (copy)",
             "Relevant supporting documents (case-specific)",
             "Two passport-size photographs",
-            "Completed applicable form",
+            "Completed Miscellaneous Application Form — https://www.cgijoburg.gov.in//docs/1771050896misc%20application%20form-new.pdf",
             "Affidavit / Notarised documents (where required)",
             "Fee payment receipt (if applicable)",
         ],

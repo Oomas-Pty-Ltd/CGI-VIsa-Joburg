@@ -94,15 +94,13 @@ async def lifespan(app: FastAPI):
         # Check WhatsApp/ICS WABA configuration
         _check_whatsapp_config()
         
-        # Pre-warm the scraper cache so the first user chat request is instant
-        from knowledge_scraper import get_realtime_knowledge, start_periodic_cgi_crawl
-        asyncio.create_task(get_realtime_knowledge())
-        logger.info("Scraper cache pre-warm started in background")
-
-        # Periodic background crawl: fetches https://www.cgijoburg.gov.in/ + sub-pages
-        # every 6 hours and stores results into MongoDB knowledge_base
-        asyncio.create_task(start_periodic_cgi_crawl())
-        logger.info("Periodic CGI background crawl task started (interval: 6h)")
+        # In-process Playwright crawling disabled — starves the API on 1-CPU hosts.
+        # Run the crawler out-of-process (cron / separate pm2 job) instead.
+        # To re-enable, uncomment the block below.
+        # from knowledge_scraper import get_realtime_knowledge, start_periodic_cgi_crawl
+        # asyncio.create_task(get_realtime_knowledge())
+        # asyncio.create_task(start_periodic_cgi_crawl())
+        logger.info("Background crawler disabled (run out-of-process via cron)")
         
         # Start session cleanup task (runs every hour)
         async def periodic_session_cleanup():
@@ -330,6 +328,29 @@ app.include_router(api_router)
 # HSTS + body-size middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
+import time as _time
+
+
+class RequestTimingMiddleware(BaseHTTPMiddleware):
+    """Log every request as [TIMING] METHOD PATH status=N ms=N (gated by TIMING_LOGS env)."""
+    async def dispatch(self, request, call_next):
+        if os.environ.get("TIMING_LOGS", "1") == "0":
+            return await call_next(request)
+        t0 = _time.perf_counter()
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        except Exception:
+            ms = int((_time.perf_counter() - t0) * 1000)
+            logging.getLogger("timing").info(
+                f"[TIMING] {request.method} {request.url.path} status=ERR ms={ms}"
+            )
+            raise
+        ms = int((_time.perf_counter() - t0) * 1000)
+        logging.getLogger("timing").info(
+            f"[TIMING] {request.method} {request.url.path} status={status_code} ms={ms}"
+        )
+        return response
 
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — matches the PDF upload limit
 
@@ -363,6 +384,7 @@ class HSTSMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(HSTSMiddleware)
 app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(RequestTimingMiddleware)
 
 _cors_origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app.add_middleware(

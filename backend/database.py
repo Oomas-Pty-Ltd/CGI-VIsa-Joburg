@@ -84,6 +84,33 @@ async def create_indexes():
         await db.knowledge_base.create_index("id", unique=True)
         await db.knowledge_base.create_index("category")
         await db.knowledge_base.create_index([("title", "text"), ("question", "text"), ("answer", "text")])
+        # Multi-tenant + crawler upsert keys
+        await db.knowledge_base.create_index(
+            [("company_id", 1), ("url_hash", 1)],
+            unique=True,
+            partialFilterExpression={"url_hash": {"$exists": True}},
+        )
+        await db.knowledge_base.create_index([("company_id", 1), ("category", 1)])
+        await db.knowledge_base.create_index([("company_id", 1), ("status", 1)])
+        await db.knowledge_base.create_index([("company_id", 1), ("updated_at", -1)])
+
+        # Crawler frontier (BFS queue, one row per URL per run)
+        await db.crawler_frontier.create_index("id", unique=True)
+        await db.crawler_frontier.create_index(
+            [("company_id", 1), ("run_id", 1), ("url_hash", 1)],
+            unique=True,
+        )
+        await db.crawler_frontier.create_index([("company_id", 1), ("run_id", 1), ("status", 1)])
+        await db.crawler_frontier.create_index([("status", 1), ("depth", 1), ("discovered_at", 1)])
+        await db.crawler_frontier.create_index("finished_at", expireAfterSeconds=2592000)  # 30-day TTL
+
+        # Crawler runs (one row per crawl invocation)
+        await db.crawler_runs.create_index("run_id", unique=True)
+        await db.crawler_runs.create_index([("company_id", 1), ("started_at", -1)])
+        await db.crawler_runs.create_index([("company_id", 1), ("status", 1)])
+
+        # Per-tenant scraper config
+        await db.scraper_config.create_index("company_id", unique=True)
         
         # WhatsApp session indexes
         await db.whatsapp_sessions.create_index("phone_hash", unique=True)

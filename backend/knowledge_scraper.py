@@ -234,16 +234,37 @@ OFFICIAL_SOURCES = [
     "https://www.cgijoburg.gov.in/",
 ]
 
-# Sub-pages to crawl on CGI Joburg for richer service data
+# Sub-pages to crawl on CGI Joburg for richer service data.
+# URL list verified against the live cgijoburg.gov.in site (May 2026).
 CGI_SUB_PAGES = [
-    "https://www.cgijoburg.gov.in/page/passport-services/",
-    "https://www.cgijoburg.gov.in/page/visa-services/",
-    "https://www.cgijoburg.gov.in/page/oci-services/",
-    "https://www.cgijoburg.gov.in/page/fee-schedule/",
-    "https://www.cgijoburg.gov.in/page/contact-us/",
-    "https://www.cgijoburg.gov.in/page/emergency-contact/",
-    "https://www.cgijoburg.gov.in/page/police-clearance-certificate/",
-    "https://www.cgijoburg.gov.in/page/services-rendered-at-the-consulate/",
+    # Passport
+    "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
+    "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
+    # Visa
+    "https://www.cgijoburg.gov.in/page/general-visa-guidelines/",
+    "https://www.cgijoburg.gov.in/page/regular-visa/",
+    "https://www.cgijoburg.gov.in/page/visa-fee/",
+    "https://www.cgijoburg.gov.in/page/processing-time/",
+    "https://www.cgijoburg.gov.in/page/foreigners-other-than-south-african-nationals/",
+    # OCI / Citizenship
+    "https://www.cgijoburg.gov.in/page/oci-related-services/",
+    "https://www.cgijoburg.gov.in/page/renunciation-of-indian-citizenship/",
+    "https://www.cgijoburg.gov.in/page/no-objection-certificate-to-apply-for-south-african-citizenship/",
+    # Birth / Marriage / Death / EC
+    "https://www.cgijoburg.gov.in/page/child-birth-registration/",
+    "https://www.cgijoburg.gov.in/page/marriage-certificate/",
+    "https://www.cgijoburg.gov.in/page/death-transfer-of-mortal-remains-related-procedure/",
+    "https://www.cgijoburg.gov.in/page/emergency-travel-document/",
+    # Miscellaneous / Other services
+    "https://www.cgijoburg.gov.in/page/translation-of-indian-driving-license/",
+    "https://www.cgijoburg.gov.in/page/indians-in-distress/",
+    "https://www.cgijoburg.gov.in/page/tracing-the-roots/",
+    # Fees, bank, FAQs, registration
+    "https://www.cgijoburg.gov.in/page/fees-for-passport-oci-misc-services/",
+    "https://www.cgijoburg.gov.in/page/bank-details-and-timings/",
+    "https://www.cgijoburg.gov.in/page/frequently-asked-questions-faq-s/",
+    "https://www.cgijoburg.gov.in/page/faqs/",
+    "https://www.cgijoburg.gov.in/register.php",
 ]
 
 EXCEPTION_EMAIL = "mayurakole@example.com"
@@ -419,7 +440,7 @@ Collection Hours: 11:00 to 16:00
 Processing Time: Up to one month (provided all documents are in order and security status is clear)
 
 RE-ISSUE OF PASSPORT ON EXPIRY:
-- Completed online application from https://embassy.passportindia.gov.in/
+- Completed online application from https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
 - 3 passport-sized photographs (5cm x 5cm, coloured, white background)
 - Original passport (to be returned after verification)
 - Proof of residential address in South Africa
@@ -461,7 +482,7 @@ RE-ISSUE ON EXHAUSTION OF PAGES:
 
 GENERAL NOTES:
 - Payment by EFT or Credit/Debit Card. Original proof of payment required; photocopies not accepted.
-- Online application at: https://embassy.passportindia.gov.in/
+- Online application at: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
 - Applications must be submitted in person at VFS Global. No direct submissions at the Consulate.
 - Original documents are returned after verification at VFS.
 - Applicants may be called for interview if required by the Consulate.
@@ -586,7 +607,7 @@ PCC is required for immigration, change of nationality, employment abroad, or lo
 
 FOR INDIAN NATIONALS:
 - PCC service is outsourced to VFS Global.
-- Apply online at: https://portal5.passportindia.gov.in
+- Apply online at: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 - Select CGI Johannesburg and submit at VFS Global Johannesburg.
 - Applicants in Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg.
 - VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
@@ -650,7 +671,7 @@ ONE AND THE SAME CERTIFICATE:
 
 === 10. FREQUENTLY ASKED QUESTIONS (FAQ) ===
 Q: How do I apply for a new/renewal/lost/damaged passport?
-A: Complete online application at https://embassy.passportindia.gov.in/ and submit at VFS Centre with prior appointment. See: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/
+A: Complete online application at https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ and submit at VFS Centre with prior appointment. See: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/
 
 Q: What is the timeframe for reissue of passport?
 A: Approximately 3-4 weeks, provided all relevant documents are in place and approved by concerned authorities in India.
@@ -659,7 +680,7 @@ Q: What is the definition of a damaged passport?
 A: Spill over of ink/water mark, scribbling, thread out, torn paper, missing data page, or spine damage.
 
 Q: How can I apply for PCC (Police Clearance Certificate)?
-A: PCC service is outsourced to VFS. Apply at https://portal5.passportindia.gov.in. Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
+A: PCC service is outsourced to VFS. Apply at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/. Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
 
 Q: How can I get my Indian documents attested?
 A: Indian documents must first be apostilled by MEA. See: http://www.mea.gov.in/apostille.htm
@@ -683,7 +704,7 @@ Q: Can a person apply for OCI on the basis of spouse's eligibility?
 A: No. Husband and wife must each claim OCI on the strength of their own parents/grandparents.
 
 Q: How do I check the status of my Indian passport or PCC application?
-A: Passport: https://www.passportindia.gov.in/AppOnlineProject/welcomeLink | PCC: https://portal5.passportindia.gov.in
+A: Passport: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ | PCC: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 
 === 11. TRADE & COMMERCE — INDIA–SOUTH AFRICA BILATERAL RELATIONS ===
 India and South Africa established diplomatic relations in 1993. Both are members of BRICS and G20.
@@ -700,12 +721,11 @@ Services for Indian Companies: Trade advisory, business meeting facilitation, pa
 Services for South African Companies: Market entry advisory for India, introduction to Indian counterparts, investment/regulatory information, support for Buyer-Seller Meets (BSM).
 
 === 12. BANKING DETAILS & TIMINGS ===
-Bank Details: Available at https://www.cgijoburg.gov.in/bank-details-and-timings.php
+Bank Details: Available at https://www.cgijoburg.gov.in/page/bank-details-and-timings/
 Payment Methods: EFT, Credit Card, Debit Card. Original proof of payment required.
 ICWF Fee: ZAR 30 included in all consular/passport/visa fees.
 Office Hours: Monday to Friday: 08:30 to 17:00 | Lunch Break: 13:00 to 13:30
 VFS Submission: 08:00 to 15:00 | VFS Collection: 11:00 to 16:00
-Holidays: https://www.cgijoburg.gov.in/holiday-at-the-consulate-general.php
 
 === 13. LATEST NEWS & EVENTS (as of April 2026) ===
 11 Mar 2026: ACG Mr. Harish Kumar inaugurates the 11th Agritec South Africa with MEC: Agriculture Ms. Vuyiswa Ramokgopa.
@@ -723,11 +743,11 @@ Upcoming Notices: Tender for renovation of rooms (Apr 01, 2026), Tender for Secu
 
 === 14. IMPORTANT LINKS & CONTACTS ===
 Consulate Website: www.cgijoburg.gov.in
-Passport Application (Online): https://embassy.passportindia.gov.in/
+Passport Application (Online): https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
 Regular Visa Application: https://indianvisaonline.gov.in/visa/index.html
 E-Visa Application: https://indianvisaonline.gov.in/evisa/tvoa.html
 OCI Services: https://ociservices.gov.in/
-PCC Application: https://portal5.passportindia.gov.in
+PCC Application: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 VFS Global (SA): https://services.vfsglobal.com/zaf/en/ind/
 VFS Johannesburg: 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 4253007
 MEA Apostille: http://www.mea.gov.in/apostille.htm
@@ -735,8 +755,8 @@ Consulate Email: ccom.jburg@mea.gov.in
 Consular Services Email: cons.jburg@mea.gov.in
 Pravasi Bharatiya Sahayata Kendra: Toll Free (India only): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in
 Office of Protector General of Emigrants: pge@mea.gov.in | diroe1@mea.gov.in
-Passport Status Check: https://www.passportindia.gov.in/AppOnlineProject/welcomeLink
-PCC Status Check: https://portal5.passportindia.gov.in
+Passport Status Check: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
+PCC Status Check: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 Ministry of External Affairs: www.mea.gov.in
 High Commission of India, Pretoria: www.hcipretoria.gov.in
 """.strip()
@@ -1052,11 +1072,11 @@ async def _do_scrape() -> Dict:
         **CONTACT_FALLBACK,
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
-            "passport_application": "https://embassy.passportindia.gov.in/",
+            "passport_application": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
             "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
             "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
             "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://portal5.passportindia.gov.in",
+            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
             "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
         },
     }
@@ -1123,11 +1143,11 @@ async def get_realtime_knowledge() -> Dict:
         **CONTACT_FALLBACK,
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
-            "passport": "https://embassy.passportindia.gov.in/",
+            "passport": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
             "visa": "https://indianvisaonline.gov.in/visa/index.html",
             "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
             "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://portal5.passportindia.gov.in",
+            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
             "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
         },
     }
@@ -1201,13 +1221,13 @@ def get_fallback_knowledge() -> Dict:
         "services": {
             "passport": {
                 "description": "All passport services processed through VFS Global — not directly at Consulate",
-                "apply_online": "https://embassy.passportindia.gov.in/",
+                "apply_online": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
                 "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
                 "vfs_phone": "012 425 3007 / 011 484 0327",
                 "submission_hours": "08:00–15:00 | Collection: 11:00–16:00",
                 "processing_time": "Up to one month (if all documents are in order)",
                 "documents_required": [
-                    "Completed online application (embassy.passportindia.gov.in)",
+                    "Completed online application (cgijoburg.gov.in passport services)",
                     "3 passport-sized photos (5cm x 5cm, coloured, white background)",
                     "Original current passport",
                     "Proof of residential address in South Africa",
@@ -1246,7 +1266,7 @@ def get_fallback_knowledge() -> Dict:
             },
             "pcc": {
                 "description": "Police Clearance Certificate — required for immigration, change of nationality, employment abroad",
-                "apply_online": "https://portal5.passportindia.gov.in",
+                "apply_online": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
                 "submit_to": "VFS Global Johannesburg (select CGI Johannesburg)",
                 "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
                 "jurisdiction": "Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg"
@@ -1427,14 +1447,14 @@ def get_fallback_knowledge() -> Dict:
         },
         "official_links": {
             "consulate": "https://www.cgijoburg.gov.in/",
-            "passport_application": "https://embassy.passportindia.gov.in/",
+            "passport_application": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
             "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
             "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
             "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://portal5.passportindia.gov.in",
+            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
             "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
             "mea_apostille": "http://www.mea.gov.in/apostille.htm",
-            "passport_status": "https://www.passportindia.gov.in/AppOnlineProject/welcomeLink"
+            "passport_status": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/"
         }
     }
 

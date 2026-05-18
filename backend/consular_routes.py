@@ -6,9 +6,82 @@ import asyncio
 import re
 import uuid
 import json
+import logging as _logging
+import time as _time
 from datetime import datetime, timezone
 import base64
+import hashlib
 import os
+
+
+# Standard SSE response headers — disable proxy/CDN/browser buffering so chunks
+# reach the client as they're yielded.
+#   - X-Accel-Buffering: no       → nginx disables buffering for THIS response only
+#   - Cache-Control: no-cache,no-transform → tells Cloudflare/CDNs not to cache or transform
+#   - Connection: keep-alive       → keep the SSE connection open
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse(generator, status_code: int = 200) -> StreamingResponse:
+    """Build an SSE StreamingResponse with anti-buffering headers."""
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        status_code=status_code,
+        headers=_SSE_HEADERS,
+    )
+
+
+class _StageTimer:
+    """Lightweight per-request stage timer.
+
+    Usage:
+        t = _StageTimer("chat_stream")
+        t.mark("sanitize"); ... ; t.mark("hybrid_flow")
+        t.flush(extra="msg_len=42")
+    """
+    _log = _logging.getLogger("timing.chat")
+    _enabled = os.environ.get("TIMING_LOGS", "1") != "0"
+
+    __slots__ = ("label", "t0", "last", "parts", "ttft_ms", "_done")
+
+    def __init__(self, label: str):
+        self.label = label
+        self.t0 = _time.perf_counter()
+        self.last = self.t0
+        self.parts: list[str] = []
+        self.ttft_ms: int | None = None
+        self._done = False
+
+    def mark(self, name: str) -> None:
+        if not self._enabled:
+            return
+        now = _time.perf_counter()
+        self.parts.append(f"{name}={int((now - self.last) * 1000)}")
+        self.last = now
+
+    def mark_ttft(self) -> None:
+        """Call once when the first LLM token is received."""
+        if not self._enabled or self.ttft_ms is not None:
+            return
+        self.ttft_ms = int((_time.perf_counter() - self.t0) * 1000)
+
+    def flush(self, extra: str = "") -> None:
+        if not self._enabled or self._done:
+            return
+        self._done = True
+        total_ms = int((_time.perf_counter() - self.t0) * 1000)
+        line = f"[CHAT-TIMING:{self.label}] " + " ".join(self.parts)
+        if self.ttft_ms is not None:
+            line += f" ttft={self.ttft_ms}"
+        line += f" total={total_ms}"
+        if extra:
+            line += f" {extra}"
+        self._log.info(line)
 from database import get_database
 from auth_utils import verify_token
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
@@ -168,6 +241,98 @@ _UNSUPPORTED_B64 = {
 }
 
 
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB cap for chat uploads
+MAX_PDF_PAGES = 5                   # render at most 5 pages per uploaded PDF
+PDF_RENDER_DPI = 144                # 144 DPI gives readable text without huge images
+
+SCOPE_RULES = """SCOPE — STRICT:
+- You answer questions about ANY Indian consular service offered at CGI Johannesburg. The full list includes (but is not limited to):
+  • Passport — new, renewal, lost/damaged, Tatkal, status
+  • Visa — tourist, business, student, medical, e-Visa, regular visa, visa fees, processing time, visa for foreigners
+  • OCI / PIO — application, renewal, conversion, miscellaneous OCI services
+  • PCC (Police Clearance Certificate)
+  • Document attestation, apostille, notary, legalization
+  • Affidavits, Power of Attorney (PoA / GPA), miscellaneous consular services
+  • Marriage Certificate — registration and attestation
+  • Birth Registration / Child Birth Registration
+  • Death Certificate, transfer of mortal remains
+  • Emergency Certificate (EC) / Emergency Travel Document (ETD)
+  • Surrender / Renunciation of Indian citizenship
+  • No Objection Certificate (NOC) for South African citizenship
+  • Translation of Indian Driving License
+  • Indians in Distress, consular emergencies
+  • Tracing the Roots scheme
+  • Appointments, fees, documents required, office hours, address, contact info, banking details, application status
+  • Any related procedure, requirement, document, fee, or timeline for the services above
+- Greetings ("hi", "hello", "namaste", "good morning"), thanks ("thank you", "thanks"), and farewells ("bye", "goodbye") are ALWAYS allowed. Reply with a brief, warm one-line acknowledgement and invite the user to ask about consular services. Do NOT use the scope refusal line for these.
+- For genuinely off-topic questions — general knowledge, math, arithmetic, jokes, riddles, weather, coding, politics, other consulates, role-play, hypotheticals, or "what if" trivia — reply with EXACTLY this one line and nothing else:
+  "I can only help with Indian consular services at CGI Johannesburg — passport, visa, OCI, PCC, attestation, affidavits, marriage/birth/death certificates, EC/ETD, surrender, NOC, appointments, fees, and related procedures. Please ask about one of these."
+- Do not perform calculations. Do not entertain off-topic premises even when the user pushes back ("are you kidding", "but actually", "as a hypothetical"). Repeat the scope line."""
+
+
+def _resolve_user_id(req_user_id: Optional[str], http_request: Optional[Request]) -> str:
+    """Anonymous users are scoped by hashed client IP so one bad upload
+    can't poison a globally shared 'guest' session.
+    """
+    if req_user_id and req_user_id != "guest":
+        return req_user_id
+    client_ip = "unknown"
+    if http_request and http_request.client:
+        client_ip = http_request.client.host or "unknown"
+    return "guest:" + hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+
+
+def _render_pdf_pages(image_base64: str) -> list[tuple[str, str]]:
+    """Render a base64-encoded PDF into up to MAX_PDF_PAGES PNG pages.
+    Returns a list of (page_b64, "image/png"). Raises ValueError on failure.
+    """
+    import fitz  # PyMuPDF — already in requirements.txt
+    try:
+        raw = base64.b64decode(image_base64)
+    except Exception as e:
+        raise ValueError(f"Invalid PDF data (could not decode base64). ({e})")
+    try:
+        doc = fitz.open(stream=raw, filetype="pdf")
+    except Exception as e:
+        raise ValueError(f"Could not open PDF. ({e})")
+    try:
+        if doc.page_count == 0:
+            raise ValueError("PDF has no pages.")
+        page_count = min(doc.page_count, MAX_PDF_PAGES)
+        scale = PDF_RENDER_DPI / 72.0
+        mat = fitz.Matrix(scale, scale)
+        pages: list[tuple[str, str]] = []
+        for i in range(page_count):
+            pix = doc[i].get_pixmap(matrix=mat, alpha=False)
+            pages.append((base64.b64encode(pix.tobytes("png")).decode(), "image/png"))
+        return pages
+    finally:
+        doc.close()
+
+
+def _validate_and_normalize_upload(image_base64: str) -> list[tuple[str, str]]:
+    """Enforce the 5 MB cap, then expand the upload into one or more
+    (b64, media_type) pages ready to attach to a vision-model message.
+
+    - Regular images → single-item list with format normalised.
+    - PDFs           → up to MAX_PDF_PAGES PNG pages rendered via PyMuPDF.
+
+    Raises ValueError on rejection (oversize, unrecoverable format, etc.).
+    """
+    approx_bytes = (len(image_base64) * 3) // 4
+    if approx_bytes > MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"File too large. Maximum upload size is 5 MB "
+            f"(your file is approximately {approx_bytes / (1024 * 1024):.1f} MB). "
+            f"Please compress the file or send a smaller one."
+        )
+    # PDF magic bytes — render each page as a PNG so the vision model can read it.
+    if image_base64[:10].startswith("JVBER"):
+        return _render_pdf_pages(image_base64)
+    b64, mime = _normalize_image(image_base64)
+    return [(b64, mime)]
+
+
 def _normalize_image(image_base64: str) -> tuple[str, str]:
     """
     Detect image format from base64 magic bytes.
@@ -185,13 +350,6 @@ def _normalize_image(image_base64: str) -> tuple[str, str]:
     for magic, mime in _B64_MAGIC.items():
         if prefix.startswith(magic):
             return image_base64, mime
-
-    # PDF — cannot convert without poppler
-    if prefix.startswith("JVBER"):
-        raise ValueError(
-            "PDF files cannot be scanned directly. "
-            "Please take a **photo or screenshot** of the document and upload that instead."
-        )
 
     # HEIC — not supported
     if prefix.startswith("AAAAF"):
@@ -244,13 +402,15 @@ class FormData(BaseModel):
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(check_rate_limit)])
 async def chat(request: ChatRequest, http_request: Request):
     db = await get_database()
-    
+
     # Get client IP for rate limiting logging
     client_ip = http_request.client.host if http_request.client else "unknown"
-    
+
+    _resolved_user_id = _resolve_user_id(request.user_id, http_request)
+
     # Sanitize and validate user input
     sanitization_result = sanitize_user_input(request.message, context="web_chat")
-    
+
     if not sanitization_result.is_safe:
         logger.warning(f"[SECURITY] Blocked unsafe input from {client_ip}: {sanitization_result.detected_patterns}")
         return ChatResponse(
@@ -258,7 +418,22 @@ async def chat(request: ChatRequest, http_request: Request):
             response="I cannot process that request. Please ask a question about consular services.",
             step="error"
         )
-    
+
+    # Validate upload size + format up-front so we don't pay for a virus scan
+    # or LLM call on a doomed request. We keep request.image_base64 as the
+    # *original* bytes so downstream virus-scan / has_image checks still work;
+    # _validated_pages holds the renderings sent to the vision model.
+    _validated_pages: list[tuple[str, str]] = []
+    if request.image_base64:
+        try:
+            _validated_pages = _validate_and_normalize_upload(request.image_base64)
+        except ValueError as _ve:
+            return ChatResponse(
+                session_id=request.session_id or str(uuid.uuid4()),
+                response=str(_ve),
+                step="error"
+            )
+
     sanitized_message = request.message
 
     # Intent classification - try rule-based first
@@ -267,7 +442,7 @@ async def chat(request: ChatRequest, http_request: Request):
     
     # Check for escalation trigger
     if intent_result.escalation_needed:
-        user_id = request.user_id or "guest"
+        user_id = _resolved_user_id
         session_id = request.session_id or str(uuid.uuid4())
         
         # Get session for conversation history
@@ -313,7 +488,7 @@ async def chat(request: ChatRequest, http_request: Request):
     if (deterministic_response and not request.image_base64
             and not is_tracking_query(sanitized_message)
             and (not request.language or request.language == "en")):
-        user_id = request.user_id or "guest"
+        user_id = _resolved_user_id
         session = await session_manager.get_or_create_session(
             channel="web",
             user_identifier=user_id,
@@ -352,7 +527,7 @@ async def chat(request: ChatRequest, http_request: Request):
         )
     
     # Fall through to LLM for complex queries
-    user_id    = request.user_id or "guest"
+    user_id    = _resolved_user_id
     company_id = request.company_id or get_company_id()
 
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -490,6 +665,8 @@ async def chat(request: ChatRequest, http_request: Request):
 {_prohibition}
 {_lang_instruction(request.language or "en")}
 
+{SCOPE_RULES}
+
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
 - Do NOT echo the user's question back.
@@ -517,9 +694,10 @@ IF the answer is not in any of the data above, say so briefly and direct the use
             system_message=_base_system_message
         ).with_model("openai", llm_model)
 
-        user_msg_content = []
-        if request.image_base64:
-            user_msg_content.append(ImageContent(image_base64=request.image_base64))
+        user_msg_content = [
+            ImageContent(image_base64=_b64, media_type=_mime)
+            for _b64, _mime in _validated_pages
+        ]
 
         user_message = UserMessage(
             text=sanitized_message,
@@ -581,28 +759,51 @@ IF the answer is not in any of the data above, say so briefly and direct the use
 
 
 @router.post("/chat/stream", dependencies=[Depends(check_rate_limit)])
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, http_request: Request):
     """
     Streaming version of /chat.
     Returns Server-Sent Events so the frontend can render text progressively.
     Non-LLM (deterministic) responses are sent as a single chunk + done event.
     """
     db = await get_database()
+    _t = _StageTimer("chat_stream")
+
+    _resolved_user_id = _resolve_user_id(request.user_id, http_request)
 
     _san = sanitize_user_input(request.message or "", context="web_chat")
+    _t.mark("sanitize")
     if not _san.is_safe:
+        _t.flush(extra="path=blocked_unsafe")
         async def _blocked():
             yield f"data: {json.dumps({'error': 'Message blocked for security reasons'})}\n\n"
-        return StreamingResponse(_blocked(), media_type="text/event-stream")
+        return _sse(_blocked())
     sanitized_message = _san.sanitized_text
     if not sanitized_message:
+        _t.flush(extra="path=empty")
         async def _empty():
             yield f"data: {json.dumps({'error': 'Empty message'})}\n\n"
-        return StreamingResponse(_empty(), media_type="text/event-stream")
+        return _sse(_empty())
+
+    # Validate upload size + format up-front so we fail with a friendly SSE error
+    # rather than burning a virus scan + LLM round-trip on a doomed request.
+    # NOTE: do NOT overwrite request.image_base64 — the virus scanner below should
+    # see the *original* bytes (especially for PDFs, which we render into images for
+    # the LLM but must scan as raw PDF).
+    _validated_pages: list[tuple[str, str]] = []
+    if request.image_base64:
+        try:
+            _validated_pages = _validate_and_normalize_upload(request.image_base64)
+        except ValueError as _ve:
+            _t.flush(extra="path=upload_rejected")
+            _err_msg = str(_ve)
+            async def _bad_upload():
+                yield f"data: {json.dumps({'error': _err_msg})}\n\n"
+            return _sse(_bad_upload())
 
     # ── Intent classification (fast, no I/O) ─────────────────────────
     intent_result  = classify_intent(sanitized_message)
     deterministic  = get_deterministic_response(intent_result)
+    _t.mark("intent")
 
     async def _stream_deterministic(text: str, sid: str, step: str, pdf_url: str = None, lang_switch: str = None) -> AsyncGenerator:
         yield f"data: {json.dumps({'chunk': text})}\n\n"
@@ -628,19 +829,21 @@ async def chat_stream(request: ChatRequest):
             and (_is_lang_switch or not request.language or request.language == "en")):
         # Quick peek at flow state — skip deterministic if user is mid-flow
         _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
+        _t.mark("quick_flow")
         if _quick_flow.get("state", "idle") == "idle":
             session = await session_manager.get_or_create_session(
-                channel="web", user_identifier=request.user_id or "guest",
+                channel="web", user_identifier=_resolved_user_id,
                 session_id=request.session_id,
                 metadata={"language": request.language}
             )
-            return StreamingResponse(
-                _stream_deterministic(deterministic, session["id"], "complete", lang_switch=_lang_switch_code),
-                media_type="text/event-stream"
+            _t.mark("session")
+            _t.flush(extra="path=deterministic")
+            return _sse(
+                _stream_deterministic(deterministic, session["id"], "complete", lang_switch=_lang_switch_code)
             )
 
     # ── Full LLM path ─────────────────────────────────────────────────
-    user_id   = request.user_id or "guest"
+    user_id   = _resolved_user_id
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
     session, knowledge_base = await asyncio.gather(
@@ -652,12 +855,14 @@ async def chat_stream(request: ChatRequest):
         get_realtime_knowledge(),
     )
     session_id = session["id"]
+    _t.mark("session_kb")
 
     context_info, current_flow = await asyncio.gather(
         hybrid_search(sanitized_message, knowledge_base),
         get_flow_state(session_id),
     )
     current_state = current_flow.get("state", "idle")
+    _t.mark("hybrid_flow")
 
     # ── Blocked keyword: stream canned response without calling LLM ───
     if context_info == BLOCKED_SENTINEL:
@@ -665,10 +870,11 @@ async def chat_stream(request: ChatRequest):
         await session_manager.add_message(session_id, "user", sanitized_message)
         await session_manager.add_message(session_id, "assistant", _blocked_msg)
         import json as _json
+        _t.flush(extra="path=blocked_keyword")
         async def _blocked_stream():
             yield f"data: {_json.dumps({'chunk': _blocked_msg})}\n\n"
             yield f"data: {_json.dumps({'done': True, 'session_id': session_id, 'step': 'idle'})}\n\n"
-        return StreamingResponse(_blocked_stream(), media_type="text/event-stream")
+        return _sse(_blocked_stream())
 
     # ── Virus scan + mark as uploaded ────────────────────────────────
     image_doc_data = None
@@ -682,7 +888,7 @@ async def chat_stream(request: ChatRequest):
                 import json as _json
                 yield f"data: {_json.dumps({'chunk': f'🚫 **Security Alert:** This file was flagged as a threat ({threat}) and cannot be processed. Please upload a different document.'})}\n\n"
                 yield f"data: {_json.dumps({'done': True, 'session_id': session_id, 'step': 'error'})}\n\n"
-            return StreamingResponse(_virus_blocked(), media_type="text/event-stream")
+            return _sse(_virus_blocked())
 
         if current_state == "docs_uploading":
             image_doc_data = {
@@ -706,6 +912,7 @@ async def chat_stream(request: ChatRequest):
         )
     else:
         flow_response, needs_llm, current_step = None, True, "idle"
+    _t.mark("process_flow")
 
     # ── Non-LLM flow response ─────────────────────────────────────────
     # For non-English: flow hardcoded strings are English — route through LLM to translate
@@ -721,9 +928,9 @@ async def chat_stream(request: ChatRequest):
             _tid_match = re.search(r"`([A-Z]+-\d{8}-[A-Z0-9]+)`", full_text)
             if _tid_match:
                 pdf_url = f"/api/consular/download-pdf/{_tid_match.group(1)}"
-        return StreamingResponse(
-            _stream_deterministic(full_text, session_id, current_step, pdf_url=pdf_url),
-            media_type="text/event-stream"
+        _t.flush(extra=f"path=flow_only step={current_step}")
+        return _sse(
+            _stream_deterministic(full_text, session_id, current_step, pdf_url=pdf_url)
         )
 
     # ── Build LLM context ─────────────────────────────────────────────
@@ -782,43 +989,74 @@ async def chat_stream(request: ChatRequest):
         sanitized_message, re.IGNORECASE
     ))
 
-    system_msg = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
-{_s_prohibition}
+    # ── Prompt structure: STATIC zone (cacheable) → DYNAMIC zone (per-request).
+    # OpenAI's automatic prefix cache hits only when the leading bytes are identical
+    # across requests, so anything that varies per query goes at the bottom.
+    static_prefix = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
 {_lang_instruction(request.language or "en")}
 
+{SCOPE_RULES}
+
 RESPONSE STYLE:
-{"- This is a step-by-step walkthrough or multi-part question. Provide a COMPLETE, DETAILED response covering ALL parts of the question in order. Use numbered steps. Do not skip any step. Be thorough." if _is_walkthrough else "- Be concise, accurate, and helpful."}
+- Be concise. Default to 3–5 short sentences. Use bullet points for lists, numbered steps for processes.
+- When the answer comes from a source (CGI Johannesburg, VFS Global, an uploaded document), quote only the key facts and include a markdown link to the source page so the user can read more — for example: *Read more: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/*. Prefer the URL given in any "(Source: …)" tag in the additional knowledge below.
+- Expand into a fuller answer only when the user asks for detail, a step-by-step walkthrough, or a multi-part explanation.
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
-- Do NOT ask clarifying questions like "What information do you need?" — provide the complete relevant answer directly.
-- Use bullet points when listing multiple items; use numbered steps for processes.
+- Do NOT ask clarifying questions like "What information do you need?" — answer directly.
 - Do NOT repeat information already shown in the conversation.
-- When the user asks a multi-part question (e.g. "first explain X, then tell me Y"), answer ALL parts in sequence without asking which to cover first.
-- When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
+- When an INTENDED RESPONSE is provided in the dynamic context below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
 
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
 CONSULATE FACTS:
 {_s_facts}
-{_s_clean_hint}
-ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
-{_s_clean_ctx}
 
-IF the answer is not in any of the data above, say so and direct the user to:
-{_s_footer}{_stream_flow_translate_hint}"""
+(Per-request context, prohibition rules, service-specific details, and additional knowledge follow below.)"""
+
+    dynamic_suffix_parts: list[str] = [""]
+    if _s_prohibition:
+        dynamic_suffix_parts.append(_s_prohibition)
+    if _is_walkthrough:
+        dynamic_suffix_parts.append(
+            "OVERRIDE: This is a step-by-step walkthrough or multi-part question. "
+            "Provide a COMPLETE, DETAILED response covering ALL parts in order. "
+            "Use numbered steps. Do not skip any step. Be thorough."
+        )
+    if _s_clean_hint:
+        dynamic_suffix_parts.append(_s_clean_hint)
+    dynamic_suffix_parts.append(
+        "ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):\n"
+        f"{_s_clean_ctx}"
+    )
+    dynamic_suffix_parts.append(
+        "IF the answer is not in any of the data above, say so and direct the user to:\n"
+        f"{_s_footer}{_stream_flow_translate_hint}"
+    )
+    system_msg = static_prefix + "\n\n" + "\n\n".join(p for p in dynamic_suffix_parts if p)
+
+    # Walkthroughs need more output room; brevity-tuned answers stay well under 300.
+    _max_tokens = 800 if _is_walkthrough else 300
 
     api_key = os.environ.get("EMERGENT_LLM_KEY")
-    chat_instance = LlmChat(
-        api_key=api_key, session_id=session_id, system_message=system_msg
-    ).with_model("openai", llm_model)
+    chat_instance = (
+        LlmChat(
+            api_key=api_key, session_id=session_id, system_message=system_msg,
+            max_tokens=_max_tokens,
+        )
+        .with_model("openai", llm_model)
+    )
 
-    user_msg_content = []
-    if request.image_base64:
-        user_msg_content.append(ImageContent(image_base64=request.image_base64))
+    user_msg_content = [
+        ImageContent(image_base64=_b64, media_type=_mime)
+        for _b64, _mime in _validated_pages
+    ]
     user_message = UserMessage(
         text=sanitized_message,
         file_contents=user_msg_content if user_msg_content else None
     )
+
+    _t.mark("pre_llm")
 
     # ── Stream generator ──────────────────────────────────────────────
     async def _llm_stream() -> AsyncGenerator:
@@ -826,14 +1064,18 @@ IF the answer is not in any of the data above, say so and direct the user to:
         try:
             if hasattr(chat_instance, "send_message_stream"):
                 async for chunk in chat_instance.send_message_stream(user_message):
+                    if not full_text:
+                        _t.mark_ttft()
                     full_text += chunk
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
             else:
                 # Fallback for older LlmChat without streaming support
                 full_text = await chat_instance.send_message(user_message)
+                _t.mark_ttft()
                 yield f"data: {json.dumps({'chunk': full_text})}\n\n"
         except Exception as e:
             logger.error(f"[STREAM] LLM error: {sanitize_logs(str(e))}")
+            _t.flush(extra="path=llm_error")
             yield f"data: {json.dumps({'error': 'AI service error, please try again.'})}\n\n"
             return
 
@@ -845,6 +1087,7 @@ IF the answer is not in any of the data above, say so and direct the user to:
                 yield f"data: {json.dumps({'chunk': suffix})}\n\n"
 
         yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'step': current_step})}\n\n"
+        _t.flush(extra=f"path=llm step={current_step} model={llm_model} out_len={len(full_text)}")
 
         # Fire-and-forget persistence + usage tracking
         asyncio.create_task(record_llm_usage(
@@ -854,7 +1097,7 @@ IF the answer is not in any of the data above, say so and direct the user to:
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
         asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
 
-    return StreamingResponse(_llm_stream(), media_type="text/event-stream")
+    return _sse(_llm_stream())
 
 
 @router.post("/document-scan")
@@ -913,14 +1156,13 @@ Be accurate and thorough."""
     ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
     try:
-        normalized_b64, media_type = _normalize_image(request.image_base64)
+        pages = _validate_and_normalize_upload(request.image_base64)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
-    image_content = ImageContent(image_base64=normalized_b64, media_type=media_type)
     user_message = UserMessage(
         text=f"Extract all information from this {request.document_type}. Translate to English if needed.",
-        file_contents=[image_content]
+        file_contents=[ImageContent(image_base64=b64, media_type=mime) for b64, mime in pages]
     )
 
     try:
@@ -1286,7 +1528,7 @@ async def chat_widget(request: WidgetChatRequest):
     session_id = session['id']
     
     # Concise system prompt - KEY TO BETTER BEHAVIOR (BASE)
-    _base_system_message = """You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.
+    _base_system_message = "You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.\n\n" + SCOPE_RULES + """
 
 CRITICAL RULES:
 1. WAIT for user's question. DO NOT volunteer information they didn't ask for.
@@ -1334,10 +1576,10 @@ NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
     
     if request.image_base64:
         try:
-            normalized_b64, media_type = _normalize_image(request.image_base64)
+            pages = _validate_and_normalize_upload(request.image_base64)
             user_message = UserMessage(
                 text=sanitized_message or "Please describe what you see in this document/image and help me with it.",
-                file_contents=[ImageContent(image_base64=normalized_b64, media_type=media_type)]
+                file_contents=[ImageContent(image_base64=b64, media_type=mime) for b64, mime in pages]
             )
         except Exception:
             user_message = UserMessage(text=sanitized_message or "Document uploaded.")

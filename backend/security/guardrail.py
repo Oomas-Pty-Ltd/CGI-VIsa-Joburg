@@ -276,12 +276,20 @@ class SanitizedLogFormatter(logging.Formatter):
         super().__init__(*args, **kwargs)
         self.guardrail = GuardrailService()
     
+    # Loggers whose output is structured numeric metrics — skip PII redaction
+    # so request durations/token counts are not mangled into [PHONE_REDACTED].
+    _SKIP_REDACTION_PREFIXES = ("timing",)
+
     def format(self, record):
+        # Skip redaction for structured-metric loggers
+        if record.name and record.name.startswith(self._SKIP_REDACTION_PREFIXES):
+            return super().format(record)
+
         # Sanitize the message
         if record.msg:
             sanitized_msg, _ = self.guardrail.mask_pii(str(record.msg), log_detections=False)
             record.msg = sanitized_msg
-        
+
         # Sanitize args if present
         if record.args:
             sanitized_args = []
@@ -292,7 +300,7 @@ class SanitizedLogFormatter(logging.Formatter):
                 else:
                     sanitized_args.append(arg)
             record.args = tuple(sanitized_args)
-        
+
         return super().format(record)
 
 

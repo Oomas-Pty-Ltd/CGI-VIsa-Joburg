@@ -113,3 +113,14 @@ frontend/node_modules/.cache/default-development/0.pack
 backend/backup/*
 frontend/backup/*
 .gitignore
+
+backend/logs/*
+test_result/*
+
+backend/uploads/*
+frontend/public/*
+
+frontend/yarn.lock
+bash.exe.stackdump
+settings.local.json
+webhook_response.txt

@@ -132,7 +132,7 @@ Submission: 08:00–15:00 | Collection: 11:00–16:00
 All passport services are processed through **VFS Global** (not directly at the Consulate).
 
 **Step 1 — Apply Online:**
-Complete application at: https://embassy.passportindia.gov.in/
+Complete application at: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
 
 **Step 2 — Submit at VFS Global:**
 Indian Visa and Consular Application Centre
@@ -197,7 +197,7 @@ Original proof of payment required — photocopies/scanned copies NOT accepted."
         "answer": """**Lost / Stolen Passport — Steps to Follow:**
 
 1. **File a Police Report** — Obtain original FIR/Police Report from SA Police (10111)
-2. **Apply Online:** https://embassy.passportindia.gov.in/
+2. **Apply Online:** https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
 3. **Submit at VFS Global** with the following documents:
    • Original FIR/Police Report for lost/stolen passport
    • 3 passport-sized photographs (5cm x 5cm, white background)
@@ -228,7 +228,7 @@ Tel: 012 425 3007 / 011 484 0327""",
 **Fee:** ZAR 780 (includes ICWF of ZAR 30) — 5-year validity passport issued
 
 **Documents Required:**
-• Completed online application (https://embassy.passportindia.gov.in/)
+• Completed online application (https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/)
 • 3 passport-sized photographs (5cm x 5cm, white background)
 • Birth registration at the Consulate (obtain this first — it is free)
 • Birth certificate issued by South African Home Department and local hospital
@@ -358,7 +358,7 @@ employment abroad, or longer stay in another country.
 
 **PCC service is outsourced to VFS Global.**
 
-**Apply Online:** https://portal5.passportindia.gov.in
+**Apply Online:** https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 • Select CGI Johannesburg
 • Submit application at VFS Global Johannesburg
 
@@ -368,7 +368,7 @@ Tel: 012 425 3007 / 011 484 0327
 
 **Applicants in:** Gauteng, North West, Limpopo, and Mpumalanga must apply through CGI Johannesburg.
 
-**Check Status:** https://portal5.passportindia.gov.in
+**Check Status:** https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
 
 **VFS Reference:** https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/""",
         "keywords": ["pcc", "police clearance", "police clearance certificate",
@@ -554,13 +554,13 @@ Market entry advisory for India, introductions to Indian counterparts, investmen
 | Service | Link |
 |---|---|
 | Consulate Website | www.cgijoburg.gov.in |
-| Passport Application | https://embassy.passportindia.gov.in/ |
+| Passport Application | https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ |
 | Regular Visa Application | https://indianvisaonline.gov.in/visa/index.html |
 | E-Visa Application | https://indianvisaonline.gov.in/evisa/tvoa.html |
 | OCI Services | https://ociservices.gov.in/ |
-| PCC Application | https://portal5.passportindia.gov.in |
+| PCC Application | https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ |
 | VFS Global South Africa | https://services.vfsglobal.com/zaf/en/ind/ |
-| Passport Status Check | https://www.passportindia.gov.in/AppOnlineProject/welcomeLink |
+| Passport Status Check | https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ |
 | MEA Apostille | http://www.mea.gov.in/apostille.htm |
 | Ministry of External Affairs | www.mea.gov.in |
 | High Commission of India, Pretoria | www.hcipretoria.gov.in |
@@ -633,7 +633,7 @@ For latest updates: www.cgijoburg.gov.in | @indiainjoburg""",
         "answer": """**Frequently Asked Questions — CGI Johannesburg**
 
 **Q: How do I apply for a new/renewal/lost/damaged passport?**
-A: Complete online application at https://embassy.passportindia.gov.in/ and submit at VFS Global with prior appointment.
+A: Complete online application at https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ and submit at VFS Global with prior appointment.
 
 **Q: What is the timeframe for passport reissue?**
 A: Approximately 3–4 weeks, provided all documents are in place and approved by Indian authorities.
@@ -642,7 +642,7 @@ A: Approximately 3–4 weeks, provided all documents are in place and approved b
 A: Ink/water spill, scribbling, torn paper, missing data page, spine damage, or thread out.
 
 **Q: How do I apply for PCC?**
-A: Apply online at https://portal5.passportindia.gov.in — submit at VFS Global Johannesburg.
+A: Apply online at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ — submit at VFS Global Johannesburg.
 
 **Q: How do I get Indian documents attested?**
 A: Indian documents must first be apostilled by MEA India — see http://www.mea.gov.in/apostille.htm
@@ -666,7 +666,7 @@ A: Apply online at www.indianvisaonline.gov.in and submit in person at VFS Globa
 A: No. Husband and wife must each claim OCI on the strength of their own parents/grandparents.
 
 **Q: How do I check passport/PCC status?**
-A: Passport: https://www.passportindia.gov.in/AppOnlineProject/welcomeLink | PCC: https://portal5.passportindia.gov.in""",
+A: Passport: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ | PCC: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/""",
         "keywords": ["faq", "frequently asked", "questions", "how to", "what is",
                      "damaged passport", "name change", "emergency visa", "spouse oci",
                      "military oci", "passport mistake", "passport status", "pcc status"],

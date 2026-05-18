@@ -23,6 +23,7 @@ This mirrors how modern AI search works:
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -35,6 +36,41 @@ _KB_CONFIDENCE_THRESHOLD = 2.0
 
 # Minimum scraped-cache line hits before we skip the deep crawl
 _CACHE_HIT_THRESHOLD = 3
+
+# ── LLM context budget ───────────────────────────────────────────────
+# How many KB entries are sent to the LLM. Top-N by relevance, the rest are dropped.
+# Smaller = faster TTFT and lower input cost; too small risks losing on-topic info.
+_LLM_KB_TOP_N = 5
+# Per-entry char cap (≈300 tokens). Long PDF chunks get truncated; head content
+# matters most because _calculate_relevance already ranked the entries.
+_LLM_KB_MAX_CHARS_PER_ENTRY = 1200
+# Ceiling for total Layer-2 (PDF / scraped page) lines passed to the LLM.
+_LLM_L2_MAX_LINES = 25
+
+# ── Per-process result cache (TTL) ───────────────────────────────────
+# Same query within _CACHE_TTL seconds skips KB scan + formatting entirely.
+_CACHE_TTL = 60.0
+_CACHE_MAX_ENTRIES = 200
+_HYBRID_CACHE: Dict[str, tuple[float, str]] = {}
+
+
+def _cache_get(key: str) -> Optional[str]:
+    e = _HYBRID_CACHE.get(key)
+    if not e:
+        return None
+    ts, val = e
+    if (time.time() - ts) > _CACHE_TTL:
+        _HYBRID_CACHE.pop(key, None)
+        return None
+    return val
+
+
+def _cache_put(key: str, val: str) -> None:
+    if len(_HYBRID_CACHE) >= _CACHE_MAX_ENTRIES:
+        # Drop the oldest entry (cheap, no full LRU bookkeeping needed)
+        oldest_key = min(_HYBRID_CACHE, key=lambda k: _HYBRID_CACHE[k][0])
+        _HYBRID_CACHE.pop(oldest_key, None)
+    _HYBRID_CACHE[key] = (time.time(), val)
 
 # Stop words excluded from keyword extraction
 _STOP_WORDS = {
@@ -120,20 +156,28 @@ def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 
     return [line for _, line in scored][:max_lines]
 
 
-def _format_kb_entries(entries: List[Dict]) -> str:
-    """Format MongoDB knowledge_base entries into a clean context string."""
+def _format_kb_entries(entries: List[Dict], max_per_entry: int = _LLM_KB_MAX_CHARS_PER_ENTRY) -> str:
+    """Format MongoDB knowledge_base entries into a clean context string.
+
+    Each entry's answer body is truncated to `max_per_entry` chars to keep
+    the LLM prompt small. The brevity instruction in the system prompt tells
+    the model to surface the (Source: <url>) link so the user can read more.
+    """
     if not entries:
         return ""
     parts = []
     for e in entries:
         title  = e.get("title", "")
-        answer = e.get("answer", "").strip()
+        answer = (e.get("answer", "") or "").strip()
         source = e.get("source", "")
-        if answer:
-            block = f"**{title}**\n{answer}"
-            if source:
-                block += f"\n(Source: {source})"
-            parts.append(block)
+        if not answer:
+            continue
+        if max_per_entry and len(answer) > max_per_entry:
+            answer = answer[:max_per_entry].rstrip() + "…"
+        block = f"**{title}**\n{answer}"
+        if source:
+            block += f"\n(Source: {source})"
+        parts.append(block)
     return "\n\n---\n\n".join(parts)
 
 
@@ -221,7 +265,32 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     Layer 2  In-memory scraped cache  →  keyword line scan
     Layer 3  Deep-scan cache / background crawl  →  fire-and-forget
     Layer 4  Structured fallback  →  always available
+
+    Results are cached per-process for `_CACHE_TTL` seconds keyed on the
+    normalized query so repeated questions skip the whole pipeline.
     """
+    # ── Result cache: same query within 60s short-circuits the pipeline ──
+    norm_query = (query or "").lower().strip()
+    if norm_query:
+        cached_result = _cache_get(norm_query)
+        if cached_result is not None:
+            logger.debug(f"[HYBRID-CACHE] hit for '{norm_query[:40]}'")
+            return cached_result
+
+    result = await _hybrid_search_impl(query, knowledge_base)
+
+    # Don't cache the blocked sentinel (admin may unblock the keyword)
+    if norm_query and result:
+        try:
+            from knowledge_scraper import BLOCKED_SENTINEL as _BS
+            if result != _BS:
+                _cache_put(norm_query, result)
+        except Exception:
+            _cache_put(norm_query, result)
+    return result
+
+
+async def _hybrid_search_impl(query: str, knowledge_base: Dict) -> str:
     keywords = _extract_keywords(query)
     cache_key = "_".join(sorted(set(keywords[:6]))) if keywords else "general"
 
@@ -248,11 +317,12 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
             top_score = knowledge_service._calculate_relevance(query.lower(), kb_results[0])
             if top_score >= _KB_CONFIDENCE_THRESHOLD:
                 logger.debug(f"[HYBRID L1] '{cache_key}' — MongoDB hit (score {top_score:.1f})")
-                # Include ALL entries that scored above threshold
+                # Keep only entries above threshold, then cap to top N to stay within
+                # the LLM context budget (the search() result is already ordered by score).
                 strong = [
                     e for e in kb_results
                     if knowledge_service._calculate_relevance(query.lower(), e) >= _KB_CONFIDENCE_THRESHOLD
-                ]
+                ][:_LLM_KB_TOP_N]
                 return _format_kb_entries(strong)
     except Exception as e:
         logger.warning(f"[HYBRID L1] MongoDB search failed: {e}")
@@ -270,7 +340,7 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     # 2a: Uploaded PDF documents have sufficient hits — return PDF content directly
     if pdf_hits >= _CACHE_HIT_THRESHOLD:
         logger.debug(f"[HYBRID L2a] '{cache_key}' — PDF match ({pdf_hits} lines)")
-        uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=50)
+        uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=_LLM_L2_MAX_LINES)
         if uploaded_lines:
             return "[Uploaded Documents]\n" + "\n".join(uploaded_lines)
 
@@ -282,13 +352,14 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
             f"knowledge scraper hit ({scraper_hits} lines)"
         )
         parts = []
-        # Prepend any partial PDF matches so they're still visible
+        # Budget total Layer-2 output: split between PDF + CGI + VFS sources.
+        per_source = max(8, _LLM_L2_MAX_LINES // 3)
         if pdf_hits > 0:
-            uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=20)
+            uploaded_lines = _extract_matching_lines(phrase_kws, uploaded_content, max_lines=per_source)
             if uploaded_lines:
                 parts.append("[Uploaded Documents]\n" + "\n".join(uploaded_lines))
-        cgi_lines = _extract_matching_lines(phrase_kws, cgi_content)
-        vfs_lines = _extract_matching_lines(phrase_kws, vfs_content)
+        cgi_lines = _extract_matching_lines(phrase_kws, cgi_content, max_lines=per_source)
+        vfs_lines = _extract_matching_lines(phrase_kws, vfs_content, max_lines=per_source)
         if cgi_lines:
             parts.append("[CGI Johannesburg — live]\n" + "\n".join(cgi_lines))
         if vfs_lines:

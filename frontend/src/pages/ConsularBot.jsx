@@ -998,8 +998,9 @@ export default function ConsularBot() {
 
   // Notify backend that a document was uploaded so the flow advances
   const sendDocumentToBackend = useCallback(async (imageBase64) => {
+    const UPLOAD_ACK = "📎 _Document uploaded, processing…_";
     setIsTyping(true);
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: UPLOAD_ACK }]);
     try {
       const res = await fetch(`${API}/consular/chat/stream`, {
         method: "POST",
@@ -1020,6 +1021,7 @@ export default function ConsularBot() {
       const decoder = new TextDecoder();
       let buffer = "";
       let fullText = "";
+      let gotChunk = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1036,7 +1038,21 @@ export default function ConsularBot() {
               setSessionId(evt.session_id);
               localStorage.setItem("consular_session_id", evt.session_id);
             }
+            if (evt.error) {
+              toast.error(evt.error);
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { role: "assistant", content: evt.error };
+                return updated;
+              });
+              setIsTyping(false);
+              return;
+            }
             if (evt.chunk) {
+              if (!gotChunk) {
+                fullText = "";
+                gotChunk = true;
+              }
               fullText += evt.chunk;
               setMessages((prev) => {
                 const updated = [...prev];
@@ -1049,6 +1065,15 @@ export default function ConsularBot() {
             }
           } catch {}
         }
+      }
+      // Stream closed without ever sending a chunk → leave a definitive message
+      // instead of the "processing…" placeholder.
+      if (!gotChunk) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: "Document received. Please continue." };
+          return updated;
+        });
       }
     } catch (e) {
       setMessages((prev) => {

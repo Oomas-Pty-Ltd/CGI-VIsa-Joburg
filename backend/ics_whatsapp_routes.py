@@ -672,7 +672,7 @@ _WA_TYPE_A = {
     },
     "pcc": {
         "name": "Police Clearance Certificate (PCC)",
-        "gov_url": "https://portal5.passportindia.gov.in",
+        "gov_url": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
         "vfs_note": (
             "Submit at *VFS Global* "
             "(2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007)\n"
@@ -680,7 +680,7 @@ _WA_TYPE_A = {
         ),
         "documents": [
             "Valid Indian Passport — original + photocopy",
-            "Completed PCC Application Form (portal5.passportindia.gov.in)",
+            "Completed PCC Application Form (cgijoburg.gov.in passport/PCC status)",
             "Proof of current South African residential address",
             "Copy of SA Permanent Residence / Visa",
             "2 passport-size photographs",

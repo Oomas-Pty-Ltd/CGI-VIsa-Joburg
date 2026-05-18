@@ -328,8 +328,8 @@ INTENT_PATTERNS = {
         ],
         "patterns": [
             r"what\s+(can|do)\s+you\s+(do|offer|help|provide|assist)",
-            r"(list|show|tell me).*(services?|features?|options?|capabilities?)",
-            r"(services?|features?|capabilities?).*(available|offer|provide)",
+            r"(list|show|tell me).*\b(services|features|options|capabilities)\b",
+            r"\b(services|features|capabilities)\b.*(available|offer|provide)",
             r"how\s+can\s+(you|i).*(help|assist|use)",
             r"what\s+(services?|help|assistance)\s+(do\s+you|can\s+you|are)\s+",
             r"^(help|menu|options?)[\s!?.]*$",
@@ -388,7 +388,7 @@ STRUCTURED_RESPONSES = {
 
 **🔗 How to Apply**
 
-1. Apply online at embassy.passportindia.gov.in
+1. Apply online at cgijoburg.gov.in passport services
 2. Complete the online application form
 3. Pay the fee and save your receipt
 4. Book appointment via VFS Global Johannesburg
@@ -933,23 +933,54 @@ class IntentClassifier:
             )
         
         text_lower = text.lower().strip()
+        # Strip leading/trailing non-word punctuation so "hi'", "hello.", "hi!!!"
+        # match the same patterns as "hi" — keeps interior punctuation intact.
+        text_lower = re.sub(r"^[^\w]+|[^\w]+$", "", text_lower)
         self.classification_count += 1
-        
+
         best_match = None
         best_score = 0.0
         matched_keywords = []
-        
+
         # Check each intent category
         for category, config in self.patterns.items():
             score, keywords = self._calculate_match_score(text_lower, config)
-            
+
             if score > best_score:
                 best_score = score
                 best_match = category
                 matched_keywords = keywords
-        
+
         # Determine if we need LLM
         requires_llm = best_score < 0.5  # Less than 50% confidence
+
+        # CAPABILITIES has a very broad pattern ("tell me about ... services") that
+        # outscores specific-service intents when both fire (e.g. "tell me about
+        # passport services"). If a specific service is named in the message,
+        # route to that service and let the LLM produce a service-specific reply
+        # instead of serving the generic Complete Guide template.
+        if best_match == IntentCategory.CAPABILITIES:
+            _SERVICE_OVERRIDES = (
+                (IntentCategory.PASSPORT, ("passport", "पासपोर्ट", "tatkal")),
+                (IntentCategory.VISA, ("visa", "वीज़ा", "evisa", "e-visa")),
+                (IntentCategory.OCI, ("oci", "overseas citizen")),
+                (IntentCategory.PIO, ("pio", "person of indian origin")),
+                (IntentCategory.CONSULAR, (
+                    "attestation", "affidavit", "power of attorney", "poa", "gpa",
+                    "marriage certificate", "death certificate", "birth certificate",
+                    "emergency certificate", "ec ", "etd", "surrender", "renunciation",
+                    "noc", "notary", "apostille", "legalization",
+                )),
+                (IntentCategory.FEES, ("fees", "fee schedule", "cost")),
+                (IntentCategory.APPOINTMENT, ("appointment", "book a slot")),
+                (IntentCategory.OFFICE_INFO, ("office hours", "address", "location", "directions")),
+            )
+            for _cat, _kws in _SERVICE_OVERRIDES:
+                if any(_kw in text_lower for _kw in _kws):
+                    best_match = _cat
+                    matched_keywords = [_kw for _kw in _kws if _kw in text_lower]
+                    requires_llm = True  # need LLM for service-specific answer
+                    break
 
         # For greetings, capabilities, platform info, and language-switch, any pattern
         # match is unambiguous — serve the deterministic response without calling the LLM.
@@ -961,6 +992,16 @@ class IntentClassifier:
                         requires_llm = False
                         break
                 break
+
+        # Safety net: short messages starting with a greeting word still resolve
+        # to GREETING even if the pattern missed (e.g. "hii", "hellooo there").
+        if requires_llm and len(text_lower) <= 25:
+            for _g in ("namaste", "hello", "hey", "hi"):
+                if text_lower.startswith(_g):
+                    best_match = IntentCategory.GREETING
+                    requires_llm = False
+                    matched_keywords = [_g]
+                    break
 
         if requires_llm:
             self.llm_fallback_count += 1

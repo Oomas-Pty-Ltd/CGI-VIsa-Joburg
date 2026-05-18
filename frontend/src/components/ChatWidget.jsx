@@ -5,6 +5,13 @@ import axios from 'axios';
 import { GREETING_MESSAGE, ADVISORY_MESSAGES } from '../config/botMessages';
 import './ChatWidget.css';
 
+// All links rendered inside chat markdown must open in a new tab.
+const MD_COMPONENTS = {
+  a: ({ node, ...props }) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+};
+
 // ── Inline SVG icons ───────────────────────────────────────────────────────────
 // style prop overrides host-page CSS resets (e.g. Bootstrap/Tailwind svg{max-width:100%})
 const _svgStyle = (size) => ({ display:'inline-block', width:size, height:size, minWidth:size, minHeight:size, maxWidth:'none', maxHeight:'none', flexShrink:0, verticalAlign:'middle', overflow:'visible' });
@@ -1740,7 +1747,7 @@ export default function ChatWidget() {
                   {msg.title}
                 </div>
                 <div className="seva-advisory-card-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{msg.content}</ReactMarkdown>
                 </div>
               </div>
             ) : msg.role === 'seva_service_action' ? (
@@ -2109,7 +2116,7 @@ export default function ChatWidget() {
                 <div className="msg-bubble-bot">
                   {msg.content ? (
                     <div className="prose">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{msg.content}</ReactMarkdown>
                     </div>
                   ) : (
                     <div className="typing-dots"><span /><span /><span /></div>

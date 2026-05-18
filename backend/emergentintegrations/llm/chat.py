@@ -31,7 +31,8 @@ class UserMessage:
 
 
 class LlmChat:
-    def __init__(self, api_key: str, session_id: str, system_message: str = ""):
+    def __init__(self, api_key: str, session_id: str, system_message: str = "",
+                 max_tokens: Optional[int] = 400):
         import os
         # If an emergent-platform key is passed, fall back to real OpenAI key
         if api_key and api_key.startswith("sk-emergent"):
@@ -40,6 +41,8 @@ class LlmChat:
         self.session_id = session_id
         self.system_message = system_message
         self.model = "gpt-4o-mini"
+        # Hard cap on completion length. None = unlimited (use only for extraction tasks).
+        self.max_tokens = max_tokens
         if session_id not in _sessions:
             _sessions[session_id] = []
 
@@ -47,8 +50,18 @@ class LlmChat:
         self.model = MODEL_MAP.get(model, model)
         return self
 
+    def with_max_tokens(self, max_tokens: Optional[int]) -> "LlmChat":
+        self.max_tokens = max_tokens
+        return self
+
     def _build_messages(self, message: UserMessage) -> tuple:
-        """Return (history, openai_messages_list, content)."""
+        """Return (history, openai_messages_list).
+
+        The outgoing request contains the full multimodal content for THIS turn,
+        but only the text portion is persisted to history. Replaying image_url
+        parts on every follow-up turn poisons the whole conversation if any
+        single upload happens to be in a format OpenAI rejects.
+        """
         history = _sessions.get(self.session_id, [])
         if message.file_contents:
             content: Any = []
@@ -64,21 +77,27 @@ class LlmChat:
                     })
         else:
             content = message.text
-        user_msg = {"role": "user", "content": content}
-        history.append(user_msg)
         messages = []
         if self.system_message:
             messages.append({"role": "system", "content": self.system_message})
         messages.extend(history)
+        messages.append({"role": "user", "content": content})
+        history.append({"role": "user", "content": message.text or ""})
         return history, messages
+
+    def _completion_kwargs(self) -> dict:
+        kwargs: dict = {"model": self.model}
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
+        return kwargs
 
     async def send_message(self, message: UserMessage) -> str:
         history, messages = self._build_messages(message)
         client = openai.AsyncOpenAI(api_key=self.api_key)
         try:
             response = await client.chat.completions.create(
-                model=self.model,
                 messages=messages,
+                **self._completion_kwargs(),
             )
             assistant_text = response.choices[0].message.content
         except Exception as e:
@@ -95,9 +114,9 @@ class LlmChat:
         full_response = ""
         try:
             stream = await client.chat.completions.create(
-                model=self.model,
                 messages=messages,
                 stream=True,
+                **self._completion_kwargs(),
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta.content
