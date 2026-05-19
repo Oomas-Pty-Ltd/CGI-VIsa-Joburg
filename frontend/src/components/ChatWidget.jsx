@@ -151,6 +151,10 @@ const SERVICE_INFO = {
     description: 'For other consular services — affidavits, power of attorney, document attestation, name correction, and more.',
     documents: ['Valid Indian Passport or OCI card (copy)', 'Relevant supporting documents (case-specific)', '2 passport-size photographs'],
   },
+  appointment: {
+    key: 'appointment', name: 'Book An Appointment', emoji: '📅',
+    url: 'https://appointment.cgijoburg.gov.in/',
+  },
 };
 
 // Greetings (English + common Indian/SA/Arabic/French) — whole-message match.
@@ -422,10 +426,9 @@ export default function ChatWidget() {
     return () => { if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); };
   }, [cameraStream]);
 
-  // Open widget → show welcome
+  // Open widget → show welcome (scroll to bottom so service tabs are visible)
   useEffect(() => {
     if (isOpen && messages.length === 0) {
-      scrollToTopNextRef.current = true;
       setMessages(buildWelcomeMessages());
     }
   }, [isOpen, messages.length]);
@@ -1802,6 +1805,10 @@ export default function ChatWidget() {
                     services={Object.values(SERVICE_INFO)}
                     onPick={(svc) => {
                       const now = Date.now();
+                      if (svc.url) {
+                        window.open(svc.url, '_blank', 'noopener,noreferrer');
+                        return;
+                      }
                       setMessages(prev => [
                         ...prev,
                         {
