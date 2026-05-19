@@ -153,6 +153,11 @@ const SERVICE_INFO = {
   },
 };
 
+// Greetings (English + common Indian/SA/Arabic/French) — whole-message match.
+// Allows trailing punctuation/emoji and a few optional fillers ("hi there", "good morning sir").
+const GREETING_PATTERN = /^\s*(hi|hii+|hey+|hello+|hola|yo|howdy|greetings|namaste|namaskar|namaskaram|salaam|salam|salam alaikum|assalam(?:u)? ?alaikum|vanakkam|sat sri akal|adab|pranam|jai hind|good\s*(morning|afternoon|evening|day)|bonjour|sawubona|molo|hallo|dumela|sanibonani)\b[\s\W]*(there|sir|madam|ma'am|bot|seva|setu|team)?[\s\W]*$/i;
+const GREETING_REPLY = "🙏 Namaste! How can I help you today? Pick a service below or type your question.";
+
 const SERVICE_KEYWORDS = [
   { key: 'passport',  pattern: /\b(passport|passaport)\b/i },
   { key: 'visa',      pattern: /\b(visa)\b/i },
@@ -184,6 +189,7 @@ function buildWelcomeMessages() {
   ADVISORY_MESSAGES.filter(a => a.active).forEach(adv => {
     msgs.push({ id: adv.id, role: 'advisory', type: adv.type, title: adv.title, content: adv.content, time: timeNow() });
   });
+  msgs.push({ id: `seva_tabs_${Date.now()}`, role: 'seva_service_tabs' });
   return msgs;
 }
 
@@ -255,6 +261,27 @@ const TypeACard = ({ msg, onFinalize }) => {
     </div>
   );
 };
+
+// ── Service tabs — clickable chips shown under the greeting ────────────────
+const ServiceTabs = ({ services, onPick }) => (
+  <div className="seva-svc-tabs-card">
+    <p className="seva-svc-tabs-title">🏛️ I Can Help You With</p>
+    <p className="seva-svc-tabs-hint">Pick a service to see details, or type your question below.</p>
+    <div className="seva-svc-tabs-grid">
+      {services.map(svc => (
+        <button
+          key={svc.key}
+          className="seva-svc-tab"
+          onClick={() => onPick(svc)}
+          type="button"
+        >
+          <span className="seva-svc-tab-emoji">{svc.emoji}</span>
+          <span className="seva-svc-tab-name">{svc.name}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 // ── Service info card — shown when user asks about a service ──────────────
 const ServiceInfoCard = ({ svc, onApply }) => (
@@ -1061,6 +1088,21 @@ export default function ChatWidget() {
     const trimmed = (overrideText !== undefined ? overrideText : input).trim();
     if (!trimmed || isLoading) return;
 
+    // Greeting short-circuit — respond with service tabs instead of streaming.
+    // Only kicks in when the entire message is a greeting and we're not mid-auth.
+    if (!sevaAuthStep && !sevaUser && GREETING_PATTERN.test(trimmed)) {
+      setInput('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      const now = Date.now();
+      setMessages(prev => [
+        ...prev,
+        { id: now, role: 'user', content: trimmed, time: timeNow() },
+        { id: now + 1, role: 'bot', html: false, content: GREETING_REPLY, time: timeNow() },
+        { id: now + 2, role: 'seva_service_tabs' },
+      ]);
+      return;
+    }
+
     // Service keyword detection (only when not in auth flow)
     let detectedServiceKey = null;
     if (!sevaAuthStep) {
@@ -1750,6 +1792,34 @@ export default function ChatWidget() {
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{msg.content}</ReactMarkdown>
                 </div>
               </div>
+            ) : msg.role === 'seva_service_tabs' ? (
+              sevaUser ? null : (
+                <div key={msg.id || i} className="seva-msg-bot">
+                  <div className={`seva-msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
+                    <img src={BOT_IMAGE} alt="" />
+                  </div>
+                  <ServiceTabs
+                    services={Object.values(SERVICE_INFO)}
+                    onPick={(svc) => {
+                      const now = Date.now();
+                      setMessages(prev => [
+                        ...prev,
+                        {
+                          id: now,
+                          role: 'user',
+                          content: `${svc.emoji} ${svc.name}`,
+                          time: timeNow(),
+                        },
+                        {
+                          id: now + 1,
+                          role: 'seva_service_info',
+                          svc,
+                        },
+                      ]);
+                    }}
+                  />
+                </div>
+              )
             ) : msg.role === 'seva_service_action' ? (
               <div key={msg.id || i} className="seva-svc-action-card">
                 <div className="seva-svc-action-info">
@@ -2085,7 +2155,11 @@ export default function ChatWidget() {
                     <button
                       onClick={() => {
                         resetSevaAppState();
-                        setMessages(prev => [...prev, { id: Date.now(), role: 'bot', html: false, content: 'How can I assist you? You can ask about another service.', time: timeNow() }]);
+                        setMessages(prev => [
+                          ...prev,
+                          { id: Date.now(), role: 'bot', html: false, content: 'How can I assist you? Pick a service below or ask me a question.', time: timeNow() },
+                          { id: `seva_tabs_${Date.now()}`, role: 'seva_service_tabs' },
+                        ]);
                       }}
                       style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
                     >
