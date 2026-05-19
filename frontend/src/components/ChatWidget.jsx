@@ -162,17 +162,6 @@ const SERVICE_INFO = {
 const GREETING_PATTERN = /^\s*(hi|hii+|hey+|hello+|hola|yo|howdy|greetings|namaste|namaskar|namaskaram|salaam|salam|salam alaikum|assalam(?:u)? ?alaikum|vanakkam|sat sri akal|adab|pranam|jai hind|good\s*(morning|afternoon|evening|day)|bonjour|sawubona|molo|hallo|dumela|sanibonani)\b[\s\W]*(there|sir|madam|ma'am|bot|seva|setu|team)?[\s\W]*$/i;
 const GREETING_REPLY = "🙏 Namaste! How can I help you today? Pick a service below or type your question.";
 
-const SERVICE_KEYWORDS = [
-  { key: 'passport',  pattern: /\b(passport|passaport)\b/i },
-  { key: 'visa',      pattern: /\b(visa)\b/i },
-  { key: 'pcc',       pattern: /\b(pcc|police clearance(?: cert(?:ificate)?)?|clearance cert(?:ificate)?)\b/i },
-  { key: 'oci',       pattern: /\b(oci|overseas citizen(?: of india)?|oci card)\b/i },
-  { key: 'ec_death',  pattern: /\b(death cert(?:ificate)?|ec cert(?:ificate)?|emergency cert(?:ificate)?|death certificate)\b/i },
-  { key: 'surrender', pattern: /\b(surrender|renunciation|renounce|renouncing)\b/i },
-  { key: 'marriage',  pattern: /\b(marriage cert(?:ificate)?|marriage registration|marriage)\b/i },
-  { key: 'misc',      pattern: /\b(misc|miscellaneous|affidavit|attestation|power of attorney|apostille)\b/i },
-];
-
 function timeNow() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -288,7 +277,7 @@ const ServiceTabs = ({ services, onPick }) => (
 );
 
 // ── Service info card — shown when user asks about a service ──────────────
-const ServiceInfoCard = ({ svc, onApply }) => (
+const ServiceInfoCard = ({ svc }) => (
   <div className="seva-svc-info-card">
     <div className="seva-svc-info-header">
       <span className="seva-svc-emoji">{svc.emoji}</span>
@@ -306,9 +295,6 @@ const ServiceInfoCard = ({ svc, onApply }) => (
         ))}
       </ul>
     </div>
-    <button onClick={onApply} className="seva-svc-primary-btn">
-      Apply Now →
-    </button>
   </div>
 );
 
@@ -1106,15 +1092,6 @@ export default function ChatWidget() {
       return;
     }
 
-    // Service keyword detection (only when not in auth flow)
-    let detectedServiceKey = null;
-    if (!sevaAuthStep) {
-      const matched = SERVICE_KEYWORDS.find(({ pattern }) => pattern.test(trimmed));
-      if (matched && SERVICE_INFO[matched.key]) {
-        detectedServiceKey = matched.key;
-      }
-    }
-
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -1173,13 +1150,6 @@ export default function ChatWidget() {
             });
           }
           if (evt.done) {
-            if (detectedServiceKey && SERVICE_INFO[detectedServiceKey]) {
-              setMessages(prev => [...prev, {
-                id: Date.now(),
-                role: 'seva_service_info',
-                svc: SERVICE_INFO[detectedServiceKey],
-              }]);
-            }
             if (voiceOnRef.current && fullText) speakWithBackend(fullText);
             if (evt.lang_switch) {
               setTimeout(() => changeLang(evt.lang_switch), 800);
@@ -1851,13 +1821,7 @@ export default function ChatWidget() {
                 <div className={`seva-msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
                   <img src={BOT_IMAGE} alt="" />
                 </div>
-                <ServiceInfoCard
-                  svc={msg.svc}
-                  onApply={() => {
-                    resetSevaAppState();
-                    handleSevaStartAuth({ key: msg.svc.key, name: msg.svc.name, category: msg.svc.category });
-                  }}
-                />
+                <ServiceInfoCard svc={msg.svc} />
               </div>
             ) : msg.role === 'seva_type_a' ? (
               <div key={msg.id || i} className="msg-bot">
