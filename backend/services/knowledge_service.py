@@ -781,10 +781,19 @@ class KnowledgeService:
             score = self._calculate_relevance(query_lower, entry)
             if score > 0:
                 scored.append((score, entry))
-        
-        # Sort by score and return top results
-        scored.sort(key=lambda x: x[0], reverse=True)
-        
+
+        # Sort by score, then by recency (valid_from → created_at → updated_at)
+        # so newer press releases / events beat older ones for the same topic.
+        def _recency_key(entry: Dict) -> str:
+            return (
+                entry.get("valid_from")
+                or entry.get("created_at")
+                or entry.get("updated_at")
+                or ""
+            )
+
+        scored.sort(key=lambda x: (x[0], _recency_key(x[1])), reverse=True)
+
         return [entry for score, entry in scored[:limit]]
     
     @staticmethod
@@ -831,7 +840,56 @@ class KnowledgeService:
         if matched_in_answer >= 2:
             score += 0.5
 
+        # Recency boost — keeps newly uploaded press releases / events ahead of
+        # older entries on the same topic, so "yoga day" surfaces 2026 before 2025.
+        # Only applied when the entry carries a recognised date signal, so plain
+        # FAQ entries (no dates) keep their existing relative ranking.
+        score += self._recency_boost(entry)
+
         return score
+
+    @staticmethod
+    def _recency_boost(entry: Dict) -> float:
+        """Return a small additive score reflecting how recent / upcoming an entry is.
+
+        Priority:
+          • event_status == "future"  → +1.5  (upcoming events outrank past)
+          • event_status == "present" → +1.0
+          • valid_from within last 180 days → +0.5
+          • created_at within last 90 days  → +0.3
+        Returns 0.0 when no date metadata is present (legacy FAQ entries).
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        boost = 0.0
+
+        status = (entry.get("event_status") or "").lower()
+        if status == "future":
+            boost += 1.5
+        elif status == "present":
+            boost += 1.0
+
+        now = _dt.now(_tz.utc)
+
+        def _age_days(iso: Optional[str]) -> Optional[float]:
+            if not iso:
+                return None
+            try:
+                ts = _dt.fromisoformat(iso.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=_tz.utc)
+                return (now - ts).total_seconds() / 86400.0
+            except Exception:
+                return None
+
+        vf_age = _age_days(entry.get("valid_from"))
+        if vf_age is not None and -365 <= vf_age <= 180:
+            boost += 0.5
+
+        ca_age = _age_days(entry.get("created_at"))
+        if ca_age is not None and 0 <= ca_age <= 90:
+            boost += 0.3
+
+        return boost
     
     async def get_entry(self, entry_id: str) -> Optional[Dict]:
         """Get knowledge entry by ID"""
