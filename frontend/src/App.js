@@ -6,9 +6,9 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { ErrorBoundary, ErrorProvider } from "@/components/ErrorSystem";
 
 import Landing from "@/pages/Landing";
-import SuperAdminLogin from "@/pages/SuperAdminLogin";
+import LoginPage from "@/pages/LoginPage";
+import ChangePasswordPage from "@/pages/ChangePasswordPage";
 import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
-import LocalAdminLogin from "@/pages/LocalAdminLogin";
 import LocalAdminDashboard from "@/pages/LocalAdminDashboard";
 import ConsularBot from "@/pages/ConsularBot";
 import ICSWhatsAppBot from "@/pages/ICSWhatsAppBot";
@@ -26,10 +26,10 @@ function App() {
             <BrowserRouter>
               <Routes>
                 <Route path="/" element={<Landing />} />
-                <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/change-password" element={<ChangePasswordPage />} />
                 <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
                 <Route path="/super-admin/admin-panel" element={<AdminDashboardPage />} />
-                <Route path="/admin/login" element={<LocalAdminLogin />} />
                 <Route path="/admin/dashboard" element={<LocalAdminDashboard />} />
                 <Route path="/consular" element={<ConsularBot />} />
                 <Route path="/whatsapp" element={<ICSWhatsAppBot />} />

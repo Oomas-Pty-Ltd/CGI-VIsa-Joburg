@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, AsyncGenerator
 import asyncio
@@ -106,6 +106,8 @@ from security.guardrail import guardrail_service, sanitize_logs
 from security.rate_limiter import rate_limiter, check_rate_limit
 from security.cost_monitor import cost_monitor, record_llm_usage
 from config import get_company_id
+from tenant import get_tenant_id
+from services.bot_config import get_bot_config
 
 # Services imports
 from services.intent_classifier import (
@@ -121,7 +123,8 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, SERVICES, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query
+from services.application_flow import process_flow, flow_suffix, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query
+from services.service_registry import get_service
 from services.pdf_service import generate_application_pdf
 from fastapi.responses import Response as FastAPIResponse
 
@@ -400,7 +403,11 @@ class FormData(BaseModel):
     form_data: Dict[str, Any]
 
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(check_rate_limit)])
-async def chat(request: ChatRequest, http_request: Request):
+async def chat(
+    request: ChatRequest,
+    http_request: Request,
+    tenant_id: str = Depends(get_tenant_id),
+):
     db = await get_database()
 
     # Get client IP for rate limiting logging
@@ -413,9 +420,10 @@ async def chat(request: ChatRequest, http_request: Request):
 
     if not sanitization_result.is_safe:
         logger.warning(f"[SECURITY] Blocked unsafe input from {client_ip}: {sanitization_result.detected_patterns}")
+        _cfg = await get_bot_config(tenant_id)
         return ChatResponse(
             session_id=request.session_id or str(uuid.uuid4()),
-            response="I cannot process that request. Please ask a question about consular services.",
+            response=_cfg.fallback("blocked_input") or "I cannot process that request.",
             step="error"
         )
 
@@ -452,7 +460,8 @@ async def chat(request: ChatRequest, http_request: Request):
             session_id=session_id
         )
         
-        # Create escalation
+        # Create escalation (tenant-scoped so it shows up under the
+        # right tenant's admin queue, not in a global pool).
         escalation = await escalation_service.create_escalation(
             session_id=session['id'],
             user_identifier=user_id,
@@ -460,6 +469,7 @@ async def chat(request: ChatRequest, http_request: Request):
             reason=EscalationReason.EMERGENCY if intent_result.category == IntentCategory.EMERGENCY else EscalationReason.USER_REQUEST,
             priority=EscalationPriority.URGENT if intent_result.category == IntentCategory.EMERGENCY else EscalationPriority.MEDIUM,
             description=sanitized_message,
+            company_id=tenant_id,
             conversation_history=session.get('messages', [])
         )
         
@@ -506,10 +516,10 @@ async def chat(request: ChatRequest, http_request: Request):
         # TC 1.3 — if this is a core service, invite them to start the application
         if _FLOW_ENABLED:
             matched_service = _INTENT_TO_SERVICE.get(intent_result.category)
-            if matched_service and matched_service in SERVICES:
-                svc_name = SERVICES[matched_service]["name"]
+            matched_svc_obj = await get_service(tenant_id, matched_service) if matched_service else None
+            if matched_svc_obj:
                 final_response += (
-                    f"\n\n**Are you interested in starting the application process for {svc_name}?** "
+                    f"\n\n**Are you interested in starting the application process for {matched_svc_obj.name}?** "
                     f"Type **apply** to begin."
                 )
 
@@ -528,7 +538,11 @@ async def chat(request: ChatRequest, http_request: Request):
     
     # Fall through to LLM for complex queries
     user_id    = _resolved_user_id
-    company_id = request.company_id or get_company_id()
+    # tenant_id is the canonical company_id (from X-Company-Id header, falling
+    # back to the env var inside get_tenant_id). The request.company_id body
+    # field is preserved on the Pydantic model for back-compat but no longer
+    # affects behavior.
+    company_id = tenant_id
 
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
@@ -551,7 +565,7 @@ async def chat(request: ChatRequest, http_request: Request):
 
     # ── Parallel: hybrid search + flow state ──────────────────────────
     context_info, current_flow = await asyncio.gather(
-        hybrid_search(sanitized_message, knowledge_base),
+        hybrid_search(sanitized_message, knowledge_base, tenant_id),
         get_flow_state(session_id),
     )
     current_state = current_flow.get("state", "idle")
@@ -591,7 +605,7 @@ async def chat(request: ChatRequest, http_request: Request):
     # ── Application flow state machine ────────────────────────────────
     if _FLOW_ENABLED:
         flow_response, needs_llm, current_step = await process_flow(
-            session_id, sanitized_message,
+            session_id, sanitized_message, tenant_id,
             has_image=bool(request.image_base64),
             image_doc_data=image_doc_data,
             user_id=user_id,
@@ -614,13 +628,13 @@ async def chat(request: ChatRequest, http_request: Request):
         # LLM needed (info query, question during pause, etc.)
 
         # Detect service for info context
-        detected_svc = detect_service(sanitized_message)
+        detected_svc_key = detect_service(sanitized_message)
+        detected_svc_obj = await get_service(tenant_id, detected_svc_key) if detected_svc_key else None
         svc_docs_hint = ""
-        if detected_svc and detected_svc in SERVICES:
-            svc = SERVICES[detected_svc]
-            docs = "\n".join(f"  • {d}" for d in svc["documents"])
+        if detected_svc_obj:
+            docs = "\n".join(f"  • {d}" for d in detected_svc_obj.documents)
             svc_docs_hint = (
-                f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
+                f"\nDOCUMENTS REQUIRED FOR {detected_svc_obj.name.upper()}:\n{docs}\n"
             )
 
         # When a known-good English answer exists (flow or deterministic), pass it as
@@ -661,7 +675,8 @@ async def chat(request: ChatRequest, http_request: Request):
             _blocked_kws,
         )
 
-        _base_system_message = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+        _bot_cfg = await get_bot_config(company_id)
+        _base_system_message = f"""You are {_bot_cfg.bot_name}, the official consular assistant for {_bot_cfg.org_name}.
 {_prohibition}
 {_lang_instruction(request.language or "en")}
 
@@ -722,10 +737,10 @@ IF the answer is not in any of the data above, say so briefly and direct the use
 
         if _FLOW_ENABLED:
             flow_service = detect_service(sanitized_message)
-            suffix = flow_suffix(current_step, flow_service)
+            suffix = await flow_suffix(current_step, flow_service, tenant_id)
             if suffix:
                 bot_response += suffix
-    
+
     # Generate voice response if requested
     audio_base64 = None
     if request.enable_voice:
@@ -759,7 +774,11 @@ IF the answer is not in any of the data above, say so briefly and direct the use
 
 
 @router.post("/chat/stream", dependencies=[Depends(check_rate_limit)])
-async def chat_stream(request: ChatRequest, http_request: Request):
+async def chat_stream(
+    request: ChatRequest,
+    http_request: Request,
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Streaming version of /chat.
     Returns Server-Sent Events so the frontend can render text progressively.
@@ -858,7 +877,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
     _t.mark("session_kb")
 
     context_info, current_flow = await asyncio.gather(
-        hybrid_search(sanitized_message, knowledge_base),
+        hybrid_search(sanitized_message, knowledge_base, tenant_id),
         get_flow_state(session_id),
     )
     current_state = current_flow.get("state", "idle")
@@ -902,7 +921,7 @@ async def chat_stream(request: ChatRequest, http_request: Request):
 
     if _FLOW_ENABLED:
         flow_response, needs_llm, current_step = await process_flow(
-            session_id, sanitized_message,
+            session_id, sanitized_message, tenant_id,
             has_image=bool(request.image_base64),
             image_doc_data=image_doc_data,
             user_id=user_id,
@@ -938,12 +957,12 @@ async def chat_stream(request: ChatRequest, http_request: Request):
     if _FLOW_ENABLED and current_step == "info_shown" and flow_response:
         llm_context = (llm_context + "\n\n---\n\n" + flow_response) if llm_context else flow_response
 
-    detected_svc = detect_service(sanitized_message) if _FLOW_ENABLED else None
+    detected_svc_key = detect_service(sanitized_message) if _FLOW_ENABLED else None
+    detected_svc_obj = await get_service(tenant_id, detected_svc_key) if detected_svc_key else None
     svc_docs_hint = ""
-    if detected_svc and detected_svc in SERVICES:
-        svc = SERVICES[detected_svc]
-        docs = "\n".join(f"  • {d}" for d in svc["documents"])
-        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
+    if detected_svc_obj:
+        docs = "\n".join(f"  • {d}" for d in detected_svc_obj.documents)
+        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {detected_svc_obj.name.upper()}:\n{docs}\n"
 
     # When a known-good English answer exists (flow or deterministic), pass it as
     # translation context so the LLM translates it rather than searching from scratch.
@@ -992,7 +1011,10 @@ async def chat_stream(request: ChatRequest, http_request: Request):
     # ── Prompt structure: STATIC zone (cacheable) → DYNAMIC zone (per-request).
     # OpenAI's automatic prefix cache hits only when the leading bytes are identical
     # across requests, so anything that varies per query goes at the bottom.
-    static_prefix = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg.
+    # NOTE: bot_name/org_name change the cache-key prefix per-tenant, which is
+    # expected — each tenant has its own prefix cache.
+    _bot_cfg_stream = await get_bot_config(tenant_id)
+    static_prefix = f"""You are {_bot_cfg_stream.bot_name}, the official consular assistant for {_bot_cfg_stream.org_name}.
 {_lang_instruction(request.language or "en")}
 
 {SCOPE_RULES}
@@ -1081,7 +1103,7 @@ CONSULATE FACTS:
 
         if _FLOW_ENABLED:
             flow_service = detect_service(sanitized_message)
-            suffix = flow_suffix(current_step, flow_service)
+            suffix = await flow_suffix(current_step, flow_service, tenant_id)
             if suffix:
                 full_text += suffix
                 yield f"data: {json.dumps({'chunk': suffix})}\n\n"
@@ -1101,7 +1123,10 @@ CONSULATE FACTS:
 
 
 @router.post("/document-scan")
-async def document_scan(request: DocumentScanRequest):
+async def document_scan(
+    request: DocumentScanRequest,
+    tenant_id: str = Depends(get_tenant_id),
+):
     db = await get_database()
 
     # ── TC 3.1 — Virus / malware scan before any processing ──────────
@@ -1120,10 +1145,11 @@ async def document_scan(request: DocumentScanRequest):
 
     api_key = os.environ.get('EMERGENT_LLM_KEY')
 
+    _cfg = await get_bot_config(tenant_id)
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=str(uuid.uuid4()),
-        system_message=f"""You are a document processing AI for Seva Setu Bot.
+        system_message=f"""You are a document processing AI for {_cfg.bot_name}.
 
 TASK: Extract ALL information from this {request.document_type} document in ANY language.
 
@@ -1193,7 +1219,7 @@ Be accurate and thorough."""
             _update["flow.doc_context"] = doc_context
 
         await db.chat_sessions.update_one(
-            {"id": request.session_id},
+            {"id": request.session_id, "company_id": tenant_id},
             {"$set": _update},
         )
 
@@ -1244,7 +1270,10 @@ Be accurate and thorough."""
         )
 
 @router.get("/generate-pdf")
-async def generate_pdf(session_id: str):
+async def generate_pdf(
+    session_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     TC 4.1 — Generate an editable AcroForm PDF preview of the applicant's form.
 
@@ -1253,8 +1282,11 @@ async def generate_pdf(session_id: str):
     """
     db = await get_database()
 
-    # Load session and flow
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+    # Load session and flow (tenant-scoped)
+    session = await db.chat_sessions.find_one(
+        {"id": session_id, "company_id": tenant_id},
+        {"_id": 0},
+    )
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
@@ -1264,13 +1296,14 @@ async def generate_pdf(session_id: str):
     tracking_id  = flow.get("tracking_id", "UNKNOWN")
     uploaded_docs = flow.get("uploaded_docs", [])
 
-    if not service_key or service_key not in SERVICES:
+    svc_obj = await get_service(tenant_id, service_key) if service_key else None
+    if not svc_obj:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="No active application found for this session.",
         )
 
-    service_name = SERVICES[service_key]["name"]
+    service_name = svc_obj.name
 
     try:
         loop = asyncio.get_event_loop()
@@ -1301,14 +1334,22 @@ async def generate_pdf(session_id: str):
 
 
 @router.get("/download-pdf/{tracking_id}")
-async def download_pdf_by_tracking(tracking_id: str):
+async def download_pdf_by_tracking(
+    tracking_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Generate and download the submitted application PDF using tracking ID.
     Called automatically after submission (session flow may already be cleared).
+    Tenant-scoped — a tracking ID issued by tenant A cannot be redeemed by
+    a download request on tenant B.
     """
     db = await get_database()
 
-    app = await db.applications.find_one({"tracking_id": tracking_id.upper()}, {"_id": 0})
+    app = await db.applications.find_one(
+        {"tracking_id": tracking_id.upper(), "company_id": tenant_id},
+        {"_id": 0},
+    )
     if not app:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
 
@@ -1319,13 +1360,14 @@ async def download_pdf_by_tracking(tracking_id: str):
         for d in app.get("documents", [])
     ]
 
-    if not service_key or service_key not in SERVICES:
+    svc_obj = await get_service(tenant_id, service_key) if service_key else None
+    if not svc_obj:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Service information not available for this application.",
         )
 
-    service_name = SERVICES[service_key]["name"]
+    service_name = svc_obj.name
 
     try:
         loop = asyncio.get_event_loop()
@@ -1356,11 +1398,11 @@ async def download_pdf_by_tracking(tracking_id: str):
 
 
 @router.post("/form-submit")
-async def form_submit(form: FormData):
+async def form_submit(form: FormData, tenant_id: str = Depends(get_tenant_id)):
     db = await get_database()
-    
+
     await db.chat_sessions.update_one(
-        {"id": form.session_id},
+        {"id": form.session_id, "company_id": tenant_id},
         {
             "$set": {
                 "form_data": form.form_data,
@@ -1370,24 +1412,30 @@ async def form_submit(form: FormData):
             }
         }
     )
-    
+
     return {"success": True, "message": "Form submitted successfully"}
 
 @router.get("/session/{session_id}")
-async def get_session(session_id: str):
+async def get_session(session_id: str, tenant_id: str = Depends(get_tenant_id)):
     db = await get_database()
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
-    
+    session = await db.chat_sessions.find_one(
+        {"id": session_id, "company_id": tenant_id}, {"_id": 0}
+    )
+
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
-    
+
     return session
 
 @router.post("/session/{session_id}/close")
-async def close_session(session_id: str, reason: str = "language_changed"):
+async def close_session(
+    session_id: str,
+    reason: str = "language_changed",
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Mark a session as closed in the DB and persist its final state.
     Called by the frontend when the user changes language so the old
@@ -1395,7 +1443,7 @@ async def close_session(session_id: str, reason: str = "language_changed"):
     """
     db = await get_database()
     result = await db.chat_sessions.update_one(
-        {"id": session_id},
+        {"id": session_id, "company_id": tenant_id},
         {"$set": {
             "is_active": False,
             "closed_at": datetime.now(timezone.utc).isoformat(),
@@ -1500,7 +1548,10 @@ class WidgetChatResponse(BaseModel):
     response: str
 
 @router.post("/chat-widget", response_model=WidgetChatResponse)
-async def chat_widget(request: WidgetChatRequest):
+async def chat_widget(
+    request: WidgetChatRequest,
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
     Widget-specific chat endpoint with concise, focused responses.
     Designed for embedded chat widgets on external websites.
@@ -1508,27 +1559,30 @@ async def chat_widget(request: WidgetChatRequest):
     """
     # Sanitize and validate user input
     sanitization_result = sanitize_user_input(request.message, context="widget")
-    
+
     if not sanitization_result.is_safe:
         logger.warning(f"[SECURITY] Blocked unsafe widget input: {sanitization_result.detected_patterns}")
+        _cfg = await get_bot_config(tenant_id)
         return WidgetChatResponse(
             session_id=request.session_id or str(uuid.uuid4()),
-            response="I cannot process that request. Please ask about consular services."
+            response=_cfg.fallback("blocked_input") or "I cannot process that request."
         )
-    
+
     sanitized_message = request.message
 
-    # Use secure session management for widgets
+    # Use secure session management for widgets — thread tenant into metadata
+    # so downstream queries can scope by it.
     session = await session_manager.get_or_create_session(
         channel="widget",
         user_identifier="widget_guest",
         session_id=request.session_id,
-        metadata={"mode": request.mode, "source": "widget"}
+        metadata={"mode": request.mode, "source": "widget", "company_id": tenant_id}
     )
     session_id = session['id']
     
     # Concise system prompt - KEY TO BETTER BEHAVIOR (BASE)
-    _base_system_message = "You are Seva Setu, a helpful consular assistant for the Consulate General of India, Johannesburg.\n\n" + SCOPE_RULES + """
+    _bot_cfg_widget = await get_bot_config(tenant_id)
+    _base_system_message = f"You are {_bot_cfg_widget.bot_name}, a helpful consular assistant for {_bot_cfg_widget.org_name}.\n\n" + SCOPE_RULES + """
 
 CRITICAL RULES:
 1. WAIT for user's question. DO NOT volunteer information they didn't ask for.
@@ -1623,11 +1677,15 @@ class ApplicationStatusResponse(BaseModel):
 
 
 @router.get("/application/{tracking_id}", response_model=ApplicationStatusResponse)
-async def get_application_status(tracking_id: str):
-    """Check the status of an application by tracking ID."""
+async def get_application_status(
+    tracking_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Check the status of an application by tracking ID.
+    Tenant-scoped — a tracking ID is visible only to its owning tenant."""
     db = await get_database()
     app = await db.applications.find_one(
-        {"tracking_id": tracking_id.upper()}, {"_id": 0}
+        {"tracking_id": tracking_id.upper(), "company_id": tenant_id}, {"_id": 0}
     )
     if not app:
         raise HTTPException(
@@ -1649,10 +1707,15 @@ async def get_application_status(tracking_id: str):
 
 
 @router.get("/applications/session/{session_id}")
-async def get_session_applications(session_id: str):
-    """List all applications linked to a session."""
+async def get_session_applications(
+    session_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """List all applications linked to a session (tenant-scoped)."""
     db = await get_database()
-    cursor = db.applications.find({"session_id": session_id}, {"_id": 0})
+    cursor = db.applications.find(
+        {"session_id": session_id, "company_id": tenant_id}, {"_id": 0}
+    )
     apps = await cursor.to_list(length=20)
     return {
         "session_id": session_id,
@@ -1675,9 +1738,15 @@ async def get_session_applications(session_id: str):
 
 
 @router.get("/applications/lookup")
-async def lookup_applications_by_contact(contact: str):
+async def lookup_applications_by_contact(
+    contact: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
     """
-    Find applications by email or phone number.
+    Find applications by email or phone number. Tenant-scoped — without
+    this, an email/phone lookup would surface applications across all
+    tenants, leaking cross-tenant PII.
+
     GET /api/consular/applications/lookup?contact=user@example.com
     GET /api/consular/applications/lookup?contact=+27811234567
     """
@@ -1687,7 +1756,10 @@ async def lookup_applications_by_contact(contact: str):
     is_email = bool(_re.match(r'.+@.+\..+', contact))
     field = "form_data.email" if is_email else "form_data.phone"
     cursor = db.applications.find(
-        {field: {"$regex": _re.escape(contact), "$options": "i"}},
+        {
+            "company_id": tenant_id,
+            field: {"$regex": _re.escape(contact), "$options": "i"},
+        },
         {"_id": 0}
     ).sort("created_at", -1).limit(20)
     apps = await cursor.to_list(length=20)
@@ -1712,3 +1784,17 @@ async def lookup_applications_by_contact(contact: str):
             for a in apps
         ],
     }
+
+
+@router.get("/widget-config")
+async def widget_config(tenant_id: str = Depends(get_tenant_id)):
+    """Public branding endpoint — the widget calls this on boot to fetch
+    bot name, avatar, colors, supported languages for the calling tenant.
+
+    No auth required (the widget runs on third-party pages). Returns only
+    `cfg.public_branding()` — system prompt, contact info, and fallback
+    response templates are NOT exposed here. Use the super-admin endpoints
+    to read those.
+    """
+    cfg = await get_bot_config(tenant_id)
+    return cfg.public_branding()

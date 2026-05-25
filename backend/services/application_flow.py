@@ -19,291 +19,21 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from database import get_database
+from services.service_registry import Service, get_service, list_services
+from services.flow_steps import execute_step
 
 logger = logging.getLogger(__name__)
 
 
 # =====================================================================
-# SERVICE DEFINITIONS
+# SERVICE DEFINITIONS — moved to `tenant_services` collection (Sprint 4).
+# Per-request loads come from `services.service_registry.get_service()`.
+# Seed data for fresh tenants lives in `migrations/0006_seed_tenant_services.py`.
 # =====================================================================
-SERVICES: Dict[str, Dict] = {
-    "passport": {
-        "name": "Passport Services",
-        "description": (
-            "The Consulate General of India, Johannesburg provides passport services including "
-            "fresh issuance, renewal, and emergency travel documents for Indian nationals residing "
-            "in South Africa. Applications must be submitted in person by appointment. "
-            "Processing time is typically 3–4 weeks for normal passports and 2–3 days for emergency documents. "
-            "Visit https://passportindia.gov.in to complete your online application before visiting the consulate."
-        ),
-        "documents": [
-            "Online application receipt from passportindia.gov.in",
-            "Current/expired passport — original + photocopy of all pages",
-            "Proof of residence in South Africa (utility bill or lease agreement)",
-            "Recent passport-size photographs (51×51 mm, white background)",
-            "South African ID or valid visa/work permit",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (as it appears on your passport):"},
-            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number", "question": "Please enter your **current passport number**:"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-            {"key": "address",         "question": "Please enter your **residential address** in South Africa:"},
-        ],
-    },
-    "visa": {
-        "name": "Indian Visa",
-        "description": (
-            "Indian visas for South African and other foreign nationals are processed through "
-            "VFS Global Visa Application Centre, Johannesburg (not directly at the Consulate). "
-            "South African nationals receive Indian visas GRATIS (free of charge). "
-            "Apply online at https://indianvisaonline.gov.in/ — no manual forms accepted. "
-            "For e-Visa, apply at https://indianvisaonline.gov.in/evisa/tvoa.html (min. 5 working days before travel). "
-            "Biometrics mandatory at VFS for regular visa applicants. "
-            "VFS Visa Centre: 1st Floor, Rivonia Village Office Block, cnr Rivonia Blvd & Mutual Rd, Rivonia, JHB. "
-            "VFS hours: Mon–Fri 08:00–15:00. No visa applications accepted at the Consulate directly."
-        ),
-        "documents": [
-            "Valid foreign passport (at least 6 months validity remaining)",
-            "Recent passport-size photographs",
-            "Proof of residence in South Africa",
-            "Bank statements (last 3 months)",
-            "Travel itinerary / flight bookings",
-            "Proof of purpose (invitation letter / hotel bookings / medical letter)",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
-            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "nationality",     "question": "Please enter your **nationality**:"},
-            {"key": "passport_number", "question": "Please enter your **passport number**:"},
-            {"key": "travel_dates",    "question": "Please enter your **intended travel dates** to India (e.g. 01/06/2026 – 20/06/2026):"},
-            {"key": "purpose",         "question": "What is the **purpose** of your visit? (tourism / business / medical / student)"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-        ],
-    },
-    "oci": {
-        "name": "OCI (Overseas Citizen of India)",
-        "description": (
-            "OCI (Overseas Citizen of India) provides a multi-purpose, multi-entry life-long visa to India. "
-            "Eligibility: persons who were citizens of India on or after 26 Jan 1950, or whose parents/grandparents "
-            "were Indian citizens, or who are spouses of Indian citizens/OCI holders (married for ≥2 years), "
-            "or minor children of Indian citizens. "
-            "Apply online at ociservices.gov.in, then submit documents in person at the Consulate "
-            "(appointment via cons.jburg@mea.gov.in). Fees as per MEA notification."
-        ),
-        "documents": [
-            "Foreign passport — original + copies of all pages",
-            "Proof of Indian origin (old Indian passport / parent's Indian passport / Indian birth certificate)",
-            "South African ID / permanent residence / work permit",
-            "Recent passport-size photographs",
-            "Marriage certificate (if applying as spouse of an Indian citizen)",
-        ],
-        "fields": [
-            {"key": "full_name",         "question": "Please enter your **full name** (as in your passport):"},
-            {"key": "dob",               "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number",   "question": "Please enter your **foreign passport number**:"},
-            {"key": "indian_connection", "question": "Briefly describe your **Indian origin connection** (e.g. 'My father was an Indian citizen'):"},
-            {"key": "phone",             "question": "Please enter your **phone number**:"},
-            {"key": "email",             "question": "Please enter your **email address**:"},
-        ],
-    },
-    "pcc": {
-        "name": "Police Clearance Certificate (PCC)",
-        "description": (
-            "A Police Clearance Certificate (PCC) is required by Indian nationals for immigration, "
-            "change of nationality, employment abroad, or longer stay in another country. "
-            "PCC service is outsourced to VFS Global — do NOT apply at the Consulate directly. "
-            "Apply online at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/, select CGI Johannesburg, "
-            "and submit at VFS Global Johannesburg (2nd Floor, Harrow Court 1, Isle of Houghton, Park Town). "
-            "VFS submission hours: 08:00–15:00, Mon–Fri. "
-            "VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/"
-        ),
-        "documents": [
-            "Valid Indian passport — original + photocopy",
-            "Proof of current address in South Africa",
-            "South African residency document (visa / permit / PR)",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
-            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number", "question": "Please enter your **Indian passport number**:"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-            {"key": "purpose",         "question": "What is the **purpose** for which you need the PCC?"},
-        ],
-    },
-    "marriage": {
-        "name": "Marriage Certificate / Registration",
-        "description": (
-            "The Consulate General of India, Johannesburg provides services for registration of marriages "
-            "of Indian nationals solemnized in South Africa under the Hindu Marriage Act or Special Marriage Act. "
-            "Both spouses must appear in person at the consulate. "
-            "The consulate also attests South African marriage certificates for use in India. "
-            "Processing time: 5–7 business days. Appointment required. "
-            "For attestation of documents for use in India, bring originals and certified copies."
-        ),
-        "documents": [
-            "Valid Indian passport of Indian spouse — original + photocopy",
-            "South African marriage certificate (registered with Home Affairs) — original + photocopy",
-            "Proof of residence in South Africa of both spouses",
-            "Recent passport-size photographs of both spouses",
-            "Affidavit confirming marital status (if previously married)",
-            "Divorce decree / death certificate of previous spouse (if applicable)",
-        ],
-        "fields": [
-            {"key": "full_name",          "question": "Please enter the **full name of the Indian spouse** (as in passport):"},
-            {"key": "dob",                "question": "Please enter their **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number",    "question": "Please enter the **Indian passport number**:"},
-            {"key": "spouse_name",        "question": "Please enter the **full name of the other spouse**:"},
-            {"key": "marriage_date",      "question": "Please enter the **date of marriage** (DD/MM/YYYY):"},
-            {"key": "marriage_place",     "question": "Please enter the **place of marriage** (city, country):"},
-            {"key": "phone",              "question": "Please enter your **phone number**:"},
-            {"key": "email",              "question": "Please enter your **email address**:"},
-        ],
-    },
-    "birth": {
-        "name": "Birth Certificate Registration",
-        "description": (
-            "Indian nationals residing in South Africa can register the birth of their child born in South Africa "
-            "at the Consulate General of India, Johannesburg. "
-            "This service is Gratis (free of charge). "
-            "Registration is required before applying for an Indian passport for the child. "
-            "Required: birth certificate from South African Home Department and local hospital."
-        ),
-        "documents": [
-            "South African birth certificate of the child — original + photocopy",
-            "Indian passport of both parents — original + photocopy",
-            "Proof of residence in South Africa",
-            "Hospital birth record / discharge summary",
-            "Recent passport-size photographs of the child",
-            "Marriage certificate of parents (if applicable)",
-        ],
-        "fields": [
-            {"key": "child_name",         "question": "Please enter the **child's full name**:"},
-            {"key": "dob",                "question": "Please enter the **child's date of birth** (DD/MM/YYYY):"},
-            {"key": "birth_place",        "question": "Please enter the **place of birth** (hospital, city):"},
-            {"key": "father_name",        "question": "Please enter the **father's full name** (as in passport):"},
-            {"key": "mother_name",        "question": "Please enter the **mother's full name** (as in passport):"},
-            {"key": "father_passport",    "question": "Please enter the **father's Indian passport number**:"},
-            {"key": "phone",              "question": "Please enter your **phone number**:"},
-            {"key": "email",              "question": "Please enter your **email address**:"},
-        ],
-    },
-    "attestation": {
-        "name": "Document Attestation / Apostille",
-        "description": (
-            "The Consulate General of India, Johannesburg provides attestation of academic degrees, "
-            "general power of attorney (GPA/PoA), and other documents for Indian and foreign nationals. "
-            "For Indian documents: must first be apostilled by MEA (Ministry of External Affairs, India) — "
-            "see http://www.mea.gov.in/apostille.htm. "
-            "For GPA/PoA: bring original documents and self-attested copies. "
-            "For foreign nationals: attestation of Indian documents for use in South Africa. "
-            "Fee as per consular schedule. Contact the Consulate for appointment."
-        ),
-        "documents": [
-            "Original document(s) to be attested — with photocopies",
-            "Valid Indian passport — original + photocopy (for Indian national documents)",
-            "Proof of residence in South Africa",
-            "Application form (available at the consulate)",
-            "Fee payment receipt",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
-            {"key": "passport_number", "question": "Please enter your **passport number**:"},
-            {"key": "doc_type",        "question": "What **type of document** needs attestation? (e.g. degree certificate, affidavit, power of attorney):"},
-            {"key": "doc_purpose",     "question": "What is the **purpose** of attestation? (e.g. employment in India, property registration, etc.):"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-        ],
-    },
-    "renunciation": {
-        "name": "Renunciation / Surrender of Indian Citizenship",
-        "description": (
-            "Indian nationals who have acquired citizenship of another country (including South Africa) "
-            "are required by law to renounce their Indian citizenship and surrender their Indian passport. "
-            "The renunciation certificate is issued by the Consulate General of India, Johannesburg. "
-            "After renunciation, an OCI card can be applied for to maintain ties with India. "
-            "Contact the Consulate for appointment: cons.jburg@mea.gov.in or +27 11-4828484 / +27 11 581 9800."
-        ),
-        "documents": [
-            "Indian passport — original (to be surrendered)",
-            "New foreign citizenship certificate / foreign passport — original + photocopy",
-            "Proof of current address in South Africa",
-            "Completed renunciation application form",
-            "Recent passport-size photographs",
-            "Paid fee receipt (fee payable at consulate)",
-        ],
-        "fields": [
-            {"key": "full_name",          "question": "Please enter your **full name** (as in your Indian passport):"},
-            {"key": "dob",                "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "indian_passport",    "question": "Please enter your **Indian passport number** (to be surrendered):"},
-            {"key": "new_citizenship",    "question": "What is your **new citizenship / nationality**?"},
-            {"key": "new_passport",       "question": "Please enter your **new foreign passport number**:"},
-            {"key": "phone",              "question": "Please enter your **phone number**:"},
-            {"key": "email",              "question": "Please enter your **email address**:"},
-        ],
-    },
-    "ec_death": {
-        "name": "EC / Death Certificate",
-        "description": (
-            "The Consulate General of India, Johannesburg issues Emergency Certificates (EC) and "
-            "assists with death registration for Indian nationals. "
-            "An EC is issued when the Indian passport is lost/expired and the person needs to travel back to India urgently. "
-            "Death registration is required when an Indian national passes away in South Africa. "
-            "Contact: cons.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800."
-        ),
-        "documents": [
-            "Indian Passport of the deceased / applicant (copy)",
-            "South African Death Certificate (original + notarised copy) — for death registration",
-            "Proof of relationship to deceased",
-            "Applicant's valid Indian Passport or OCI card",
-            "Two passport-size photographs of applicant",
-            "Police report (in case of unnatural death)",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (applicant):"},
-            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number", "question": "Please enter your **passport / OCI number**:"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-            {"key": "doc_type",        "question": "What do you require? (Emergency Certificate or Death Certificate registration):"},
-            {"key": "doc_purpose",     "question": "Please briefly describe the **purpose / relationship to deceased** (if applicable):"},
-        ],
-    },
-    "misc": {
-        "name": "Miscellaneous / Other Consular Services",
-        "description": (
-            "The Consulate General of India, Johannesburg handles various miscellaneous consular matters "
-            "including affidavits, document authentication, general power of attorney (GPA/PoA), "
-            "life certificates, and other services not covered under standard categories. "
-            "📄 Miscellaneous application form (PDF): "
-            "https://www.cgijoburg.gov.in//docs/1771050896misc%20application%20form-new.pdf\n"
-            "Contact the Consulate to confirm your specific requirement: "
-            "cons.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800."
-        ),
-        "documents": [
-            "Valid Indian Passport or OCI card (copy)",
-            "Relevant supporting documents (case-specific)",
-            "Two passport-size photographs",
-            "Completed Miscellaneous Application Form — https://www.cgijoburg.gov.in//docs/1771050896misc%20application%20form-new.pdf",
-            "Affidavit / Notarised documents (where required)",
-            "Fee payment receipt (if applicable)",
-        ],
-        "fields": [
-            {"key": "full_name",       "question": "Please enter your **full name** (as in your passport):"},
-            {"key": "dob",             "question": "Please enter your **date of birth** (DD/MM/YYYY):"},
-            {"key": "passport_number", "question": "Please enter your **passport / OCI number**:"},
-            {"key": "phone",           "question": "Please enter your **phone number**:"},
-            {"key": "email",           "question": "Please enter your **email address**:"},
-            {"key": "doc_purpose",     "question": "Please describe the **nature / purpose** of your request:"},
-        ],
-    },
-}
+
 
 CONTACT_INFO = (
     "📞 **+27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800**\n"
@@ -532,29 +262,29 @@ async def _clear_flow(session_id: str):
     await _save_flow(session_id, dict(_EMPTY_FLOW))
 
 
-async def _create_application(session_id: str, user_id: str, service: str) -> Tuple[str, str]:
+async def _create_application(session_id: str, user_id: str, svc: Service) -> Tuple[str, str]:
     """Create a new application record in the applications collection.
     Returns (application_id, tracking_id)."""
     db = await get_database()
     app_id = str(uuid.uuid4())
-    svc = SERVICES[service]
-    tracking_id = f"{service.upper()}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{app_id[:6].upper()}"
+    tracking_id = f"{svc.service_key.upper()}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{app_id[:6].upper()}"
     now = datetime.now(timezone.utc).isoformat()
     await db.applications.insert_one({
         "id":                 app_id,
         "tracking_id":        tracking_id,
         "session_id":         session_id,
         "user_id":            user_id,
-        "service":            service,
-        "service_name":       svc["name"],
+        "company_id":         svc.company_id,
+        "service":            svc.service_key,
+        "service_name":       svc.name,
         "status":             "in_progress",
         "form_data":          {},
         "documents":          [],
-        "required_documents": svc["documents"],
+        "required_documents": list(svc.documents),
         "created_at":         now,
         "updated_at":         now,
     })
-    logger.info(f"[APP] Created application {tracking_id} for {service}")
+    logger.info(f"[APP] Created application {tracking_id} for {svc.service_key}")
     return app_id, tracking_id
 
 
@@ -564,39 +294,64 @@ async def _update_application(app_id: str, update: Dict):
     await db.applications.update_one({"id": app_id}, {"$set": update})
 
 
-# =====================================================================
-# RESPONSE BUILDERS
-# =====================================================================
-def _docs_list(service_key: str) -> str:
-    svc = SERVICES[service_key]
-    docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc["documents"]))
-    return f"**Documents required for {svc['name']}:**\n{docs}"
+async def _fast_forward_non_input(
+    fields: List[Dict[str, Any]],
+    fi: int,
+    flow: Dict,
+    app_id: Optional[str],
+) -> int:
+    """Sprint 4E — auto-evaluate any consecutive `conditional` / `api_call`
+    fields starting at ``fi`` so the user never sees their `question`.
+
+    Each non-input step may update form data (api_call response →
+    ``store_response_as``) or short-circuit the form (``skip_to_docs``);
+    on short-circuit we return ``len(fields)`` so the caller transitions
+    straight to docs_uploading. Plain input fields stop the fast-forward
+    and the caller asks the user the question."""
+    while fi < len(fields):
+        step = await execute_step(fields[fi], flow.get("data", {}))
+        if step is None:
+            return fi
+        if step.form_updates:
+            flow.setdefault("data", {}).update(step.form_updates)
+            if app_id:
+                await _update_application(app_id, {"form_data": flow["data"]})
+        if step.advance == "skip_to_docs":
+            return len(fields)
+        fi += 1
+    return fi
 
 
-def _consent_prompt(service_key: str, scraped_summary: str = "") -> str:
-    svc = SERVICES[service_key]
+# =====================================================================
+# RESPONSE BUILDERS — all take a `Service` loaded once per request
+# from `service_registry.get_service(tenant_id, service_key)`.
+# =====================================================================
+def _docs_list(svc: Service) -> str:
+    docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc.documents))
+    return f"**Documents required for {svc.name}:**\n{docs}"
+
+
+def _consent_prompt(svc: Service, scraped_summary: str = "") -> str:
     parts = []
     if scraped_summary:
         parts.append(scraped_summary)
-    parts.append(_docs_list(service_key))
+    parts.append(_docs_list(svc))
     parts.append(
-        f"\nWould you like to start your **{svc['name']}** application now?\n"
+        f"\nWould you like to start your **{svc.name}** application now?\n"
         f"Reply **yes** to proceed or **no** to cancel."
     )
     return "\n\n".join(parts)
 
 
-def _field_question(service_key: str, index: int) -> str:
-    fields = SERVICES[service_key]["fields"]
-    total = len(fields)
-    q = fields[index]["question"]
+def _field_question(svc: Service, index: int) -> str:
+    total = len(svc.fields)
+    q = svc.fields[index]["question"]
     return f"**Step {index+1} of {total}** — {q}"
 
 
-def _doc_upload_prompt(service_key: str, doc_index: int) -> str:
-    docs = SERVICES[service_key]["documents"]
-    total = len(docs)
-    doc = docs[doc_index]
+def _doc_upload_prompt(svc: Service, doc_index: int) -> str:
+    total = len(svc.documents)
+    doc = svc.documents[doc_index]
     return (
         f"📎 **Document {doc_index+1} of {total}** — Please upload:\n\n"
         f"**{doc}**\n\n"
@@ -605,14 +360,12 @@ def _doc_upload_prompt(service_key: str, doc_index: int) -> str:
     )
 
 
-def _summary(service_key: str, data: Dict) -> str:
-    svc = SERVICES[service_key]
-    fields = svc["fields"]
-    lines = [f"  • **{f['key'].replace('_', ' ').title()}:** {data.get(f['key'], '—')}" for f in fields]
+def _summary(svc: Service, data: Dict) -> str:
+    lines = [f"  • **{f['key'].replace('_', ' ').title()}:** {data.get(f['key'], '—')}" for f in svc.fields]
     return (
-        f"✅ **Application Summary — {svc['name']}**\n\n"
+        f"✅ **Application Summary — {svc.name}**\n\n"
         + "\n".join(lines)
-        + f"\n\n📎 Now let's collect your **{len(svc['documents'])} required documents**."
+        + f"\n\n📎 Now let's collect your **{len(svc.documents)} required documents**."
     )
 
 
@@ -737,30 +490,29 @@ def _detect_passport_subtype(query: str) -> Optional[str]:
     return None
 
 
-def _service_info_page(service_key: str, scraped_summary: str = "", user_query: str = "", channel: str = "web") -> str:
+def _service_info_page(svc: Service, scraped_summary: str = "", user_query: str = "", channel: str = "web") -> str:
     """Full info card shown when a user asks about a service.
     Combines static description + live scraped data + docs required + apply offer.
     For passport, detects sub-type (lost/stolen/damaged/emergency/tatkal) from user_query."""
-    svc = SERVICES[service_key]
 
     # Passport sub-type customisation
     subtype_info = None
-    if service_key == "passport" and user_query:
+    if svc.service_key == "passport" and user_query:
         subtype_key = _detect_passport_subtype(user_query)
         subtype_info = _PASSPORT_SUBTYPES.get(subtype_key)
 
     if subtype_info:
         title = subtype_info["label"]
         description = subtype_info["description"]
-        base_docs = list(svc["documents"])
+        base_docs = list(svc.documents)
         # Prepend sub-type specific docs (FIR etc.) before generic list
         extra = subtype_info.get("extra_docs", [])
         all_docs = extra + [d for d in base_docs if d not in extra]
         docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(all_docs))
         parts = [f"## {title}\n\n{description}"]
     else:
-        docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc["documents"]))
-        parts = [f"## {svc['name']}\n\n{svc['description']}"]
+        docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(svc.documents))
+        parts = [f"## {svc.name}\n\n{svc.description}"]
 
     if scraped_summary and len(scraped_summary.strip()) > 40:
         parts.append(f"**Latest information from official websites:**\n{scraped_summary.strip()}")
@@ -768,22 +520,21 @@ def _service_info_page(service_key: str, scraped_summary: str = "", user_query: 
     parts.append(f"**Documents required:**\n{docs}")
     if channel != "whatsapp":
         parts.append(
-            f"---\n**Are you interested in starting the application process for {svc['name']}?**\n"
+            f"---\n**Are you interested in starting the application process for {svc.name}?**\n"
             f"Type **apply** to begin, or ask any questions you may have."
         )
     return "\n\n".join(parts)
 
 
-def _docs_complete_prompt(service_key: str, uploaded: List[Dict], tracking_id: str) -> str:
-    svc = SERVICES[service_key]
+def _docs_complete_prompt(svc: Service, uploaded: List[Dict], tracking_id: str) -> str:
     lines = []
     for d in uploaded:
         icon = "✅" if d.get("status") == "uploaded" else "⚠️ skipped"
         lines.append(f"  {icon} {d['name']}")
-    skipped = len(svc["documents"]) - sum(1 for d in uploaded if d.get("status") == "uploaded")
+    skipped = len(svc.documents) - sum(1 for d in uploaded if d.get("status") == "uploaded")
     skip_note = f"\n  _(⚠️ {skipped} document(s) were skipped — you may be asked to provide them later)_" if skipped else ""
     return (
-        f"📋 **All documents processed for {svc['name']}**\n\n"
+        f"📋 **All documents processed for {svc.name}**\n\n"
         + "\n".join(lines)
         + skip_note
         + f"\n\n🔖 **Tracking ID:** `{tracking_id}`\n\n"
@@ -846,13 +597,13 @@ _FIELD_ALIASES: Dict[str, str] = {
 }
 
 
-def _match_field_key(service_key: str, user_label: str) -> Optional[str]:
+def _match_field_key(svc: Service, user_label: str) -> Optional[str]:
     """
     Map a free-text label (e.g. 'name', 'date of birth') to the exact
-    form field key defined in SERVICES[service_key]['fields'].
+    form field key defined on the tenant's Service.fields.
     Returns None if no match found.
     """
-    fields = SERVICES[service_key]["fields"]
+    fields = svc.fields
     field_keys = {f["key"] for f in fields}
     low = user_label.lower().strip()
 
@@ -931,14 +682,14 @@ _DOC_CTX_TO_FORM: Dict[str, List[str]] = {
 _EMPTY_VALUES = {"", "n/a", "null", "none", "unknown", "not available", "not found"}
 
 
-def _get_prefill(service_key: str, field_index: int, doc_context: Dict) -> Optional[str]:
+def _get_prefill(svc: Service, field_index: int, doc_context: Dict) -> Optional[str]:
     """
     Return a pre-filled value from doc_context for fields[field_index], or None.
     Converts OCR date format (YYYY-MM-DD) → form format (DD/MM/YYYY) automatically.
     """
     if not doc_context:
         return None
-    fields = SERVICES[service_key]["fields"]
+    fields = svc.fields
     if field_index >= len(fields):
         return None
     field_key = fields[field_index]["key"]
@@ -959,9 +710,9 @@ def _get_prefill(service_key: str, field_index: int, doc_context: Dict) -> Optio
     return None
 
 
-def _prefill_prompt(service_key: str, field_index: int, prefilled_value: str) -> str:
+def _prefill_prompt(svc: Service, field_index: int, prefilled_value: str) -> str:
     """Question shown when a field has a pre-filled value from a scanned document."""
-    fields = SERVICES[service_key]["fields"]
+    fields = svc.fields
     total  = len(fields)
     label  = fields[field_index]["key"].replace("_", " ").title()
     return (
@@ -975,6 +726,7 @@ def _prefill_prompt(service_key: str, field_index: int, prefilled_value: str) ->
 async def process_flow(
     session_id: str,
     message: str,
+    tenant_id: str,
     has_image: bool = False,
     image_doc_data: Optional[Dict] = None,
     user_id: str = "guest",
@@ -1051,11 +803,17 @@ async def process_flow(
     di      = flow.get("doc_index", 0)
     app_id  = flow.get("application_id")
 
+    # Resolve the tenant's Service definition once. If the user is mid-flow
+    # but the operator deleted/renamed the service in the meantime, svc_obj
+    # is None and downstream branches treat that as "service gone" rather
+    # than crashing.
+    svc_obj: Optional[Service] = await get_service(tenant_id, service) if service else None
+
     # ------------------------------------------------------------------
     # STATE: paused  (user asked a question mid-registration)
     # ------------------------------------------------------------------
     if state == "paused":
-        svc_name = SERVICES[service]["name"] if service and service in SERVICES else "your application"
+        svc_name = svc_obj.name if svc_obj else "your application"
 
         if is_discard(message):
             saved_question = flow.get("paused_question", "")
@@ -1088,7 +846,7 @@ async def process_flow(
             await _save_flow(session_id, flow)
             if paused_in_state == "docs_uploading":
                 return (
-                    "✅ Resuming document upload.\n\n" + _doc_upload_prompt(service, flow.get("doc_index", 0)),
+                    "✅ Resuming document upload.\n\n" + _doc_upload_prompt(svc_obj, flow.get("doc_index", 0)),
                     False, "docs_uploading"
                 )
             if paused_in_state == "docs_pending":
@@ -1100,7 +858,7 @@ async def process_flow(
                     False, "docs_pending"
                 )
             return (
-                "✅ Resuming your application.\n\n" + _field_question(service, saved_fi),
+                "✅ Resuming your application.\n\n" + _field_question(svc_obj, saved_fi),
                 False, "collecting"
             )
 
@@ -1112,14 +870,14 @@ async def process_flow(
     # ------------------------------------------------------------------
     if state == "docs_pending":
         tracking_id = flow.get("tracking_id", "")
-        svc_name    = SERVICES[service]["name"]
+        svc_name    = svc_obj.name if svc_obj else (service or "your application")
 
         # ── TC 4.2 — Field correction: "correct field: value" ────────
         _corr = _CORRECT_RE.match(message)
         if _corr:
             user_label = _corr.group(1).strip()
             new_value  = _corr.group(2).strip()
-            field_key  = _match_field_key(service, user_label)
+            field_key  = _match_field_key(svc_obj, user_label) if svc_obj else None
             if field_key:
                 validation_error = _validate_field(field_key, new_value)
                 if validation_error:
@@ -1139,12 +897,13 @@ async def process_flow(
                     False, "docs_pending",
                 )
             else:
+                example_fields = svc_obj.fields if svc_obj else []
                 return (
                     f"I couldn't find a field named **\"{user_label}\"** in your {svc_name} application.\n\n"
                     f"Try using the exact field name, e.g.:\n"
                     + "\n".join(
                         f"  • `correct {f['key'].replace('_', ' ')}: <value>`"
-                        for f in SERVICES[service]["fields"]
+                        for f in example_fields
                     ),
                     False, "docs_pending",
                 )
@@ -1175,14 +934,15 @@ async def process_flow(
         if is_question(message) or _is_info_query(message):
             if channel == "whatsapp":
                 asked_svc = detect_service(message)
+                asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
-                if asked_svc and asked_svc in SERVICES:
+                if asked_svc_obj:
                     new_flow = dict(_EMPTY_FLOW)
                     new_flow["state"]   = "info_shown"
                     new_flow["service"] = asked_svc
                     await _save_flow(session_id, new_flow)
-                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                    return (_service_info_page(asked_svc_obj, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
                 await _clear_flow(session_id)
                 return (None, True, "idle")
             flow["state"]             = "paused"
@@ -1202,7 +962,7 @@ async def process_flow(
     # STATE: docs_uploading  (step-by-step document collection)
     # ------------------------------------------------------------------
     if state == "docs_uploading":
-        docs     = SERVICES[service]["documents"]
+        docs     = svc_obj.documents if svc_obj else []
         uploaded = flow.get("uploaded_docs", [])
 
         if is_discard(message):
@@ -1214,14 +974,15 @@ async def process_flow(
         if (is_question(message) or _is_info_query(message)) and not has_image:
             if channel == "whatsapp":
                 asked_svc = detect_service(message)
+                asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
-                if asked_svc and asked_svc in SERVICES:
+                if asked_svc_obj:
                     new_flow = dict(_EMPTY_FLOW)
                     new_flow["state"]   = "info_shown"
                     new_flow["service"] = asked_svc
                     await _save_flow(session_id, new_flow)
-                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                    return (_service_info_page(asked_svc_obj, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
                 await _clear_flow(session_id)
                 return (None, True, "idle")
             flow["state"]             = "paused"
@@ -1229,7 +990,7 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "docs_uploading"
             await _save_flow(session_id, flow)
-            svc_name = SERVICES[service]["name"]
+            svc_name = svc_obj.name if svc_obj else "your application"
             return (_pause_prompt(svc_name, message), False, "paused")
 
         # Accept uploaded image or skip
@@ -1267,7 +1028,7 @@ async def process_flow(
                 await _save_flow(session_id, flow)
                 tracking_id = flow.get("tracking_id", "")
                 return (
-                    _docs_complete_prompt(service, uploaded, tracking_id),
+                    _docs_complete_prompt(svc_obj, uploaded, tracking_id),
                     False, "docs_pending"
                 )
 
@@ -1275,18 +1036,22 @@ async def process_flow(
             # Acknowledge upload and ask for next
             ack = "✅ Document uploaded." if has_image else "⚠️ Document skipped."
             return (
-                f"{ack}\n\n" + _doc_upload_prompt(service, di),
+                f"{ack}\n\n" + _doc_upload_prompt(svc_obj, di),
                 False, "docs_uploading"
             )
 
         # No image, not skip — re-prompt
-        return (_doc_upload_prompt(service, di), False, "docs_uploading")
+        return (_doc_upload_prompt(svc_obj, di), False, "docs_uploading")
 
     # ------------------------------------------------------------------
     # STATE: collecting  (step-by-step data collection)
     # ------------------------------------------------------------------
     if state == "collecting":
-        fields      = SERVICES[service]["fields"]
+        # If the operator deleted the service mid-flow, abandon gracefully.
+        if not svc_obj:
+            await _clear_flow(session_id)
+            return ("This service is no longer available. How can I help you?", False, "idle")
+        fields      = svc_obj.fields
         doc_context = flow.get("doc_context", {})
 
         # ── Resolve a pending pre-fill confirm (TC 3.4) ───────────────
@@ -1309,7 +1074,7 @@ async def process_flow(
                 if validation_error:
                     return (
                         f"⚠️ {validation_error}\n\n"
-                        + _prefill_prompt(service, fi, prefilled_value),
+                        + _prefill_prompt(svc_obj, fi, prefilled_value),
                         False, "collecting",
                     )
                 accepted_value = message.strip()
@@ -1317,9 +1082,11 @@ async def process_flow(
             flow["prefill_pending"]            = None
             flow["data"][fields[fi]["key"]]    = accepted_value
             fi += 1
-            flow["field_index"] = fi
             if app_id:
                 await _update_application(app_id, {"form_data": flow["data"]})
+            # Skip past any conditional/api_call steps inserted between inputs.
+            fi = await _fast_forward_non_input(fields, fi, flow, app_id)
+            flow["field_index"] = fi
 
             if fi >= len(fields):
                 flow["state"]         = "docs_uploading"
@@ -1327,32 +1094,33 @@ async def process_flow(
                 flow["uploaded_docs"] = []
                 await _save_flow(session_id, flow)
                 return (
-                    _summary(service, flow["data"]) + "\n\n" + _doc_upload_prompt(service, 0),
+                    _summary(svc_obj, flow["data"]) + "\n\n" + _doc_upload_prompt(svc_obj, 0),
                     False, "docs_uploading",
                 )
 
             # Check doc_context for the NEXT field before asking
-            next_prefill = _get_prefill(service, fi, doc_context)
+            next_prefill = _get_prefill(svc_obj, fi, doc_context)
             if next_prefill:
                 flow["prefill_pending"] = {"field_key": fields[fi]["key"], "value": next_prefill}
                 await _save_flow(session_id, flow)
-                return (_prefill_prompt(service, fi, next_prefill), False, "collecting")
+                return (_prefill_prompt(svc_obj, fi, next_prefill), False, "collecting")
 
             await _save_flow(session_id, flow)
-            return (_field_question(service, fi), False, "collecting")
+            return (_field_question(svc_obj, fi), False, "collecting")
 
         # ── Normal collecting flow ────────────────────────────────────
         if (is_question(message) or _is_info_query(message)) and not _looks_like_answer(message, fields[fi]["key"]):
             if channel == "whatsapp":
                 asked_svc = detect_service(message)
+                asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
-                if asked_svc and asked_svc in SERVICES:
+                if asked_svc_obj:
                     new_flow = dict(_EMPTY_FLOW)
                     new_flow["state"]   = "info_shown"
                     new_flow["service"] = asked_svc
                     await _save_flow(session_id, new_flow)
-                    return (_service_info_page(asked_svc, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
+                    return (_service_info_page(asked_svc_obj, scraped_summary, user_query=message, channel="whatsapp"), True, "info_shown")
                 await _clear_flow(session_id)
                 return (None, True, "idle")
             flow["state"]             = "paused"
@@ -1360,8 +1128,7 @@ async def process_flow(
             flow["paused_field_index"]= fi
             flow["paused_in_state"]   = "collecting"
             await _save_flow(session_id, flow)
-            svc_name = SERVICES[service]["name"]
-            return (_pause_prompt(svc_name, message), False, "paused")
+            return (_pause_prompt(svc_obj.name, message), False, "paused")
 
         if is_discard(message):
             if app_id:
@@ -1374,18 +1141,21 @@ async def process_flow(
         if validation_error:
             await _save_flow(session_id, flow)
             return (
-                f"⚠️ {validation_error}\n\n" + _field_question(service, fi),
+                f"⚠️ {validation_error}\n\n" + _field_question(svc_obj, fi),
                 False, "collecting"
             )
 
         # Accept the answer
         flow["data"][fields[fi]["key"]] = message.strip()
         fi += 1
-        flow["field_index"] = fi
 
         # Persist form data
         if app_id:
             await _update_application(app_id, {"form_data": flow["data"]})
+
+        # Skip past any conditional/api_call steps inserted between inputs.
+        fi = await _fast_forward_non_input(fields, fi, flow, app_id)
+        flow["field_index"] = fi
 
         if fi >= len(fields):
             # All fields collected → move to docs_uploading
@@ -1394,51 +1164,72 @@ async def process_flow(
             flow["uploaded_docs"] = []
             await _save_flow(session_id, flow)
             return (
-                _summary(service, flow["data"]) + "\n\n" + _doc_upload_prompt(service, 0),
+                _summary(svc_obj, flow["data"]) + "\n\n" + _doc_upload_prompt(svc_obj, 0),
                 False, "docs_uploading"
             )
 
         # Check doc_context for the NEXT field before asking (TC 3.4)
-        next_prefill = _get_prefill(service, fi, doc_context)
+        next_prefill = _get_prefill(svc_obj, fi, doc_context)
         if next_prefill:
             flow["prefill_pending"] = {"field_key": fields[fi]["key"], "value": next_prefill}
             await _save_flow(session_id, flow)
-            return (_prefill_prompt(service, fi, next_prefill), False, "collecting")
+            return (_prefill_prompt(svc_obj, fi, next_prefill), False, "collecting")
 
         await _save_flow(session_id, flow)
-        return (_field_question(service, fi), False, "collecting")
+        return (_field_question(svc_obj, fi), False, "collecting")
 
     # ------------------------------------------------------------------
     # STATE: consent_pending  (asked user yes/no to start registration)
     # ------------------------------------------------------------------
     if state == "consent_pending":
         if is_yes(message):
-            app_id, tracking_id = await _create_application(session_id, user_id, service)
+            if not svc_obj:
+                await _clear_flow(session_id)
+                return ("This service is no longer available. How can I help you?", False, "idle")
+            app_id, tracking_id = await _create_application(session_id, user_id, svc_obj)
             flow["state"]          = "collecting"
-            flow["field_index"]    = 0
             flow["data"]           = {}
             flow["application_id"] = app_id
             flow["tracking_id"]    = tracking_id
 
-            # Check doc_context for the FIRST field (TC 3.4 auto-fill)
-            doc_context = flow.get("doc_context", {})
-            first_prefill = _get_prefill(service, 0, doc_context)
-            if first_prefill:
-                fields = SERVICES[service]["fields"]
-                flow["prefill_pending"] = {"field_key": fields[0]["key"], "value": first_prefill}
+            # Fast-forward through any leading conditional / api_call steps
+            # so the first user-facing question is the first INPUT field.
+            start_fi = await _fast_forward_non_input(svc_obj.fields, 0, flow, app_id)
+            flow["field_index"] = start_fi
+
+            greeting = (
+                f"Great! Let's begin your **{svc_obj.name}** application.\n"
+                f"🔖 Your tracking ID: `{tracking_id}`\n\n"
+            )
+
+            # All fields were non-input (or a conditional skipped straight
+            # to docs) → transition directly to docs_uploading.
+            if start_fi >= len(svc_obj.fields):
+                flow["state"]         = "docs_uploading"
+                flow["doc_index"]     = 0
+                flow["uploaded_docs"] = []
                 await _save_flow(session_id, flow)
                 return (
-                    f"Great! Let's begin your **{SERVICES[service]['name']}** application.\n"
-                    f"🔖 Your tracking ID: `{tracking_id}`\n\n"
-                    + _prefill_prompt(service, 0, first_prefill),
+                    greeting + _summary(svc_obj, flow["data"]) + "\n\n"
+                    + _doc_upload_prompt(svc_obj, 0),
+                    False, "docs_uploading",
+                )
+
+            # Check doc_context for the FIRST input field (TC 3.4 auto-fill)
+            doc_context = flow.get("doc_context", {})
+            first_prefill = _get_prefill(svc_obj, start_fi, doc_context)
+            if first_prefill:
+                fields = svc_obj.fields
+                flow["prefill_pending"] = {"field_key": fields[start_fi]["key"], "value": first_prefill}
+                await _save_flow(session_id, flow)
+                return (
+                    greeting + _prefill_prompt(svc_obj, start_fi, first_prefill),
                     False, "collecting",
                 )
 
             await _save_flow(session_id, flow)
             return (
-                f"Great! Let's begin your **{SERVICES[service]['name']}** application.\n"
-                f"🔖 Your tracking ID: `{tracking_id}`\n\n"
-                + _field_question(service, 0),
+                greeting + _field_question(svc_obj, start_fi),
                 False, "collecting"
             )
         if is_no(message):
@@ -1458,22 +1249,28 @@ async def process_flow(
         # Do NOT fall back from idle — that caused stale cross-session carry-over
         # (e.g. old PCC session → user types "apply oci" → PCC wrongly suggested)
         if state in ("consent_pending", "info_shown"):
-            svc = detected_svc or service
+            svc_key = detected_svc or service
         else:
-            svc = detected_svc
+            svc_key = detected_svc
 
-        if svc:
+        # Resolve to a Service object (may be the same as svc_obj when the
+        # fallback used the session-stored key, but a fresh lookup is cheap
+        # thanks to the registry's TTL cache and keeps the branches simple).
+        target_svc = await get_service(tenant_id, svc_key) if svc_key else None
+
+        if target_svc:
             flow["state"]   = "consent_pending"
-            flow["service"] = svc
+            flow["service"] = target_svc.service_key
             await _save_flow(session_id, flow)
-            return (_consent_prompt(svc, scraped_summary), False, "consent_pending")
+            return (_consent_prompt(target_svc, scraped_summary), False, "consent_pending")
 
-        # Apply intent detected but no recognisable service — ask the user
-        if is_apply_intent(message) and not svc:
-            svc_list = "\n".join(f"• {v['name']}" for v in SERVICES.values())
+        # Apply intent detected but no recognisable (or no enabled) service — ask the user
+        if is_apply_intent(message):
+            available = await list_services(tenant_id)
+            svc_list = "\n".join(f"• {s.name}" for s in available)
             return (
                 f"I'd be happy to help you apply! Which service are you looking for?\n\n{svc_list}\n\n"
-                f"Just mention the service name (e.g. *passport*, *visa*, *OCI card*, *PCC*) and I'll guide you.",
+                f"Just mention the service name and I'll guide you.",
                 False, "idle"
             )
 
@@ -1481,15 +1278,17 @@ async def process_flow(
     # Service info request — show structured info (scraped + static)
     # Triggers from idle OR info_shown (user switches service or asks again)
     # ------------------------------------------------------------------
-    svc = detect_service(message)
-    if svc and state in ("idle", "info_shown"):
-        flow["state"]   = "info_shown"
-        flow["service"] = svc
-        await _save_flow(session_id, flow)
-        # needs_llm=True so the route handler runs the LLM with live knowledge
-        # (hybrid_search context_info) as primary source. The service info page
-        # is passed back as structured context that the route handler appends.
-        return (_service_info_page(svc, scraped_summary, user_query=message, channel=channel), True, "info_shown")
+    detected_key = detect_service(message)
+    if detected_key and state in ("idle", "info_shown"):
+        detected_svc = await get_service(tenant_id, detected_key)
+        if detected_svc:
+            flow["state"]   = "info_shown"
+            flow["service"] = detected_key
+            await _save_flow(session_id, flow)
+            # needs_llm=True so the route handler runs the LLM with live knowledge
+            # (hybrid_search context_info) as primary source. The service info page
+            # is passed back as structured context that the route handler appends.
+            return (_service_info_page(detected_svc, scraped_summary, user_query=message, channel=channel), True, "info_shown")
 
     # ------------------------------------------------------------------
     # Website-only service — scan websites, show info, no registration flow
@@ -1633,12 +1432,13 @@ def _validate_field(key: str, value: str) -> Optional[str]:
 # =====================================================================
 # POST-LLM HOOK  (append context-aware suffix after LLM response)
 # =====================================================================
-def flow_suffix(state: str, service: Optional[str], channel: str = "web") -> str:
+async def flow_suffix(state: str, service: Optional[str], tenant_id: str, channel: str = "web") -> str:
     """Append after LLM response to guide user back into the flow.
 
     channel: "web" shows apply prompts; "whatsapp" hides them.
     """
-    svc_name = SERVICES[service]["name"] if service and service in SERVICES else "your application"
+    svc_obj = await get_service(tenant_id, service) if service else None
+    svc_name = svc_obj.name if svc_obj else "your application"
     # Note: "paused" state no longer uses LLM — it returns direct prompts,
     # so no suffix is needed for it here.
     if state == "consent_pending" and service:
@@ -1652,12 +1452,11 @@ def flow_suffix(state: str, service: Optional[str], channel: str = "web") -> str
     if state in ("idle", "info_shown"):
         if channel == "whatsapp":
             return ""
-        if service and service in SERVICES:
-            svc_name = SERVICES[service]["name"]
+        if svc_obj:
             return (
                 f"\n\n---\n"
                 f"Is this sufficient information, or do you need more details?\n"
-                f"**Are you interested in starting the application process for {svc_name}?** "
+                f"**Are you interested in starting the application process for {svc_obj.name}?** "
                 f"Type **apply** to begin."
             )
         return (

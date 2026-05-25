@@ -257,7 +257,7 @@ async def _crawl_and_store(
 _crawl_in_progress: set = set()
 
 
-async def hybrid_search(query: str, knowledge_base: Dict) -> str:
+async def hybrid_search(query: str, knowledge_base: Dict, tenant_id: str) -> str:
     """
     4-layer hybrid retrieval — always returns immediately, never blocks.
 
@@ -266,31 +266,33 @@ async def hybrid_search(query: str, knowledge_base: Dict) -> str:
     Layer 3  Deep-scan cache / background crawl  →  fire-and-forget
     Layer 4  Structured fallback  →  always available
 
-    Results are cached per-process for `_CACHE_TTL` seconds keyed on the
-    normalized query so repeated questions skip the whole pipeline.
+    Results are cached per-process for `_CACHE_TTL` seconds keyed on
+    ``(tenant_id, query)`` — the tenant component is required so cached
+    answers from one tenant never bleed into another's bot.
     """
-    # ── Result cache: same query within 60s short-circuits the pipeline ──
+    # ── Result cache: same (tenant, query) within 60s short-circuits the pipeline ──
     norm_query = (query or "").lower().strip()
-    if norm_query:
-        cached_result = _cache_get(norm_query)
+    cache_key = f"{tenant_id}::{norm_query}" if norm_query else ""
+    if cache_key:
+        cached_result = _cache_get(cache_key)
         if cached_result is not None:
-            logger.debug(f"[HYBRID-CACHE] hit for '{norm_query[:40]}'")
+            logger.debug(f"[HYBRID-CACHE] hit for tenant={tenant_id[:8]} '{norm_query[:40]}'")
             return cached_result
 
-    result = await _hybrid_search_impl(query, knowledge_base)
+    result = await _hybrid_search_impl(query, knowledge_base, tenant_id)
 
     # Don't cache the blocked sentinel (admin may unblock the keyword)
-    if norm_query and result:
+    if cache_key and result:
         try:
             from knowledge_scraper import BLOCKED_SENTINEL as _BS
             if result != _BS:
-                _cache_put(norm_query, result)
+                _cache_put(cache_key, result)
         except Exception:
-            _cache_put(norm_query, result)
+            _cache_put(cache_key, result)
     return result
 
 
-async def _hybrid_search_impl(query: str, knowledge_base: Dict) -> str:
+async def _hybrid_search_impl(query: str, knowledge_base: Dict, tenant_id: str) -> str:
     keywords = _extract_keywords(query)
     cache_key = "_".join(sorted(set(keywords[:6]))) if keywords else "general"
 
@@ -312,7 +314,7 @@ async def _hybrid_search_impl(query: str, knowledge_base: Dict) -> str:
         await knowledge_service.initialize()
         # Fetch top 20 so full PDFs (e.g. holiday calendars with many sections)
         # and multi-topic queries (fee + service combos) all surface
-        kb_results = await knowledge_service.search(query, limit=20)
+        kb_results = await knowledge_service.search(query, tenant_id, limit=20)
         if kb_results:
             top_score = knowledge_service._calculate_relevance(query.lower(), kb_results[0])
             if top_score >= _KB_CONFIDENCE_THRESHOLD:

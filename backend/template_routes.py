@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from database import get_database
 from auth_utils import verify_token
+from tenant import get_tenant_id
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -304,30 +305,49 @@ async def list_templates(
     category: Optional[str] = None,
     language: Optional[str] = None,
     search: Optional[str] = None,
-    include_private: bool = False
+    include_private: bool = False,
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """List all templates with optional filters"""
+    """List templates visible to the calling tenant.
+
+    Visibility rule:
+      - Templates with no `company_id` are global system templates (seeded
+        by `init_default_templates`) — visible to every tenant.
+      - Templates with `company_id == tenant_id` are this tenant's own.
+      - Custom templates owned by another tenant are NOT visible.
+    """
     db = await get_database()
-    
-    query = {}
-    
-    if category:
-        query["category"] = category
-    
-    if language:
-        query["language"] = language
-    
-    if not include_private:
-        query["is_public"] = True
-    
-    if search:
-        query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"body": {"$regex": search, "$options": "i"}},
-            {"tags": {"$in": [search]}}
+
+    base_query: Dict = {
+        "$or": [
+            {"company_id": tenant_id},
+            {"company_id": {"$exists": False}},   # legacy global templates
+            {"company_id": None},
         ]
-    
-    templates = await db.templates.find(query, {"_id": 0}).to_list(100)
+    }
+
+    if category:
+        base_query["category"] = category
+
+    if language:
+        base_query["language"] = language
+
+    if not include_private:
+        base_query["is_public"] = True
+
+    if search:
+        # Combine the visibility OR with the search OR via $and.
+        search_or = {
+            "$or": [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"body": {"$regex": search, "$options": "i"}},
+                {"tags": {"$in": [search]}}
+            ]
+        }
+        visibility = base_query.pop("$or")
+        base_query = {**base_query, "$and": [{"$or": visibility}, search_or]}
+
+    templates = await db.templates.find(base_query, {"_id": 0}).to_list(100)
     
     return {
         "templates": templates,
@@ -375,31 +395,35 @@ async def get_template(template_id: str):
 async def create_template(
     template: TemplateCreate,
     user_id: str = "guest",
-    user_type: str = "user"
+    user_type: str = "user",
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Create a new template"""
+    """Create a new template owned by the calling tenant."""
     db = await get_database()
-    
-    # Check for duplicate name in same category
+
+    # Duplicate-name check is scoped to this tenant — two tenants can each
+    # have their own "Welcome" template in the same category.
     existing = await db.templates.find_one({
+        "company_id": tenant_id,
         "name": template.name,
         "category": template.category
     })
-    
+
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Template with this name already exists in this category"
         )
-    
+
     template_doc = {
         "id": str(uuid.uuid4()),
+        "company_id": tenant_id,
         **template.model_dump(),
         "created_by": user_id,
         "created_by_type": user_type,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
     await db.templates.insert_one(template_doc)
     
     # Remove _id for response
@@ -412,19 +436,38 @@ async def create_template(
 async def update_template(
     template_id: str,
     update: TemplateUpdate,
-    user_id: str = "guest"
+    user_id: str = "guest",
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Update an existing template"""
+    """Update an existing template.
+
+    A tenant can only update templates they own. Global system templates
+    (no `company_id`) cannot be edited via this endpoint — they're seeded
+    by `init_default_templates` and modified there.
+    """
     db = await get_database()
-    
+
     template = await db.templates.find_one({"id": template_id})
-    
+
     if not template:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found"
         )
-    
+
+    # Tenant ownership check first — return 404 (not 403) for cross-tenant
+    # to avoid leaking existence of foreign templates.
+    if template.get("company_id") and template["company_id"] != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Template not found"
+        )
+    if not template.get("company_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot edit global system template via this endpoint"
+        )
+
     # Only allow owner or admin to update
     if template["created_by"] != user_id and template["created_by"] != "system":
         raise HTTPException(
@@ -445,25 +488,36 @@ async def update_template(
 
 
 @router.delete("/{template_id}")
-async def delete_template(template_id: str, user_id: str = "guest"):
-    """Delete a template"""
+async def delete_template(
+    template_id: str,
+    user_id: str = "guest",
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Delete a template. Tenant ownership enforced."""
     db = await get_database()
-    
+
     template = await db.templates.find_one({"id": template_id})
-    
+
     if not template:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found"
         )
-    
+
+    # Cross-tenant → 404 to avoid leaking existence.
+    if template.get("company_id") and template["company_id"] != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Template not found"
+        )
+
     # Only allow owner or admin to delete (not system templates)
     if template["created_by"] == "system":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete system templates"
         )
-    
+
     if template["created_by"] != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -512,18 +566,20 @@ async def save_message_as_template(
     body: str,
     subject: Optional[str] = None,
     user_id: str = "guest",
-    user_type: str = "user"
+    user_type: str = "user",
+    tenant_id: str = Depends(get_tenant_id),
 ):
     """Save a new message format as a template (for users to save custom formats)"""
     db = await get_database()
-    
+
     # Extract variables from body (look for {{variable}} pattern)
     import re
     variables = re.findall(r'\{\{(\w+)\}\}', body)
     variables = list(set(variables))  # Remove duplicates
-    
+
     template_doc = {
         "id": str(uuid.uuid4()),
+        "company_id": tenant_id,
         "name": name,
         "category": category,
         "subject": subject,
@@ -547,12 +603,15 @@ async def save_message_as_template(
 
 
 @router.get("/user/{user_id}")
-async def get_user_templates(user_id: str):
-    """Get templates created by a specific user"""
+async def get_user_templates(
+    user_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Get templates created by a specific user (tenant-scoped)."""
     db = await get_database()
-    
+
     templates = await db.templates.find(
-        {"created_by": user_id},
+        {"company_id": tenant_id, "created_by": user_id},
         {"_id": 0}
     ).to_list(100)
     

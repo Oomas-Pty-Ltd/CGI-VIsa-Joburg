@@ -57,10 +57,15 @@ class ComplianceService:
     async def create_export_request(
         self,
         db,
-        user_id: str
+        user_id: str,
+        company_id: str,
     ) -> DataExportRequest:
-        """Create a data export request (GDPR Article 15 & 20)"""
-        
+        """Create a data export request (GDPR Article 15 & 20).
+
+        Tenant-scoped: the request itself carries company_id so a download
+        attempt from a different tenant's session can be rejected even if
+        the request_id leaks."""
+
         request = DataExportRequest(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -68,49 +73,64 @@ class ComplianceService:
             status="pending",
             requested_at=datetime.now(timezone.utc).isoformat()
         )
-        
-        await db.data_requests.insert_one(request.model_dump())
-        
-        logger.info(f"[GDPR] Export request created: {request.id} for user {user_id}")
-        
+
+        doc = request.model_dump()
+        doc["company_id"] = company_id
+        await db.data_requests.insert_one(doc)
+
+        logger.info(f"[GDPR] Export request created: {request.id} for user {user_id} (tenant={company_id})")
+
         return request
-    
+
     async def process_export_request(
         self,
         db,
-        request_id: str
+        request_id: str,
+        company_id: str,
     ) -> Dict[str, Any]:
-        """Process and generate data export"""
-        
-        # Get request
-        request_doc = await db.data_requests.find_one({"id": request_id}, {"_id": 0})
+        """Process and generate data export.
+
+        The export ONLY contains records owned by the calling tenant —
+        every collection scan is filtered by company_id so the same
+        user_id under a different tenant (rare but possible with shared
+        identity providers) cannot leak across."""
+
+        # Get request — must belong to the calling tenant
+        request_doc = await db.data_requests.find_one(
+            {"id": request_id, "company_id": company_id}, {"_id": 0}
+        )
         if not request_doc:
             return {"success": False, "error": "Request not found"}
-        
+
         user_id = request_doc['user_id']
-        
+
         # Update status to processing
         await db.data_requests.update_one(
-            {"id": request_id},
+            {"id": request_id, "company_id": company_id},
             {"$set": {"status": "processing"}}
         )
-        
+
         try:
             export_data = {}
-            
+
             # Collect data from each collection
             for collection_name in self.collections_to_export:
                 collection = db[collection_name]
-                
-                # Find user's data
+
+                # Find user's data — scoped to this tenant so we don't
+                # leak records that happen to share the user_id under
+                # a different company.
                 cursor = collection.find(
-                    {"$or": [
-                        {"user_id": user_id},
-                        {"id": user_id}  # For users collection
-                    ]},
+                    {
+                        "company_id": company_id,
+                        "$or": [
+                            {"user_id": user_id},
+                            {"id": user_id}  # For users collection
+                        ],
+                    },
                     {"_id": 0, "password": 0}  # Exclude sensitive fields
                 )
-                
+
                 docs = await cursor.to_list(length=10000)
                 if docs:
                     export_data[collection_name] = docs
@@ -166,7 +186,7 @@ For questions, contact: privacy@sevasetu.gov.in
                          __import__('datetime').timedelta(days=7)).isoformat()
             
             await db.data_requests.update_one(
-                {"id": request_id},
+                {"id": request_id, "company_id": company_id},
                 {
                     "$set": {
                         "status": "completed",
@@ -175,11 +195,12 @@ For questions, contact: privacy@sevasetu.gov.in
                     }
                 }
             )
-            
+
             # Store export data temporarily
             await db.data_exports.insert_one({
                 "request_id": request_id,
                 "user_id": user_id,
+                "company_id": company_id,
                 "data_base64": zip_base64,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "expires_at": expires_at
@@ -197,7 +218,7 @@ For questions, contact: privacy@sevasetu.gov.in
         except Exception as e:
             logger.error(f"[GDPR] Export failed: {str(e)}")
             await db.data_requests.update_one(
-                {"id": request_id},
+                {"id": request_id, "company_id": company_id},
                 {
                     "$set": {
                         "status": "failed",
@@ -206,39 +227,43 @@ For questions, contact: privacy@sevasetu.gov.in
                 }
             )
             return {"success": False, "error": str(e)}
-    
+
     async def download_export(
         self,
         db,
         request_id: str,
-        user_id: str
+        user_id: str,
+        company_id: str,
     ) -> Optional[bytes]:
-        """Download exported data"""
-        
+        """Download exported data. Tenant-scoped — the export record must
+        belong to the same tenant as the calling session."""
+
         export = await db.data_exports.find_one({
             "request_id": request_id,
-            "user_id": user_id
+            "user_id": user_id,
+            "company_id": company_id,
         }, {"_id": 0})
-        
+
         if not export:
             return None
-        
+
         # Check expiry
         if export.get('expires_at'):
             expires = datetime.fromisoformat(export['expires_at'].replace('Z', '+00:00'))
             if datetime.now(timezone.utc) > expires:
                 logger.warning(f"[GDPR] Export download expired: {request_id}")
                 return None
-        
+
         return base64.b64decode(export['data_base64'])
-    
+
     async def create_deletion_request(
         self,
         db,
-        user_id: str
+        user_id: str,
+        company_id: str,
     ) -> DataExportRequest:
-        """Create a data deletion request (GDPR Article 17 - Right to Erasure)"""
-        
+        """Create a data deletion request (GDPR Article 17 - Right to Erasure)."""
+
         request = DataExportRequest(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -246,56 +271,68 @@ For questions, contact: privacy@sevasetu.gov.in
             status="pending",
             requested_at=datetime.now(timezone.utc).isoformat()
         )
-        
-        await db.data_requests.insert_one(request.model_dump())
-        
-        logger.info(f"[GDPR] Deletion request created: {request.id} for user {user_id}")
-        
+
+        doc = request.model_dump()
+        doc["company_id"] = company_id
+        await db.data_requests.insert_one(doc)
+
+        logger.info(f"[GDPR] Deletion request created: {request.id} for user {user_id} (tenant={company_id})")
+
         return request
-    
+
     async def process_deletion_request(
         self,
         db,
         request_id: str,
+        company_id: str,
         confirm: bool = False
     ) -> Dict[str, Any]:
-        """Process data deletion request"""
-        
+        """Process data deletion request.
+
+        Only deletes records belonging to the calling tenant — without this
+        a deletion request could wipe a user's records under another tenant
+        if the user_id happens to be reused across tenants."""
+
         if not confirm:
             return {"success": False, "error": "Deletion must be confirmed"}
-        
-        # Get request
-        request_doc = await db.data_requests.find_one({"id": request_id}, {"_id": 0})
+
+        # Get request — must belong to the calling tenant
+        request_doc = await db.data_requests.find_one(
+            {"id": request_id, "company_id": company_id}, {"_id": 0}
+        )
         if not request_doc:
             return {"success": False, "error": "Request not found"}
-        
+
         user_id = request_doc['user_id']
-        
+
         # Update status to processing
         await db.data_requests.update_one(
-            {"id": request_id},
+            {"id": request_id, "company_id": company_id},
             {"$set": {"status": "processing"}}
         )
-        
+
         try:
             deletion_results = {}
-            
+
             for collection_name in self.collections_to_delete:
                 collection = db[collection_name]
-                
-                # Delete user's data
+
+                # Delete user's data — tenant-scoped.
                 result = await collection.delete_many({
+                    "company_id": company_id,
                     "$or": [
                         {"user_id": user_id},
                         {"id": user_id}
                     ]
                 })
-                
+
                 deletion_results[collection_name] = result.deleted_count
-            
-            # Anonymize user record instead of deleting (for audit purposes)
+
+            # Anonymize user record instead of deleting (for audit purposes).
+            # Tenant-scoped — without company_id we could overwrite a user
+            # in a different tenant that happens to share this user_id.
             await db.users.update_one(
-                {"id": user_id},
+                {"id": user_id, "company_id": company_id},
                 {
                     "$set": {
                         "email": f"deleted_{user_id[:8]}@anonymized.local",
@@ -306,10 +343,10 @@ For questions, contact: privacy@sevasetu.gov.in
                     }
                 }
             )
-            
+
             # Update request
             await db.data_requests.update_one(
-                {"id": request_id},
+                {"id": request_id, "company_id": company_id},
                 {
                     "$set": {
                         "status": "completed",
@@ -317,7 +354,7 @@ For questions, contact: privacy@sevasetu.gov.in
                     }
                 }
             )
-            
+
             # Log deletion for audit (required even for deleted users)
             from services.audit_service import audit_service, AuditCategory
             await audit_service.log_data_deletion(
@@ -326,24 +363,25 @@ For questions, contact: privacy@sevasetu.gov.in
                 user_type="user",
                 resource_type="user_account",
                 resource_id=user_id,
+                company_id=company_id,
                 deleted_data={"collections_affected": list(deletion_results.keys())},
                 reason="GDPR Article 17 - Right to Erasure"
             )
-            
+
             total_deleted = sum(deletion_results.values())
             logger.info(f"[GDPR] Deletion completed: {request_id}, {total_deleted} records deleted")
-            
+
             return {
                 "success": True,
                 "request_id": request_id,
                 "records_deleted": total_deleted,
                 "breakdown": deletion_results
             }
-            
+
         except Exception as e:
             logger.error(f"[GDPR] Deletion failed: {str(e)}")
             await db.data_requests.update_one(
-                {"id": request_id},
+                {"id": request_id, "company_id": company_id},
                 {
                     "$set": {
                         "status": "failed",
@@ -352,14 +390,19 @@ For questions, contact: privacy@sevasetu.gov.in
                 }
             )
             return {"success": False, "error": str(e)}
-    
+
     async def get_user_data_summary(
         self,
         db,
-        user_id: str
+        user_id: str,
+        company_id: str,
     ) -> Dict[str, Any]:
-        """Get summary of user's data (for transparency)"""
-        
+        """Get summary of user's data (for transparency).
+
+        Counts only records owned by the calling tenant — a user logged
+        into tenant A should see what A holds about them, not what other
+        tenants might hold under the same user_id."""
+
         summary = {
             "user_id": user_id,
             "data_collected": {},
@@ -367,10 +410,11 @@ For questions, contact: privacy@sevasetu.gov.in
             "consent_status": {},
             "data_requests": []
         }
-        
+
         for collection_name in self.collections_to_export:
             collection = db[collection_name]
             count = await collection.count_documents({
+                "company_id": company_id,
                 "$or": [
                     {"user_id": user_id},
                     {"id": user_id}
@@ -378,26 +422,41 @@ For questions, contact: privacy@sevasetu.gov.in
             })
             if count > 0:
                 summary["data_collected"][collection_name] = count
-        
+
         # Get pending requests
         cursor = db.data_requests.find(
-            {"user_id": user_id},
+            {"user_id": user_id, "company_id": company_id},
             {"_id": 0}
         ).sort("requested_at", -1).limit(10)
-        
+
         summary["data_requests"] = await cursor.to_list(length=10)
-        
+
         return summary
-    
-    async def invalidate_user_tokens(self, db, user_id: str):
-        """Invalidate all tokens for a user (for logout everywhere)"""
+
+    async def invalidate_user_tokens(self, db, user_id: str, company_id: str):
+        """Invalidate all tokens for a user (for logout everywhere).
+
+        Tenant-scoped so the blacklist row identifies which tenant's user
+        was invalidated. ``auth_utils.verify_token`` consults this list
+        (Sprint-14) and rejects any JWT whose ``iat`` predates the
+        invalidation timestamp. We bust the auth_utils TTL cache so the
+        change is effective on the very next request rather than waiting
+        for the 60s cache to expire."""
         await db.invalidated_tokens.insert_one({
             "user_id": user_id,
+            "company_id": company_id,
             "invalidated_at": datetime.now(timezone.utc).isoformat(),
             "reason": "user_request"
         })
-        
-        logger.info(f"[AUTH] Invalidated all tokens for user {user_id}")
+
+        # Bust the per-process cache so this token is rejected immediately
+        try:
+            from auth_utils import invalidate_token_cache
+            invalidate_token_cache(user_id, company_id)
+        except Exception as exc:
+            logger.warning(f"[AUTH] cache invalidation failed (non-fatal): {exc}")
+
+        logger.info(f"[AUTH] Invalidated all tokens for user {user_id} (tenant={company_id})")
 
 
 # Singleton instance

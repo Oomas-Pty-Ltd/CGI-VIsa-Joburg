@@ -39,14 +39,13 @@ class OpenAITextToSpeech:
         text: str,
         model: str = "tts-1",
         voice: str = "nova",
-        speed: float = 1.0
+        speed: float = 1.0,
+        instructions: str = None
     ) -> str:
         client = openai.AsyncOpenAI(api_key=self.api_key)
-        response = await client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=text,
-            speed=speed
-        )
+        kwargs = dict(model=model, voice=voice, input=text, speed=speed)
+        if instructions:
+            kwargs["instructions"] = instructions
+        response = await client.audio.speech.create(**kwargs)
         audio_bytes = response.content
         return base64.b64encode(audio_bytes).decode("utf-8")

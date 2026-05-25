@@ -13,7 +13,7 @@ Manages versioned knowledge base:
 import os
 import uuid
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
@@ -47,6 +47,7 @@ class KnowledgeStatus(Enum):
 class KnowledgeEntry:
     """Knowledge base entry"""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None  # Tenant that owns this entry
     category: KnowledgeCategory = KnowledgeCategory.GENERAL
     title: str = ""
     question: str = ""  # FAQ question
@@ -63,10 +64,15 @@ class KnowledgeEntry:
     updated_by: Optional[str] = None
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
-    
+    # event_status: one of "past" | "present" | "future" | "general"
+    # Auto-derived by the PDF upload pipeline from dates in the text; can also
+    # be set manually for short events or when date parsing didn't fire.
+    event_status: Optional[str] = None
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
+            "company_id": self.company_id,
             "category": self.category.value,
             "title": self.title,
             "question": self.question,
@@ -82,7 +88,8 @@ class KnowledgeEntry:
             "updated_at": self.updated_at,
             "updated_by": self.updated_by,
             "valid_from": self.valid_from,
-            "valid_until": self.valid_until
+            "valid_until": self.valid_until,
+            "event_status": self.event_status,
         }
 
 
@@ -686,23 +693,37 @@ class KnowledgeService:
         self.initialized = False
     
     async def initialize(self):
-        """Initialize knowledge base.
+        """Initialize the default tenant's knowledge base.
+
+        The DEFAULT_KNOWLEDGE seed is CGI-Johannesburg-specific so it's
+        scoped to ``config.COMPANY_ID`` (the env-configured default
+        tenant). New tenants don't get any auto-seed — they upload their
+        own data via the super-admin knowledge endpoints. This keeps the
+        seed from leaking into other tenants' searches.
 
         Flow:
-        1. If DB is empty → attempt live scrape of https://www.cgijoburg.gov.in/
-           and populate from scraped content (stored as a single 'live' entry).
+        1. If the default tenant's KB is empty → attempt live scrape
+           of https://www.cgijoburg.gov.in/ and store as one 'live' entry.
         2. Always upsert DEFAULT_KNOWLEDGE entries (PDF-verified data) so
            corrections are applied on every restart regardless of live scrape.
         """
         if self.initialized:
             return
 
-        db = await get_database()
-        count = await db.knowledge_base.count_documents({})
+        # The default-tenant seed only runs if COMPANY_ID is set — otherwise
+        # initialise is a no-op (e.g. CI without a tenant configured yet).
+        from config import COMPANY_ID as _default_tenant
+        if not _default_tenant:
+            logger.info("[KB INIT] COMPANY_ID not set — skipping default-tenant seed")
+            self.initialized = True
+            return
 
-        # ── Step 1: Live scrape on first run (empty DB) ──────────────────────
+        db = await get_database()
+        count = await db.knowledge_base.count_documents({"company_id": _default_tenant})
+
+        # ── Step 1: Live scrape on first run (empty KB for default tenant) ──
         if count == 0:
-            logger.info("[KB INIT] Database empty — attempting live scrape of cgijoburg.gov.in")
+            logger.info("[KB INIT] Default tenant KB empty — attempting live scrape of cgijoburg.gov.in")
             try:
                 scraped = await scrape_cgi_joburg()
                 page_content = scraped.get("page_content", "")
@@ -710,6 +731,7 @@ class KnowledgeService:
 
                 if page_content and pages_crawled > 0:
                     live_entry = KnowledgeEntry(
+                        company_id=_default_tenant,
                         category=KnowledgeCategory.GENERAL,
                         title="Live Scraped Content — CGI Johannesburg",
                         question="What is the latest information from the CGI Johannesburg website?",
@@ -720,7 +742,7 @@ class KnowledgeService:
                         created_by="system_scraper"
                     )
                     await db.knowledge_base.update_one(
-                        {"title": live_entry.title},
+                        {"title": live_entry.title, "company_id": _default_tenant},
                         {"$set": live_entry.to_dict()},
                         upsert=True
                     )
@@ -733,6 +755,7 @@ class KnowledgeService:
         # ── Step 2: Always upsert PDF-verified DEFAULT_KNOWLEDGE ────────────
         for entry_data in DEFAULT_KNOWLEDGE:
             entry = KnowledgeEntry(
+                company_id=_default_tenant,
                 category=KnowledgeCategory(entry_data["category"]),
                 title=entry_data["title"],
                 question=entry_data["question"],
@@ -742,33 +765,36 @@ class KnowledgeService:
                 source_verified=entry_data["source_verified"]
             )
             await db.knowledge_base.update_one(
-                {"title": entry_data["title"]},
+                {"title": entry_data["title"], "company_id": _default_tenant},
                 {"$set": entry.to_dict()},
                 upsert=True
             )
 
-        logger.info(f"[KB INIT] Upserted {len(DEFAULT_KNOWLEDGE)} verified knowledge entries")
+        logger.info(f"[KB INIT] Upserted {len(DEFAULT_KNOWLEDGE)} verified entries for tenant {_default_tenant}")
         self.initialized = True
     
     async def search(
         self,
         query: str,
+        company_id: str,
         category: KnowledgeCategory = None,
         limit: int = 5
     ) -> List[Dict]:
-        """
-        Search knowledge base for relevant entries.
-        """
+        """Search knowledge base for relevant entries within a tenant.
+
+        ``company_id`` is required — searching cross-tenant would mix one
+        tenant's FAQs into another tenant's bot responses (e.g. CGI
+        Johannesburg answers showing up for a Mumbai consulate user)."""
         await self.initialize()
-        
+
         db = await get_database()
         query_lower = query.lower()
-        
-        # Build search filter
-        filter_query = {"status": "active"}
+
+        # Build search filter (tenant-scoped, active entries only)
+        filter_query: Dict[str, Any] = {"status": "active", "company_id": company_id}
         if category:
             filter_query["category"] = category.value
-        
+
         # Get all active entries (500 gives full coverage for large PDF knowledge bases)
         entries = await db.knowledge_base.find(
             filter_query,
@@ -891,25 +917,42 @@ class KnowledgeService:
 
         return boost
     
-    async def get_entry(self, entry_id: str) -> Optional[Dict]:
-        """Get knowledge entry by ID"""
+    async def get_entry(self, entry_id: str, company_id: Optional[str] = None) -> Optional[Dict]:
+        """Get knowledge entry by ID. Pass ``company_id`` to scope the
+        lookup to one tenant (defensive when used from a tenant-scoped UI);
+        omit for super-admin cross-tenant access."""
         db = await get_database()
-        return await db.knowledge_base.find_one({"id": entry_id}, {"_id": 0})
-    
+        query: Dict[str, Any] = {"id": entry_id}
+        if company_id is not None:
+            query["company_id"] = company_id
+        return await db.knowledge_base.find_one(query, {"_id": 0})
+
     async def create_entry(
         self,
+        company_id: str,
         category: KnowledgeCategory,
         title: str,
         question: str,
         answer: str,
         keywords: List[str],
         source: str = "",
-        created_by: str = "admin"
+        created_by: str = "admin",
+        valid_from: Optional[str] = None,
+        valid_until: Optional[str] = None,
+        event_status: Optional[str] = None,
     ) -> KnowledgeEntry:
-        """Create new knowledge entry"""
+        """Create new knowledge entry. ``company_id`` is required — every
+        entry belongs to exactly one tenant. Bot searches are tenant-scoped
+        so untagged entries would simply never surface.
+
+        ``valid_from`` / ``valid_until`` / ``event_status`` are optional
+        overrides for short events or for entries where automatic date
+        parsing isn't appropriate (manual KB entry creation never runs
+        the parser)."""
         db = await get_database()
-        
+
         entry = KnowledgeEntry(
+            company_id=company_id,
             category=category,
             title=title,
             question=question,
@@ -917,113 +960,133 @@ class KnowledgeService:
             keywords=keywords,
             source=source,
             created_by=created_by,
-            status=KnowledgeStatus.PENDING_REVIEW
+            status=KnowledgeStatus.PENDING_REVIEW,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            event_status=event_status,
         )
-        
+
         await db.knowledge_base.insert_one(entry.to_dict())
-        
-        logger.info(f"Created knowledge entry: {entry.id} - {title}")
-        
+
+        logger.info(f"Created knowledge entry: {entry.id} - {title} (tenant={company_id})")
+
         return entry
-    
+
     async def update_entry(
         self,
         entry_id: str,
         updates: Dict,
-        updated_by: str = "admin"
+        updated_by: str = "admin",
+        company_id: Optional[str] = None,
     ) -> bool:
-        """
-        Update knowledge entry with version increment.
-        Old version is preserved in history.
-        """
+        """Update knowledge entry with version increment. Old version is
+        preserved in history. Pass ``company_id`` to require the entry
+        belong to that tenant — without it, a super-admin can mutate any
+        entry by ID."""
         db = await get_database()
-        
-        # Get current entry
-        current = await db.knowledge_base.find_one({"id": entry_id})
+
+        # Get current entry — scoped to caller's tenant if specified
+        query: Dict[str, Any] = {"id": entry_id}
+        if company_id is not None:
+            query["company_id"] = company_id
+        current = await db.knowledge_base.find_one(query)
         if not current:
             return False
-        
+
         # Store history
         history_entry = {
             "knowledge_id": entry_id,
+            "company_id": current.get("company_id"),
             "version": current["version"],
             "data": current,
             "archived_at": datetime.now(timezone.utc).isoformat()
         }
         await db.knowledge_history.insert_one(history_entry)
-        
+
         # Update entry
         updates["version"] = current["version"] + 1
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         updates["updated_by"] = updated_by
-        
+        # Never let the update payload reassign tenancy
+        updates.pop("company_id", None)
+
         result = await db.knowledge_base.update_one(
-            {"id": entry_id},
+            query,
             {"$set": updates}
         )
-        
+
         logger.info(f"Updated knowledge entry: {entry_id} to version {updates['version']}")
-        
+
         return result.modified_count > 0
-    
-    async def get_entry_history(self, entry_id: str) -> List[Dict]:
-        """Get version history for an entry"""
+
+    async def get_entry_history(self, entry_id: str, company_id: Optional[str] = None) -> List[Dict]:
+        """Get version history for an entry, optionally scoped by tenant."""
         db = await get_database()
-        
+
+        query: Dict[str, Any] = {"knowledge_id": entry_id}
+        if company_id is not None:
+            query["company_id"] = company_id
+
         history = await db.knowledge_history.find(
-            {"knowledge_id": entry_id},
-            {"_id": 0}
+            query, {"_id": 0}
         ).sort("version", -1).to_list(50)
-        
+
         return history
-    
+
     async def get_all_entries(
         self,
         category: KnowledgeCategory = None,
         status: KnowledgeStatus = None,
-        limit: int = 100
+        limit: int = 100,
+        company_id: Optional[str] = None,
     ) -> List[Dict]:
-        """Get all knowledge entries with optional filters"""
+        """Get all knowledge entries with optional filters. ``company_id=None``
+        returns across all tenants (super-admin); pass it for a
+        tenant-scoped admin view."""
         db = await get_database()
-        
-        filter_query = {}
+
+        filter_query: Dict[str, Any] = {}
         if category:
             filter_query["category"] = category.value
         if status:
             filter_query["status"] = status.value
-        
+        if company_id is not None:
+            filter_query["company_id"] = company_id
+
         entries = await db.knowledge_base.find(
             filter_query,
             {"_id": 0}
         ).sort("updated_at", -1).limit(limit).to_list(limit)
-        
+
         return entries
-    
-    async def get_stats(self) -> Dict:
-        """Get knowledge base statistics"""
+
+    async def get_stats(self, company_id: Optional[str] = None) -> Dict:
+        """Get knowledge base statistics, optionally tenant-scoped."""
         db = await get_database()
-        
+
+        base_match: Dict[str, Any] = {}
+        if company_id is not None:
+            base_match["company_id"] = company_id
+
         # Count by category
-        category_pipeline = [
-            {"$group": {
-                "_id": "$category",
-                "count": {"$sum": 1}
-            }}
-        ]
+        category_pipeline = []
+        if base_match:
+            category_pipeline.append({"$match": dict(base_match)})
+        category_pipeline.append({"$group": {"_id": "$category", "count": {"$sum": 1}}})
         category_counts = await db.knowledge_base.aggregate(category_pipeline).to_list(20)
-        
+
         # Count by status
-        status_pipeline = [
-            {"$group": {
-                "_id": "$status",
-                "count": {"$sum": 1}
-            }}
-        ]
+        status_pipeline = []
+        if base_match:
+            status_pipeline.append({"$match": dict(base_match)})
+        status_pipeline.append({"$group": {"_id": "$status", "count": {"$sum": 1}}})
         status_counts = await db.knowledge_base.aggregate(status_pipeline).to_list(10)
-        
-        total = await db.knowledge_base.count_documents({})
-        verified = await db.knowledge_base.count_documents({"source_verified": True})
-        
+
+        total_filter = dict(base_match)
+        total = await db.knowledge_base.count_documents(total_filter)
+        verified_filter = {**total_filter, "source_verified": True}
+        verified = await db.knowledge_base.count_documents(verified_filter)
+
         return {
             "total_entries": total,
             "verified_entries": verified,

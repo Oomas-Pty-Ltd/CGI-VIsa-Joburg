@@ -42,6 +42,7 @@ from services.email_service import (
     send_confirmation_email,
 )
 from services.pdf_service import generate_application_pdf
+from tenant import get_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,20 @@ async def _get_session(authorization: str, db) -> dict:
         {"session_id": token},
         {"$set": {"last_active": _now().isoformat()}}
     )
+    # Ensure company_id is on the session dict. New sessions write it at
+    # creation time; legacy sessions fall back to their user row.
+    if not session.get("company_id"):
+        user = await db.seva_setu_users.find_one(
+            {"id": session.get("user_id")},
+            {"_id": 0, "company_id": 1},
+        )
+        if user and user.get("company_id"):
+            session["company_id"] = user["company_id"]
+            # Backfill so subsequent reads don't pay the join.
+            await db.seva_setu_sessions.update_one(
+                {"session_id": token},
+                {"$set": {"company_id": user["company_id"]}},
+            )
     return session
 
 
@@ -335,48 +350,60 @@ async def get_services():
 
 
 @router.post("/auth/start")
-async def start_auth(req: StartAuthRequest):
+async def start_auth(
+    req: StartAuthRequest,
+    company_id: str = Depends(get_tenant_id),
+):
     """
     Step 1: collect name + email, create/find user, send OTP.
     Returns whether this is a new or existing user.
+
+    The tenant comes from X-Company-Id (the widget's data-company-id attribute).
+    A user with the same email can exist independently in different tenants.
     """
     db = await get_database()
     email = req.email
     name = req.name
 
-    # Check lockout
+    # Check lockout (tenant-scoped — one tenant's lockout doesn't affect another)
     lockout = await db.otp_tokens.find_one({
+        "company_id": company_id,
         "email": email,
         "locked_until": {"$exists": True, "$gt": _now().isoformat()}
     })
     if lockout:
         raise HTTPException(status_code=429, detail="Too many failed attempts. Please try again in 5 minutes.")
 
-    # Check existing user
-    user = await db.seva_setu_users.find_one({"email": email})
+    # Check existing user within this tenant
+    user = await db.seva_setu_users.find_one({"company_id": company_id, "email": email})
     is_new = user is None
 
     if is_new:
         user_id = str(uuid.uuid4())
         await db.seva_setu_users.insert_one({
             "id": user_id,
+            "company_id": company_id,
             "name": name,
             "email": email,
             "created_at": _now().isoformat(),
         })
     else:
         user_id = user["id"]
-        # Update name in case it changed
-        await db.seva_setu_users.update_one({"email": email}, {"$set": {"name": name}})
+        # Update name in case it changed (scoped — no cross-tenant write)
+        await db.seva_setu_users.update_one(
+            {"company_id": company_id, "email": email},
+            {"$set": {"name": name}},
+        )
 
-    # Invalidate any previous unused OTPs for this email
-    await db.otp_tokens.delete_many({"email": email, "used": False})
+    # Invalidate any previous unused OTPs for this email (tenant-scoped)
+    await db.otp_tokens.delete_many({"company_id": company_id, "email": email, "used": False})
 
     # Create OTP record
     otp_id = str(uuid.uuid4())
     expires_at = (_now() + timedelta(minutes=OTP_TTL_MINUTES)).isoformat()
     await db.otp_tokens.insert_one({
         "id": otp_id,
+        "company_id": company_id,
         "email": email,
         "otp": OTP_DEV,  # replace with random in prod
         "expires_at": expires_at,
@@ -401,15 +428,21 @@ async def start_auth(req: StartAuthRequest):
 
 
 @router.post("/auth/verify-otp")
-async def verify_otp(req: VerifyOtpRequest):
+async def verify_otp(
+    req: VerifyOtpRequest,
+    company_id: str = Depends(get_tenant_id),
+):
     """
     Step 2: verify OTP → create session, return session_token + user info.
+
+    OTP + user lookup are scoped to the tenant from X-Company-Id, so an OTP
+    issued for tenant A can't be exchanged for a session under tenant B.
     """
     db = await get_database()
     email = req.email.strip().lower()
     otp_input = req.otp.strip()
 
-    token_doc = await db.otp_tokens.find_one({"email": email, "used": False})
+    token_doc = await db.otp_tokens.find_one({"company_id": company_id, "email": email, "used": False})
     if not token_doc:
         raise HTTPException(status_code=400, detail="No active OTP found. Please request a new one.")
 
@@ -441,25 +474,26 @@ async def verify_otp(req: VerifyOtpRequest):
     # Mark OTP used
     await db.otp_tokens.update_one({"id": token_doc["id"]}, {"$set": {"used": True}})
 
-    # Fetch user
-    user = await db.seva_setu_users.find_one({"email": email})
+    # Fetch user within this tenant
+    user = await db.seva_setu_users.find_one({"company_id": company_id, "email": email})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # Create session
+    # Create session — store company_id so downstream queries don't need a join
     session_token = str(uuid.uuid4())
     await db.seva_setu_sessions.insert_one({
         "session_id": session_token,
         "user_id": user["id"],
+        "company_id": company_id,
         "email": email,
         "active": True,
         "last_active": _now().isoformat(),
         "created_at": _now().isoformat(),
     })
 
-    # Get existing applications
+    # Get existing applications (tenant-scoped)
     existing_apps = await db.seva_setu_applications.find(
-        {"user_id": user["id"]}
+        {"company_id": company_id, "user_id": user["id"]}
     ).sort("created_at", -1).to_list(length=20)
 
     return {
@@ -488,6 +522,7 @@ async def logout(req: Optional[LogoutRequest] = None, authorization: str = Heade
     if req and req.chat_history and session:
         await db.seva_setu_chat_history.insert_one({
             "user_id": session.get("user_id"),
+            "company_id": session.get("company_id"),
             "email": session.get("email"),
             "session_id": token,
             "messages": req.chat_history,
@@ -513,7 +548,7 @@ async def create_application(req: CreateApplicationRequest, authorization: str =
         raise HTTPException(status_code=400, detail=f"Unknown service: {service_type}")
 
     svc = SERVICE_CATALOGUE[service_type]
-    user = await db.seva_setu_users.find_one({"id": session["user_id"]})
+    user = await db.seva_setu_users.find_one({"id": session["user_id"], "company_id": session["company_id"]})
     reference_id = _ref_id()
 
     app_id = str(uuid.uuid4())
@@ -524,6 +559,7 @@ async def create_application(req: CreateApplicationRequest, authorization: str =
         "id": app_id,
         "reference_id": reference_id,
         "user_id": session["user_id"],
+        "company_id": session["company_id"],
         "service_type": service_type,
         "service_category": svc["category"],
         "service_name": svc["name"],
@@ -565,7 +601,7 @@ async def list_applications(authorization: str = Header(default="")):
     session = await _get_session(authorization, db)
 
     apps = await db.seva_setu_applications.find(
-        {"user_id": session["user_id"]}
+        {"company_id": session["company_id"], "user_id": session["user_id"]}
     ).sort("created_at", -1).to_list(length=50)
 
     return {
@@ -590,7 +626,7 @@ async def get_application(app_id: str, authorization: str = Header(default="")):
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
 
@@ -617,7 +653,7 @@ async def update_application(app_id: str, req: UpdateApplicationRequest, authori
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
     if app["status"] in ("confirmed", "cancelled"):
@@ -630,8 +666,13 @@ async def update_application(app_id: str, req: UpdateApplicationRequest, authori
     if req.documents is not None:
         updates["documents"] = req.documents
 
-    await db.seva_setu_applications.update_one({"id": app_id}, {"$set": updates})
-    updated = await db.seva_setu_applications.find_one({"id": app_id})
+    await db.seva_setu_applications.update_one(
+        {"id": app_id, "company_id": session["company_id"]},
+        {"$set": updates},
+    )
+    updated = await db.seva_setu_applications.find_one(
+        {"id": app_id, "company_id": session["company_id"]}
+    )
     return {"success": True, "form_data": updated.get("form_data", {}), "documents": updated.get("documents", [])}
 
 
@@ -640,7 +681,7 @@ async def remove_document(app_id: str, doc_id: str, authorization: str = Header(
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
     if app["status"] in ("confirmed", "cancelled"):
@@ -658,7 +699,7 @@ async def remove_document(app_id: str, doc_id: str, authorization: str = Header(
         pass
 
     await db.seva_setu_applications.update_one(
-        {"id": app_id},
+        {"id": app_id, "company_id": session["company_id"]},
         {"$pull": {"documents": {"id": doc_id}}, "$set": {"updated_at": _now().isoformat()}}
     )
     return {"success": True, "message": f"Document '{doc.get('name', '')}' removed."}
@@ -672,20 +713,20 @@ async def submit_application(app_id: str, authorization: str = Header(default=""
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
     if app["status"] in ("confirmed", "cancelled"):
         raise HTTPException(status_code=400, detail="Application already finalised.")
 
-    user = await db.seva_setu_users.find_one({"id": session["user_id"]})
+    user = await db.seva_setu_users.find_one({"id": session["user_id"], "company_id": session["company_id"]})
 
     # Refresh edit token (reset 24h window from now)
     edit_token = str(uuid.uuid4())
     edit_token_expires = (_now() + timedelta(hours=24)).isoformat()
 
     await db.seva_setu_applications.update_one(
-        {"id": app_id},
+        {"id": app_id, "company_id": session["company_id"]},
         {"$set": {
             "status": "submitted",
             "edit_token": edit_token,
@@ -718,13 +759,13 @@ async def confirm_application(app_id: str, authorization: str = Header(default="
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
     if app["status"] == "confirmed":
         raise HTTPException(status_code=400, detail="Application already confirmed.")
 
-    user = await db.seva_setu_users.find_one({"id": session["user_id"]})
+    user = await db.seva_setu_users.find_one({"id": session["user_id"], "company_id": session["company_id"]})
     svc = SERVICE_CATALOGUE.get(app["service_type"], {})
     form_data = app.get("form_data", {})
 
@@ -747,7 +788,7 @@ async def confirm_application(app_id: str, authorization: str = Header(default="
         f.write(pdf_bytes)
 
     await db.seva_setu_applications.update_one(
-        {"id": app_id},
+        {"id": app_id, "company_id": session["company_id"]},
         {"$set": {
             "status": "confirmed",
             "pdf_path": pdf_path,
@@ -777,7 +818,7 @@ async def preview_application_pdf(
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
 
@@ -809,7 +850,7 @@ async def download_pdf(app_id: str, authorization: str = Header(default=""), tok
         authorization = f"Bearer {token}"
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
     if not app.get("pdf_path"):
@@ -849,7 +890,7 @@ async def upload_document(
     if len(raw) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail="File too large. Max size is 5MB.")
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
 
@@ -1027,7 +1068,11 @@ async def confirm_via_review(edit_token: str):
     if app["status"] == "confirmed":
         return {"success": True, "already_confirmed": True, "reference_id": app["reference_id"]}
 
-    user = await db.seva_setu_users.find_one({"id": app["user_id"]})
+    # Scope the user lookup by the application's tenant — the edit_token
+    # entry-point doesn't carry session context, but the loaded app row does.
+    user = await db.seva_setu_users.find_one(
+        {"id": app["user_id"], "company_id": app.get("company_id")}
+    )
     svc = SERVICE_CATALOGUE.get(app["service_type"], {})
     form_data = app.get("form_data", {})
 
@@ -1073,11 +1118,11 @@ async def type_a_finalize(app_id: str, req: TypeAFinalizeRequest, authorization:
     db = await get_database()
     session = await _get_session(authorization, db)
 
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"]})
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
     if not app:
         raise HTTPException(status_code=404, detail="Application not found.")
 
-    user = await db.seva_setu_users.find_one({"id": session["user_id"]})
+    user = await db.seva_setu_users.find_one({"id": session["user_id"], "company_id": session["company_id"]})
     svc = SERVICE_CATALOGUE.get(app["service_type"], {})
 
     gov_ref = req.gov_reference.strip()
@@ -1104,7 +1149,7 @@ async def type_a_finalize(app_id: str, req: TypeAFinalizeRequest, authorization:
         f.write(pdf_bytes)
 
     await db.seva_setu_applications.update_one(
-        {"id": app_id},
+        {"id": app_id, "company_id": session["company_id"]},
         {"$set": {
             "status": "confirmed",
             "form_data": form_data_for_pdf,

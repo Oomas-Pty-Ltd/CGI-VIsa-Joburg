@@ -1,6 +1,12 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { setupWidget } from './lib/widgetConfig';
 import ChatWidget from './components/ChatWidget';
+
+// Resolve company_id from the embed and install API header injectors BEFORE
+// any code in ChatWidget can make its first API call. See lib/widgetConfig.js
+// for the resolution priority (data-company-id → window override → query).
+setupWidget();
 
 // Inject Poppins font if not already on the host page
 if (!document.querySelector('link[href*="fonts.googleapis.com"][href*="Poppins"]')) {

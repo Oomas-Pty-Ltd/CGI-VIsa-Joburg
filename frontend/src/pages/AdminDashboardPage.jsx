@@ -75,7 +75,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const userType = localStorage.getItem("user_type");
     if (!token || userType !== "super_admin") {
-      navigate("/super-admin/login");
+      navigate("/login");
       return;
     }
     loadData();
@@ -101,7 +101,7 @@ export default function AdminDashboardPage() {
         localStorage.removeItem("token");
         localStorage.removeItem("user_type");
         localStorage.removeItem("user_id");
-        navigate("/super-admin/login");
+        navigate("/login");
       } else {
         toast.error("Failed to load dashboard data");
       }
@@ -114,7 +114,7 @@ export default function AdminDashboardPage() {
     localStorage.removeItem("token");
     localStorage.removeItem("user_type");
     localStorage.removeItem("user_id");
-    navigate("/super-admin/login");
+    navigate("/login");
   };
 
   const updateEscalation = async (id, updates) => {

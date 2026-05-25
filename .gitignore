@@ -4,6 +4,9 @@
 .idea/
 .vscode/
 
+# Claude Code — personal/local notes
+CLAUDE.local.md
+
 # Dependencies
 node_modules/
 /node_modules

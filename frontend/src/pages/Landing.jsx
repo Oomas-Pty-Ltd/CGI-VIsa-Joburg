@@ -17,18 +17,10 @@ export default function Landing() {
           <Button
             variant="outline"
             className="border-[#1A2E40] text-[#1A2E40] hover:bg-[#1A2E40] hover:text-white"
-            onClick={() => navigate("/super-admin/login")}
-            data-testid="super-admin-login-btn"
+            onClick={() => navigate("/login")}
+            data-testid="login-btn"
           >
-            Super Admin
-          </Button>
-          <Button
-            variant="outline"
-            className="border-[#1A2E40] text-[#1A2E40] hover:bg-[#1A2E40] hover:text-white"
-            onClick={() => navigate("/admin/login")}
-            data-testid="local-admin-login-btn"
-          >
-            Local Admin
+            Sign in
           </Button>
         </div>
       </nav>

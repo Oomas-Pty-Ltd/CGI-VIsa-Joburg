@@ -62,6 +62,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 class DocumentInfo(BaseModel):
     id: str
     user_id: str
+    company_id: str  # Tenant that owns this document (mandatory — see Sprint 2 audit)
     session_id: Optional[str] = None
     document_type: DocumentType
     filename: str
@@ -231,6 +232,7 @@ class DocumentService:
         self,
         db,
         user_id: str,
+        company_id: str,
         document_type: DocumentType,
         filename: str,
         mime_type: str,
@@ -241,14 +243,19 @@ class DocumentService:
         session_id: Optional[str] = None,
         extracted_data: Optional[Dict[str, Any]] = None
     ) -> DocumentInfo:
-        """Create a new document record in MongoDB"""
-        
+        """Create a new document record in MongoDB.
+
+        ``company_id`` is required — every document is owned by exactly one
+        tenant. Callers thread it from the request's `tenant_id` so a
+        user from tenant A can never write under tenant B's namespace."""
+
         now = datetime.now(timezone.utc).isoformat()
         expiry_status, next_check = self.calculate_expiry_status(expiry_date)
-        
+
         doc = DocumentInfo(
             id=str(uuid.uuid4()),
             user_id=user_id,
+            company_id=company_id,
             session_id=session_id,
             document_type=document_type,
             filename=filename,
@@ -264,32 +271,32 @@ class DocumentService:
             updated_at=now,
             last_checked_at=now
         )
-        
+
         # Store document metadata
         await db.documents.insert_one({
             **doc.model_dump(),
             "encrypted_content": base64.b64encode(encrypted_data).decode('utf-8')
         })
-        
-        logger.info(f"[DOCUMENT] Created document {doc.id} for user {user_id}, status: {expiry_status.value}")
+
+        logger.info(f"[DOCUMENT] Created document {doc.id} for user {user_id} (tenant={company_id}), status: {expiry_status.value}")
         return doc
-    
+
     async def check_documents_for_expiry(self, db) -> List[Dict[str, Any]]:
-        """
-        Check all documents that are due for expiry recheck.
-        Called by scheduled job every day.
-        """
+        """Check all documents due for expiry recheck. Run by the daily
+        scheduled job — intentionally cross-tenant since it's an internal
+        sweep, but each result row now carries `company_id` so downstream
+        notifications can be routed to the right tenant's admin."""
         today = datetime.now(timezone.utc).date().isoformat()
-        
-        # Find documents due for check
+
+        # Find documents due for check (cross-tenant — internal job)
         cursor = db.documents.find({
             "next_check_date": {"$lte": today}
         }, {"_id": 0, "encrypted_content": 0})
-        
+
         updated = []
         async for doc in cursor:
             new_status, new_check_date = self.calculate_expiry_status(doc.get('expiry_date'))
-            
+
             await db.documents.update_one(
                 {"id": doc['id']},
                 {
@@ -301,34 +308,45 @@ class DocumentService:
                     }
                 }
             )
-            
+
             updated.append({
                 "document_id": doc['id'],
                 "user_id": doc['user_id'],
+                "company_id": doc.get('company_id'),
                 "old_status": doc.get('expiry_status'),
                 "new_status": new_status.value,
                 "expiry_date": doc.get('expiry_date')
             })
-            
+
             logger.info(f"[DOCUMENT] Updated expiry status for {doc['id']}: {new_status.value}")
-        
+
         return updated
-    
-    async def get_user_documents(self, db, user_id: str) -> List[Dict[str, Any]]:
-        """Get all documents for a user (without encrypted content)"""
+
+    async def get_user_documents(self, db, user_id: str, company_id: str) -> List[Dict[str, Any]]:
+        """Get all documents for a user (without encrypted content),
+        scoped to the calling tenant. A user_id reused across tenants
+        (unlikely, but possible) cannot leak documents this way."""
         cursor = db.documents.find(
-            {"user_id": user_id},
+            {"user_id": user_id, "company_id": company_id},
             {"_id": 0, "encrypted_content": 0}
         ).sort("created_at", -1)
-        
+
         return await cursor.to_list(length=100)
-    
-    async def get_expiring_documents(self, db, days: int = 30) -> List[Dict[str, Any]]:
-        """Get documents expiring within specified days"""
-        cursor = db.documents.find({
+
+    async def get_expiring_documents(
+        self, db, days: int = 30, company_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get documents expiring within specified days. ``company_id=None``
+        returns across all tenants (admin observability); pass the tenant
+        for a tenant-scoped dashboard."""
+        query: Dict[str, Any] = {
             "expiry_status": {"$in": [DocumentStatus.EXPIRING_SOON.value, DocumentStatus.EXPIRED.value]}
-        }, {"_id": 0, "encrypted_content": 0})
-        
+        }
+        if company_id is not None:
+            query["company_id"] = company_id
+
+        cursor = db.documents.find(query, {"_id": 0, "encrypted_content": 0})
+
         return await cursor.to_list(length=100)
 
 

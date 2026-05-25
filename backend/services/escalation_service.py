@@ -13,7 +13,7 @@ Handles human handoff for complex cases:
 import os
 import uuid
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
@@ -63,11 +63,12 @@ class EscalationRequest:
     conversation_summary: str = ""
     status: EscalationStatus = EscalationStatus.OPEN
     assigned_to: Optional[str] = None
+    company_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     resolved_at: Optional[str] = None
     resolution_notes: Optional[str] = None
-    
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -80,6 +81,7 @@ class EscalationRequest:
             "conversation_summary": self.conversation_summary,
             "status": self.status.value,
             "assigned_to": self.assigned_to,
+            "company_id": self.company_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "resolved_at": self.resolved_at,
@@ -167,16 +169,20 @@ class EscalationService:
         reason: EscalationReason,
         priority: EscalationPriority,
         description: str,
+        company_id: Optional[str] = None,
         conversation_history: List[Dict] = None
     ) -> EscalationRequest:
-        """
-        Create a new escalation ticket.
-        """
+        """Create a new escalation ticket.
+
+        ``company_id`` should always be supplied by the caller — the chat
+        session it was raised from has a tenant. It's optional only to
+        avoid breaking legacy callers during the rollout; once everything
+        is migrated this becomes required."""
         db = await get_database()
-        
+
         # Generate conversation summary
         summary = self._generate_summary(conversation_history or [])
-        
+
         escalation = EscalationRequest(
             session_id=session_id,
             user_identifier=user_identifier,
@@ -184,23 +190,24 @@ class EscalationService:
             reason=reason,
             priority=priority,
             description=description,
-            conversation_summary=summary
+            conversation_summary=summary,
+            company_id=company_id
         )
-        
+
         # Store in database
         await db.escalations.insert_one(escalation.to_dict())
-        
+
         self.escalation_count += 1
-        
+
         logger.info(
             f"[ESCALATION] Created ticket {escalation.id[:8]} | "
             f"Reason: {reason.value} | Priority: {priority.value} | "
-            f"Channel: {channel}"
+            f"Channel: {channel} | Tenant: {company_id}"
         )
-        
+
         # Send notification
         await self._send_notification(escalation)
-        
+
         return escalation
     
     def _generate_summary(self, conversation_history: List[Dict]) -> str:
@@ -235,94 +242,114 @@ class EscalationService:
         except Exception as e:
             logger.error(f"Failed to send escalation notification: {e}")
     
-    async def get_escalation(self, escalation_id: str) -> Optional[Dict]:
-        """Get escalation by ID"""
+    async def get_escalation(self, escalation_id: str, company_id: Optional[str] = None) -> Optional[Dict]:
+        """Get escalation by ID. If ``company_id`` is given, scope the
+        lookup to that tenant — a None scope means cross-tenant (super-admin)."""
         db = await get_database()
-        return await db.escalations.find_one({"id": escalation_id}, {"_id": 0})
-    
+        query: Dict[str, Any] = {"id": escalation_id}
+        if company_id is not None:
+            query["company_id"] = company_id
+        return await db.escalations.find_one(query, {"_id": 0})
+
     async def update_escalation(
         self,
         escalation_id: str,
         status: EscalationStatus = None,
         assigned_to: str = None,
-        resolution_notes: str = None
+        resolution_notes: str = None,
+        company_id: Optional[str] = None,
     ) -> bool:
-        """Update escalation status"""
+        """Update escalation status. ``company_id`` scopes the update so a
+        local admin can't modify another tenant's ticket by ID guess."""
         db = await get_database()
-        
+
         update_data = {
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
-        
+
         if status:
             update_data["status"] = status.value
             if status == EscalationStatus.RESOLVED:
                 update_data["resolved_at"] = datetime.now(timezone.utc).isoformat()
                 self.resolved_count += 1
-        
+
         if assigned_to:
             update_data["assigned_to"] = assigned_to
-        
+
         if resolution_notes:
             update_data["resolution_notes"] = resolution_notes
-        
-        result = await db.escalations.update_one(
-            {"id": escalation_id},
-            {"$set": update_data}
-        )
-        
+
+        query: Dict[str, Any] = {"id": escalation_id}
+        if company_id is not None:
+            query["company_id"] = company_id
+        result = await db.escalations.update_one(query, {"$set": update_data})
+
         return result.modified_count > 0
-    
-    async def get_open_escalations(self, limit: int = 50) -> List[Dict]:
-        """Get all open escalations"""
+
+    async def get_open_escalations(self, limit: int = 50, company_id: Optional[str] = None) -> List[Dict]:
+        """Get all open escalations. ``company_id=None`` returns across
+        all tenants (super-admin view)."""
         db = await get_database()
-        
+
+        query: Dict[str, Any] = {"status": {"$in": ["open", "in_progress"]}}
+        if company_id is not None:
+            query["company_id"] = company_id
+
         escalations = await db.escalations.find(
-            {"status": {"$in": ["open", "in_progress"]}},
-            {"_id": 0}
+            query, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
-        
+
         return escalations
-    
+
     async def get_escalations_by_status(
-        self, 
-        status: EscalationStatus, 
-        limit: int = 50
+        self,
+        status: EscalationStatus,
+        limit: int = 50,
+        company_id: Optional[str] = None,
     ) -> List[Dict]:
-        """Get escalations by status"""
+        """Get escalations by status. ``company_id=None`` returns across
+        all tenants (super-admin view)."""
         db = await get_database()
-        
+
+        query: Dict[str, Any] = {"status": status.value}
+        if company_id is not None:
+            query["company_id"] = company_id
+
         escalations = await db.escalations.find(
-            {"status": status.value},
-            {"_id": 0}
+            query, {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
-        
+
         return escalations
-    
-    async def get_escalation_stats(self) -> Dict:
-        """Get escalation statistics"""
+
+    async def get_escalation_stats(self, company_id: Optional[str] = None) -> Dict:
+        """Get escalation statistics, optionally tenant-scoped."""
         db = await get_database()
-        
-        pipeline = [
-            {"$group": {
-                "_id": "$status",
-                "count": {"$sum": 1}
-            }}
-        ]
-        
-        status_counts = await db.escalations.aggregate(pipeline).to_list(10)
-        
+
+        base_match: Dict[str, Any] = {}
+        if company_id is not None:
+            base_match["company_id"] = company_id
+
+        status_pipeline = []
+        if base_match:
+            status_pipeline.append({"$match": dict(base_match)})
+        status_pipeline.append({"$group": {"_id": "$status", "count": {"$sum": 1}}})
+
+        status_counts = await db.escalations.aggregate(status_pipeline).to_list(10)
+
         status_map = {s["_id"]: s["count"] for s in status_counts}
-        
-        # Priority breakdown
+
+        # Priority breakdown — same tenant scope, restricted to open/in_progress
+        priority_match: Dict[str, Any] = {"status": {"$in": ["open", "in_progress"]}}
+        if company_id is not None:
+            priority_match["company_id"] = company_id
         priority_pipeline = [
-            {"$match": {"status": {"$in": ["open", "in_progress"]}}},
+            {"$match": priority_match},
             {"$group": {
                 "_id": "$priority",
                 "count": {"$sum": 1}
             }}
         ]
-        
+
         priority_counts = await db.escalations.aggregate(priority_pipeline).to_list(10)
         priority_map = {p["_id"]: p["count"] for p in priority_counts}
         

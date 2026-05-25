@@ -111,6 +111,101 @@ async def create_indexes():
 
         # Per-tenant scraper config
         await db.scraper_config.create_index("company_id", unique=True)
+
+        # Schema migrations registry. The unique index doubles as a
+        # multi-replica lock (whichever replica wins the insert owns the run).
+        await db.schema_migrations.create_index("version", unique=True)
+
+        # ── Multi-tenant scope indexes (Sprint 1A) ───────────────────────────
+        # company_id is backfilled on existing rows via migration 0002.
+        # Existing single-field uniques (email, phone_hash, reference_id, etc.)
+        # are intentionally left as-is — evolving them to compound uniques is
+        # a separate migration once we audit cross-tenant collisions.
+        await db.users.create_index("company_id")
+        await db.users.create_index([("company_id", 1), ("email", 1)])
+
+        await db.documents.create_index("company_id")
+        await db.documents.create_index([("company_id", 1), ("user_id", 1)])
+
+        await db.feedback.create_index("company_id")
+        await db.feedback.create_index([("company_id", 1), ("created_at", -1)])
+
+        await db.notifications.create_index("company_id")
+        await db.notifications.create_index([("company_id", 1), ("user_id", 1), ("status", 1)])
+
+        await db.escalations.create_index("company_id")
+        await db.escalations.create_index([("company_id", 1), ("status", 1), ("created_at", -1)])
+
+        await db.applications.create_index("company_id")
+        await db.applications.create_index([("company_id", 1), ("user_id", 1), ("created_at", -1)])
+        await db.applications.create_index([("company_id", 1), ("status", 1)])
+
+        await db.seva_setu_applications.create_index("company_id")
+        await db.seva_setu_applications.create_index([("company_id", 1), ("user_id", 1), ("created_at", -1)])
+
+        await db.seva_setu_users.create_index("company_id")
+        # Compound (company_id, email) is created as UNIQUE in migration 0003
+        # — do not also declare it here non-unique, or the next startup will
+        # try to overwrite the unique index with a weaker one.
+
+        await db.whatsapp_sessions.create_index("company_id")
+        await db.whatsapp_sessions.create_index([("company_id", 1), ("last_message_at", -1)])
+
+        await db.ics_whatsapp_sessions.create_index("company_id")
+        await db.ics_whatsapp_sessions.create_index([("company_id", 1), ("updated_at", -1)])
+
+        # Channel → tenant resolver lookup. Used by WhatsApp/Facebook webhooks
+        # to figure out which company owns an inbound message. Schema lives
+        # but the resolver is hardcoded to a default tenant until Sprint 5.
+        await db.messaging_channel_map.create_index(
+            [("channel_type", 1), ("external_id", 1)],
+            unique=True,
+        )
+        await db.messaging_channel_map.create_index("company_id")
+
+        # ── Messaging collections (Sprint 2D) ────────────────────────────────
+        # company_id is backfilled on existing rows via migration 0004.
+        # Existing single-field uniques on phone_number/phone_hash kept as-is
+        # (the same user phone can only ever speak to one tenant today since
+        # the channel resolver is hardcoded). When per-channel mapping ships,
+        # these may need to become compound (company_id, phone_number) uniques.
+        await db.whatsapp_users.create_index("company_id")
+        await db.whatsapp_users.create_index([("company_id", 1), ("phone_number", 1)])
+
+        await db.whatsapp_messages.create_index("company_id")
+        await db.whatsapp_messages.create_index([("company_id", 1), ("phone_number", 1), ("timestamp", -1)])
+        await db.whatsapp_messages.create_index([("company_id", 1), ("session_id", 1)])
+
+        await db.facebook_users.create_index("company_id")
+        await db.facebook_users.create_index([("company_id", 1), ("fb_id", 1)])
+
+        await db.facebook_messages.create_index("company_id")
+        await db.facebook_messages.create_index([("company_id", 1), ("fb_id", 1), ("timestamp", -1)])
+        await db.facebook_messages.create_index([("company_id", 1), ("session_id", 1)])
+
+        await db.ics_whatsapp_messages.create_index("company_id")
+        await db.ics_whatsapp_messages.create_index([("company_id", 1), ("phone_number", 1), ("timestamp", -1)])
+
+        # Templates — tenant-scoped custom templates + global system templates
+        # (the latter have no company_id). See template_routes.py for the
+        # visibility rules.
+        await db.templates.create_index("company_id")
+        await db.templates.create_index([("company_id", 1), ("category", 1), ("name", 1)])
+
+        # Bot identity, branding, and tenant-specific config. One row per
+        # tenant. Seed for the default tenant is created by migration 0005.
+        # See services/bot_config.py for the read-with-defaults helper.
+        await db.tenant_bot_config.create_index("company_id", unique=True)
+
+        # Tenant services — per-tenant service catalogue. One row per
+        # (tenant, service_key). Drives the conversational application flow
+        # (replaces the hardcoded SERVICES dict in services/application_flow.py).
+        # Seeded for the default tenant by migration 0006.
+        await db.tenant_services.create_index(
+            [("company_id", 1), ("service_key", 1)], unique=True,
+        )
+        await db.tenant_services.create_index([("company_id", 1), ("display_order", 1)])
+        await db.tenant_services.create_index([("company_id", 1), ("enabled", 1)])
         
         # WhatsApp session indexes
         await db.whatsapp_sessions.create_index("phone_hash", unique=True)
@@ -131,6 +226,11 @@ async def create_indexes():
         # Token invalidation indexes
         await db.invalidated_tokens.create_index("user_id")
         await db.invalidated_tokens.create_index("invalidated_at")
+        # Sprint-14: verify_token reads (user_id, company_id) sorted by
+        # invalidated_at desc. Compound index keeps the auth hot path fast.
+        await db.invalidated_tokens.create_index(
+            [("user_id", 1), ("company_id", 1), ("invalidated_at", -1)]
+        )
         
         # Data requests (GDPR)
         await db.data_requests.create_index("id", unique=True)
@@ -149,7 +249,10 @@ async def create_indexes():
 
         # ── Seva Setu auth + application indexes ──────────────────────────
         await db.seva_setu_users.create_index("id", unique=True)
-        await db.seva_setu_users.create_index("email", unique=True)
+        # No standalone `email` index — the compound (company_id, email) unique
+        # from migration 0003 serves all email lookups (all callers scope by
+        # company_id now). A standalone index would conflict on first startup
+        # because the OLD `email_1` unique is dropped LATER by the migration.
 
         await db.otp_tokens.create_index("id", unique=True)
         await db.otp_tokens.create_index("email")
@@ -160,7 +263,10 @@ async def create_indexes():
         await db.seva_setu_sessions.create_index("last_active")
 
         await db.seva_setu_applications.create_index("id", unique=True)
-        await db.seva_setu_applications.create_index("reference_id", unique=True)
+        # No standalone `reference_id` index — the compound (company_id,
+        # reference_id) unique from migration 0003 is the only constraint and
+        # no code does a global reference_id lookup. Same name-conflict risk
+        # as the email index above.
         await db.seva_setu_applications.create_index("user_id")
         await db.seva_setu_applications.create_index("edit_token", sparse=True)
         await db.seva_setu_applications.create_index("status")

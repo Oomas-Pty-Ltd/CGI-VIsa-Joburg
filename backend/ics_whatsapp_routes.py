@@ -38,11 +38,17 @@ from email.mime.text import MIMEText
 from typing import Optional
 from urllib.parse import unquote_plus
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import PlainTextResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+import config
 from database import get_database
+from tenant import get_tenant_id
+from services.messaging_channel_resolver import (
+    resolve_company_from_channel,
+    CHANNEL_ICS_WABA,
+)
 from security.input_sanitizer import sanitize_user_input
 from security.guardrail import guardrail_service, sanitize_logs
 from security.session_manager import session_manager
@@ -53,7 +59,6 @@ from knowledge_scraper import (
 )
 from services.hybrid_retrieval import hybrid_search
 from services.application_flow import (
-    SERVICES,
     CONTACT_INFO,
     process_flow,
     flow_suffix,
@@ -62,6 +67,7 @@ from services.application_flow import (
     detect_website_service,
     is_apply_intent,
 )
+from services.service_registry import get_service, list_services
 from services.intent_classifier import (
     classify_intent,
     get_deterministic_response,
@@ -454,7 +460,7 @@ def _truncate_body(text: str) -> str:
 # =====================================================================
 # LLM WITH KNOWLEDGE CONTEXT
 # =====================================================================
-async def _llm_response(user_message: str, session_id: str, context: str = "", lang_code: str = "en") -> str:
+async def _llm_response(user_message: str, session_id: str, context: str = "", lang_code: str = "en", company_id: Optional[str] = None) -> str:
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
         return (
             "Thank you for your message. For detailed assistance please visit "
@@ -464,12 +470,13 @@ async def _llm_response(user_message: str, session_id: str, context: str = "", l
     _blocked_kws = await _get_blocked_keywords()
 
     # Build service-specific document hint (same as web bot)
-    detected_svc = detect_service(user_message)
+    detected_svc_key = detect_service(user_message)
+    tenant = company_id or config.COMPANY_ID
+    detected_svc_obj = await get_service(tenant, detected_svc_key) if (detected_svc_key and tenant) else None
     svc_docs_hint = ""
-    if detected_svc and detected_svc in SERVICES:
-        svc = SERVICES[detected_svc]
-        docs = "\n".join(f"  • {d}" for d in svc["documents"])
-        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {svc['name'].upper()}:\n{docs}\n"
+    if detected_svc_obj:
+        docs = "\n".join(f"  • {d}" for d in detected_svc_obj.documents)
+        svc_docs_hint = f"\nDOCUMENTS REQUIRED FOR {detected_svc_obj.name.upper()}:\n{docs}\n"
 
     _clean_ctx      = filter_blocked_lines(context, _blocked_kws)
     _clean_hint     = filter_blocked_lines(svc_docs_hint, _blocked_kws)
@@ -537,9 +544,20 @@ IF NOT IN OFFICIAL DATA: Say "This information is not available in our current r
 # =====================================================================
 # AUDIT LOG
 # =====================================================================
-async def _log_message(phone: str, direction: str, text: str, extra: dict, db, ics_mid: str = None):
+async def _log_message(
+    phone: str, direction: str, text: str, extra: dict, db,
+    ics_mid: str = None, company_id: Optional[str] = None,
+):
+    """Persist one ICS WABA message row.
+
+    `company_id` is set explicitly when the webhook caller passes it (after
+    resolving via `resolve_company_from_channel`). When not provided —
+    e.g. utility paths that don't have tenant context — falls back to the
+    env-var default so every row still gets tagged.
+    """
     doc = {
         "id":           str(uuid.uuid4()),
+        "company_id":   company_id or config.COMPANY_ID,
         "phone_number": phone,
         "direction":    direction,
         "message":      text,
@@ -715,7 +733,7 @@ _FORM_ACTIVE_STATES = {"consent_pending", "collecting", "docs_uploading", "docs_
 # Ordered service key list that matches _wa_services_menu() display order:
 # Type A first (passport, visa, pcc), then Type B (oci, marriage, …)
 # Used by the numbered-reply fallback so "4" = OCI, not pcc.
-_WA_MENU_SVCKEYS: list = []   # populated lazily on first use (SERVICES not yet defined here)
+_WA_MENU_SVCKEYS: list = []   # populated lazily on first request from tenant_services
 
 
 async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
@@ -725,9 +743,12 @@ async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
         app = await db.applications.find_one(
             {"tracking_id": tracking_id.upper()}, {"_id": 0}
         )
-        if not app or app.get("service") not in SERVICES:
+        if not app:
             return None
-        service_name  = SERVICES[app["service"]]["name"]
+        # service_name is denormalised onto the application at creation time
+        # (see services.application_flow._create_application) so we don't need
+        # to load the Service definition here.
+        service_name = app.get("service_name") or app.get("service", "Application").title()
         uploaded_docs = [
             {"name": d.get("name", "Document"), "status": d.get("status", "uploaded")}
             for d in app.get("documents", [])
@@ -819,7 +840,7 @@ async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
             return
 
         tracking_id  = app.get("tracking_id", "")
-        service_name = app.get("service_name") or SERVICES.get(app.get("service", ""), {}).get("name", "")
+        service_name = app.get("service_name") or app.get("service", "").title()
         to_email     = app.get("form_data", {}).get("email", "")
 
         pdf_bytes = await _wa_generate_pdf(tracking_id, db)
@@ -893,11 +914,13 @@ async def _wa_my_applications(phone: str, db) -> str:
 # TYPE B — WHATSAPP REVIEW / EDIT HELPERS
 # =====================================================================
 
-def _wa_field_review(service_key: str, data: dict) -> str:
+async def _wa_field_review(company_id: str, service_key: str, data: dict) -> str:
     """Return a numbered field-by-field summary of the collected form data."""
-    svc = SERVICES[service_key]
-    lines = [f"📋 *Your {svc['name']} Application — Review*\n"]
-    for i, f in enumerate(svc["fields"]):
+    svc = await get_service(company_id, service_key)
+    if not svc:
+        return "📋 *Application Review unavailable — service definition missing.*"
+    lines = [f"📋 *Your {svc.name} Application — Review*\n"]
+    for i, f in enumerate(svc.fields):
         val = data.get(f["key"], "—")
         label = f["key"].replace("_", " ").title()
         lines.append(f"{i + 1}. *{label}:* {val}")
@@ -1120,7 +1143,7 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
     return tracking_id
 
 
-def _wa_services_menu() -> str:
+async def _wa_services_menu(company_id: str) -> str:
     """Build the WhatsApp services menu showing all Type A and Type B services."""
     lines = [
         "🏛️ *Consular Services — Seva Setu Bot*\n",
@@ -1138,9 +1161,9 @@ def _wa_services_menu() -> str:
         "📝 *Type B — Fill Form Directly Here*\n"
         "_(Complete the form in this chat)_\n"
     )
-    for key, svc in SERVICES.items():
-        if key not in _WA_TYPE_A:
-            lines.append(f"{num}. *{svc['name']}*")
+    for svc in await list_services(company_id):
+        if svc.service_key not in _WA_TYPE_A:
+            lines.append(f"{num}. *{svc.name}*")
             num += 1
 
     lines.append(
@@ -1182,8 +1205,14 @@ async def _handle_message(
     reply_type: str,
     raw_reply: str,
     db,
+    company_id: Optional[str] = None,
 ):
-    """Core bot handler — delegates to the shared process_flow() state machine."""
+    """Core bot handler — delegates to the shared process_flow() state machine.
+
+    `company_id` is the tenant that owns this inbound channel, resolved at
+    the webhook entry point. When None (legacy callers), `_log_message`'s
+    own fallback to config.COMPANY_ID kicks in — but new code should pass it.
+    """
 
     # ── Parse interactive input ───────────────────────────────────────
     selected_id    = None
@@ -1282,7 +1311,7 @@ async def _handle_message(
             await session_manager.add_message(session_id, "assistant", apps_msg)
             return
         if _t_lower in _SERVICES_MENU_WORDS:
-            menu_msg = _wa_services_menu()
+            menu_msg = await _wa_services_menu(company_id or config.COMPANY_ID)
             await _wa_send(phone, menu_msg, db, "services_menu", waba_number)
             await session_manager.add_message(session_id, "user", user_text)
             await session_manager.add_message(session_id, "assistant", menu_msg)
@@ -1350,8 +1379,9 @@ async def _handle_message(
     #   Type A first (passport, visa, pcc), then Type B — same order the user sees.
     global _WA_MENU_SVCKEYS
     if not _WA_MENU_SVCKEYS:
+        _all_services = await list_services(company_id or config.COMPANY_ID)
         _WA_MENU_SVCKEYS = list(_WA_TYPE_A.keys()) + [
-            k for k in SERVICES.keys() if k not in _WA_TYPE_A
+            s.service_key for s in _all_services if s.service_key not in _WA_TYPE_A
         ]
 
     # Pre-load wa_edit state for docs_pending so the numbered fallback below can
@@ -1437,11 +1467,11 @@ async def _handle_message(
                 )
                 from services.application_flow import _get_flow, _save_flow
                 _pre_flow = await _get_flow(_pre_session["id"])
-                if _svc_key in SERVICES:
+                if await get_service(company_id or config.COMPANY_ID, _svc_key):
                     _pre_flow["state"]   = "info_shown"
                     _pre_flow["service"] = _svc_key
                     await _save_flow(_pre_session["id"], _pre_flow)
-        elif selected_id in SERVICES:
+        elif await get_service(company_id or config.COMPANY_ID, selected_id):
             clean_text = f"apply {selected_id}"
 
     # ── SHOW MAIN MENU ────────────────────────────────────────────────
@@ -1465,12 +1495,12 @@ async def _handle_message(
         return
 
     # ── SERVICE SELECTED FROM LIST — show info card + apply buttons ───
-    if selected_id in SERVICES:
-        svc = SERVICES[selected_id]
-        docs_text = "\n".join(f"  • {d}" for d in svc["documents"])
+    _selected_svc = await get_service(company_id or config.COMPANY_ID, selected_id) if selected_id else None
+    if _selected_svc:
+        docs_text = "\n".join(f"  • {d}" for d in _selected_svc.documents)
         info_text = _md_to_wa(
-            f"*{svc['name']}*\n\n"
-            f"{svc['description']}\n\n"
+            f"*{_selected_svc.name}*\n\n"
+            f"{_selected_svc.description}\n\n"
             f"*Required documents:*\n{docs_text}"
         )
         # Save info_shown + service so "Apply Now" works correctly
@@ -1486,7 +1516,7 @@ async def _handle_message(
         # Always follow with Apply Now / Ask a Question / Main Menu buttons
         await ics_waba.send_buttons(
             to=phone,
-            body=f"Would you like to apply for *{svc['name']}*?",
+            body=f"Would you like to apply for *{_selected_svc.name}*?",
             buttons=[
                 {"id": f"apply_{selected_id}", "title": "Apply Now"},
                 {"id": "ask_question",          "title": "Ask a Question"},
@@ -1638,13 +1668,15 @@ async def _handle_message(
     if current_flow.get("state") == "docs_pending":
         _eb_svc   = current_flow.get("service")
         _eb_data  = current_flow.get("data", {})
-        _eb_fields = SERVICES.get(_eb_svc, {}).get("fields", []) if _eb_svc else []
+        _eb_svc_obj = await get_service(company_id or config.COMPANY_ID, _eb_svc) if _eb_svc else None
+        _eb_fields = _eb_svc_obj.fields if _eb_svc_obj else []
         _wa_edit  = await _wa_edit_get(db, session_id)
 
         # "Edit Field" button tapped → show numbered field list
         if selected_id == "wa_edit":
             await _wa_edit_set(db, session_id, "selecting")
-            lines = [f"✏️ *Edit a Field — {SERVICES[_eb_svc]['name']}*\n"]
+            _eb_name = _eb_svc_obj.name if _eb_svc_obj else "Application"
+            lines = [f"✏️ *Edit a Field — {_eb_name}*\n"]
             for i, f in enumerate(_eb_fields):
                 val   = _eb_data.get(f["key"], "—")
                 label = f["key"].replace("_", " ").title()
@@ -1657,7 +1689,7 @@ async def _handle_message(
 
         # "Preview" button tapped or user typed "preview"
         if selected_id == "wa_preview" or clean_text.strip().lower() == "preview":
-            _review_text = _wa_field_review(_eb_svc, _eb_data)
+            _review_text = await _wa_field_review(company_id or config.COMPANY_ID, _eb_svc, _eb_data)
             _tid = current_flow.get("tracking_id", "")
             await _wa_send(phone, _review_text, db, "wa_preview", waba_number)
             await ics_waba.send_buttons(
@@ -1819,6 +1851,7 @@ async def _handle_message(
     flow_response, needs_llm, step = await process_flow(
         session_id=session_id,
         message=clean_text,
+        tenant_id=company_id or config.COMPANY_ID,
         has_image=has_doc,
         image_doc_data=image_doc_data,
         user_id=phone,
@@ -1844,9 +1877,15 @@ async def _handle_message(
                 llm_context = flow_response
         # Use a language-scoped LLM session so history from a previous language
         # (e.g. Tamil) does not bleed into a newly selected language (e.g. Hindi).
-        raw_llm = await _llm_response(clean_text, f"{session_id}_{_lang_code}", llm_context, lang_code=_lang_code)
+        raw_llm = await _llm_response(
+            clean_text, f"{session_id}_{_lang_code}", llm_context,
+            lang_code=_lang_code, company_id=company_id or config.COMPANY_ID,
+        )
         # Append flow guidance suffix (same as web bot)
-        suffix = flow_suffix(step, detect_service(clean_text), channel="whatsapp")
+        suffix = await flow_suffix(
+            step, detect_service(clean_text),
+            tenant_id=company_id or config.COMPANY_ID, channel="whatsapp",
+        )
         if suffix:
             raw_llm += suffix
         bot_text = _md_to_wa(raw_llm)
@@ -1887,7 +1926,11 @@ async def _handle_message(
         _dp_tid  = _dp_flow.get("tracking_id", "")
         # Prepend numbered form-field review so user can see what they entered
         if _dp_svc and _dp_data:
-            await _wa_send(phone, _wa_field_review(_dp_svc, _dp_data), db, "docs_pending_review", wa)
+            await _wa_send(
+                phone,
+                await _wa_field_review(company_id or config.COMPANY_ID, _dp_svc, _dp_data),
+                db, "docs_pending_review", wa,
+            )
         await _wa_send(phone, bot_text, db, step, wa)
         await ics_waba.send_buttons(
             to=phone,
@@ -1941,10 +1984,11 @@ async def _handle_message(
         # Prioritise service detected in the current message (handles auto-discard case
         # where current_flow still holds the old service); fall back to flow context.
         _svc = detect_service(clean_text) or current_flow.get("service")
-        if _svc and _svc in SERVICES:
+        _svc_obj = await get_service(company_id or config.COMPANY_ID, _svc) if _svc else None
+        if _svc_obj:
             await ics_waba.send_buttons(
                 to=phone,
-                body=f"Would you like to apply for *{SERVICES[_svc]['name']}*?",
+                body=f"Would you like to apply for *{_svc_obj.name}*?",
                 buttons=[
                     {"id": f"apply_{_svc}", "title": "Apply Now"},
                     {"id": "ask_question",  "title": "Ask a Question"},
@@ -2052,7 +2096,12 @@ async def ics_incoming_webhook(
 
     try:
         db = await get_database()
-        background_tasks.add_task(_handle_message, phone, waba_number, reply_type, raw_reply, db)
+        # Resolve tenant from the WABA number the user messaged TO. Resolver
+        # is hardcoded today; this is the single-point swap for Sprint 5+.
+        company_id = await resolve_company_from_channel(CHANNEL_ICS_WABA, waba_number)
+        background_tasks.add_task(
+            _handle_message, phone, waba_number, reply_type, raw_reply, db, company_id
+        )
     except Exception as exc:
         logger.error("ICS webhook handler error: %s", exc)
 
@@ -2083,7 +2132,10 @@ async def ics_incoming_webhook_post(request: Request, background_tasks: Backgrou
 
     try:
         db = await get_database()
-        background_tasks.add_task(_handle_message, phone, waba_number, reply_type, raw_reply, db)
+        company_id = await resolve_company_from_channel(CHANNEL_ICS_WABA, waba_number)
+        background_tasks.add_task(
+            _handle_message, phone, waba_number, reply_type, raw_reply, db, company_id
+        )
     except Exception as exc:
         logger.error("ICS webhook POST handler error: %s", exc)
 
@@ -2209,8 +2261,9 @@ async def simulate_incoming_message(req: SimulateRequest, background_tasks: Back
 
     try:
         db = await get_database()
+        company_id = await resolve_company_from_channel(CHANNEL_ICS_WABA, req.waba_number or "")
         background_tasks.add_task(
-            _handle_message, phone, req.waba_number or "", req.reply_type.upper(), req.message, db,
+            _handle_message, phone, req.waba_number or "", req.reply_type.upper(), req.message, db, company_id,
         )
         logger.info("simulate: phone=%s msg=%s", sanitize_logs(phone), sanitize_logs(req.message[:80]))
         return {"success": True, "phone": phone, "message": req.message}
@@ -2220,10 +2273,11 @@ async def simulate_incoming_message(req: SimulateRequest, background_tasks: Back
 
 
 @router.get("/conversations")
-async def get_conversations(limit: int = 50):
-    """Get recent ICS WhatsApp conversations for admin view."""
+async def get_conversations(limit: int = 50, tenant_id: str = Depends(get_tenant_id)):
+    """Get recent ICS WhatsApp conversations for admin view (tenant-scoped)."""
     db = await get_database()
     pipeline = [
+        {"$match": {"company_id": tenant_id}},
         {"$sort": {"timestamp": -1}},
         {"$group": {
             "_id":            "$phone_number",
@@ -2249,10 +2303,14 @@ async def get_conversations(limit: int = 50):
 
 
 @router.get("/messages/{phone_number}")
-async def get_messages(phone_number: str, limit: int = 50):
-    """Get message history for a single conversation."""
+async def get_messages(
+    phone_number: str,
+    limit: int = 50,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Get message history for a single conversation (tenant-scoped)."""
     db = await get_database()
     msgs = await db.ics_whatsapp_messages.find(
-        {"phone_number": phone_number}, {"_id": 0}
+        {"company_id": tenant_id, "phone_number": phone_number}, {"_id": 0}
     ).sort("timestamp", 1).limit(limit).to_list(limit)
     return {"messages": msgs}

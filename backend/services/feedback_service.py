@@ -80,6 +80,7 @@ class FeedbackService:
         feedback_type: FeedbackType,
         channel: str = "web",
         user_id: Optional[str] = None,
+        company_id: Optional[str] = None,
         rating: Optional[int] = None,
         comment: Optional[str] = None,
         conversation_topic: Optional[str] = None,
@@ -123,8 +124,12 @@ class FeedbackService:
             metadata=metadata,
             created_at=datetime.now(timezone.utc).isoformat()
         )
-        
-        await db.feedback.insert_one(feedback.model_dump())
+
+        doc = feedback.model_dump()
+        # company_id isn't on the Feedback pydantic model — write it alongside.
+        if company_id:
+            doc["company_id"] = company_id
+        await db.feedback.insert_one(doc)
         
         logger.info(f"[FEEDBACK] Submitted {feedback_type.value} from session {session_id}, rating={rating}, sentiment={sentiment}")
         
@@ -148,13 +153,17 @@ class FeedbackService:
         
         return await cursor.to_list(length=limit)
     
-    async def get_feedback_stats(self, db, days: int = 30) -> Dict[str, Any]:
-        """Get feedback statistics"""
+    async def get_feedback_stats(self, db, days: int = 30, company_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get feedback statistics. Pass `company_id` to scope to one tenant."""
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        
+
+        match: Dict[str, Any] = {"created_at": {"$gte": cutoff}}
+        if company_id:
+            match["company_id"] = company_id
+
         pipeline = [
-            {"$match": {"created_at": {"$gte": cutoff}}},
+            {"$match": match},
             {"$group": {
                 "_id": None,
                 "total_feedback": {"$sum": 1},
@@ -194,13 +203,17 @@ class FeedbackService:
             }
         }
     
-    async def get_channel_stats(self, db, days: int = 30) -> Dict[str, Any]:
-        """Get feedback breakdown by channel"""
+    async def get_channel_stats(self, db, days: int = 30, company_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get feedback breakdown by channel. Pass `company_id` to scope to one tenant."""
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        
+
+        match: Dict[str, Any] = {"created_at": {"$gte": cutoff}}
+        if company_id:
+            match["company_id"] = company_id
+
         pipeline = [
-            {"$match": {"created_at": {"$gte": cutoff}}},
+            {"$match": match},
             {"$group": {
                 "_id": "$channel",
                 "count": {"$sum": 1},

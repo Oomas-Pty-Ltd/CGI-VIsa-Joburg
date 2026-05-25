@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import axios from 'axios';
 import { GREETING_MESSAGE, ADVISORY_MESSAGES } from '../config/botMessages';
+import { fetchBranding } from '../lib/widgetConfig';
 import './ChatWidget.css';
 
 // All links rendered inside chat markdown must open in a new tab.
@@ -47,7 +48,11 @@ const FileTextIcon = ({ size = 20, className = '' }) => (
 const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${API_BASE}/api`;
 
+// Used as the initial value + fallback if the tenant hasn't set bot_avatar_url
+// (or while the /widget-config fetch is in flight). Per-tenant override comes
+// from the backend `tenant_bot_config.bot_avatar_url`.
 const BOT_IMAGE = 'https://www.image2url.com/r2/default/images/1777573167951-14d72ab0-5694-47e9-91f4-318ff86d81c1.jpeg?v=2';
+const DEFAULT_BOT_NAME = 'Seva Setu';
 const ALL_LANGS = [
   { code: 'en',  name: 'English',                flag: '🇬🇧' },
   { code: 'hi',  name: 'हिंदी (Hindi)',            flag: '🇮🇳' },
@@ -305,6 +310,34 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const sessionIdRef = useRef(localStorage.getItem('consular_session_id') || null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Per-tenant branding loaded from /api/consular/widget-config on mount.
+  // Defaults match the legacy hardcoded values so the widget renders
+  // immediately while the fetch is in flight (and stays usable if it fails).
+  const [botName, setBotName] = useState(DEFAULT_BOT_NAME);
+  const [botAvatarUrl, setBotAvatarUrl] = useState(BOT_IMAGE);
+  // CSS custom-property overrides applied to the widget root. Stays empty
+  // until branding loads, then carries --seva-primary / --seva-secondary
+  // so the operator's Bot Config colors actually take effect. ChatWidget.css
+  // declares the same vars with the legacy hex values as defaults, so the
+  // widget renders correctly during the fetch and if the fetch fails.
+  const [brandingStyle, setBrandingStyle] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBranding().then((branding) => {
+      if (cancelled || !branding) return;
+      if (branding.bot_name) setBotName(branding.bot_name);
+      if (branding.bot_avatar_url) setBotAvatarUrl(branding.bot_avatar_url);
+      const b = branding.branding || {};
+      const style = {};
+      if (b.primary_color)   style['--seva-primary']   = b.primary_color;
+      if (b.secondary_color) style['--seva-secondary'] = b.secondary_color;
+      if (Object.keys(style).length) setBrandingStyle(style);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const [currentLang, setCurrentLang] = useState('en');
   const currentLangRef = useRef('en');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -1549,7 +1582,7 @@ export default function ChatWidget() {
     : null;
 
   return (
-    <div className="seva-widget">
+    <div className="seva-widget" style={brandingStyle}>
       {/* WELCOME TIP — disappears when chat is opened */}
       {showTip && !isOpen && (
         <div className="seva-fab-tip">
@@ -1566,25 +1599,25 @@ export default function ChatWidget() {
       <button
         className={`seva-fab${isSpeaking ? ' speaking' : ''}`}
         onClick={() => { setShowTip(false); setIsOpen(o => !o); }}
-        title="Chat with Seva Setu"
-        aria-label="Open Seva Setu chatbot"
+        title={`Chat with ${botName}`}
+        aria-label={`Open ${botName} chatbot`}
       >
-        <img src={BOT_IMAGE} alt="Seva Setu" className="seva-fab-img" />
+        <img src={botAvatarUrl} alt={botName} className="seva-fab-img" />
         <div className="seva-fab-badge" />
       </button>
 
       {/* POPUP */}
-      <div id="seva-popup" className={`${isOpen ? 'open' : ''}`} role="dialog" aria-label="Seva Setu Chatbot">
+      <div id="seva-popup" className={`${isOpen ? 'open' : ''}`} role="dialog" aria-label={`${botName} Chatbot`}>
 
         {/* HEADER */}
         <div className="chat-header">
           {/* TOP ROW */}
           <div className="header-row">
             <div className="header-av">
-              <img id="popup-avatar" src={BOT_IMAGE} alt="Seva Setu" />
+              <img id="popup-avatar" src={botAvatarUrl} alt={botName} />
             </div>
             <div className="header-info">
-              <div className="header-name">Seva Setu <span className="hn-sub">सेवा सेतु</span></div>
+              <div className="header-name">{botName}</div>
               <div className="header-status-row">
                 <div className="status-dot" id="status-dot" style={{ background: isOnline ? '#4ADE80' : '#EF4444' }} />
                 <div className="status-text" id="status-text" style={{ color: isOnline ? '#4ADE80' : '#EF4444' }}>
@@ -1769,7 +1802,7 @@ export default function ChatWidget() {
               sevaUser ? null : (
                 <div key={msg.id || i} className="seva-msg-bot">
                   <div className={`seva-msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                    <img src={BOT_IMAGE} alt="" />
+                    <img src={botAvatarUrl} alt="" />
                   </div>
                   <ServiceTabs
                     services={Object.values(SERVICE_INFO)}
@@ -1819,21 +1852,21 @@ export default function ChatWidget() {
             ) : msg.role === 'seva_service_info' ? (
               <div key={msg.id || i} className="seva-msg-bot">
                 <div className={`seva-msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <ServiceInfoCard svc={msg.svc} />
               </div>
             ) : msg.role === 'seva_type_a' ? (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <TypeACard msg={msg} onFinalize={handleSevaTypeAFinalize} />
               </div>
             ) : msg.role === 'seva_form_mode' ? (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <div className="seva-form-mode-card">
                   <p className="seva-form-mode-title">How would you like to proceed?</p>
@@ -1856,7 +1889,7 @@ export default function ChatWidget() {
             ) : msg.role === 'seva_doc_upload' ? (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 {(() => {
                   const appId = msg.appId || sevaCurrentApp?.application_id;
@@ -1957,7 +1990,7 @@ export default function ChatWidget() {
             ) : msg.role === 'seva_submit_review' ? (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <div className="seva-submit-card" style={{ minWidth: 260, maxWidth: 340 }}>
                   <p className="seva-submit-title">📋 Review &amp; Submit</p>
@@ -2117,7 +2150,7 @@ export default function ChatWidget() {
             ) : msg.role === 'seva_app_complete' ? (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <div className="seva-app-complete-card" style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #f0f9ff 100%)', borderRadius: '12px', padding: '14px', borderLeft: '4px solid #22c55e' }}>
                   <p style={{ fontSize: '13px', fontWeight: '700', color: '#065f46', margin: '0 0 8px 0' }}>✅ Application successfully completed!</p>
@@ -2156,7 +2189,7 @@ export default function ChatWidget() {
             ) : (
               <div key={msg.id || i} className="msg-bot">
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
-                  <img src={BOT_IMAGE} alt="" />
+                  <img src={botAvatarUrl} alt="" />
                 </div>
                 <div className="msg-bubble-bot">
                   {msg.content ? (

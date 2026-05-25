@@ -5,7 +5,7 @@ if __name__ == "__main__":
         "server:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=False,
         # Allow large file uploads (50 MB) to stream fully without timing out
         timeout_keep_alive=120,        # seconds to keep idle connection alive
         timeout_graceful_shutdown=30,  # seconds to finish in-flight requests on shutdown

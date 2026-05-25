@@ -127,10 +127,12 @@ class SessionManager:
         }
         
         await db.chat_sessions.insert_one(session)
-        
-        # Clean up old sessions for this user
-        await self._cleanup_old_sessions(channel, user_identifier)
-        
+
+        # Clean up old sessions for this user — scoped to the same tenant the
+        # new session belongs to, so cleanup never affects sessions in another
+        # tenant for the same user_identifier.
+        await self._cleanup_old_sessions(channel, user_identifier, resolved_company_id)
+
         logger.info(f"Created new session: {session_id} for channel: {channel}")
         return session
     
@@ -201,10 +203,17 @@ class SessionManager:
             if session:
                 return session
 
-        # Look up most recent active session for this channel + user
+        # Look up most recent active session for this channel + user. We MUST
+        # scope by company_id — the same user_identifier (phone number, fb_id,
+        # etc.) can exist independently in multiple tenants, and without this
+        # filter we'd surface another tenant's session in the current tenant's
+        # context. Fall back to env-var when metadata doesn't carry one
+        # (back-compat with single-tenant callers).
+        resolved_cid_for_find = (metadata or {}).get("company_id") or _config.COMPANY_ID
         db = await get_database()
         existing = await db.chat_sessions.find_one(
             {
+                "company_id": resolved_cid_for_find,
                 "channel": channel,
                 "user_identifier": user_identifier,
                 "is_active": True,
@@ -277,16 +286,22 @@ class SessionManager:
             }
         )
     
-    async def _cleanup_old_sessions(self, channel: str, user_identifier: str):
+    async def _cleanup_old_sessions(
+        self, channel: str, user_identifier: str, company_id: Optional[str] = None,
+    ):
         """
         Remove old sessions to prevent accumulation.
         Keeps only the most recent MAX_SESSIONS_PER_USER sessions.
+
+        Tenant-scoped: cleanup affects only sessions belonging to the given
+        company_id. Falls back to env-var COMPANY_ID for legacy callers.
         """
         db = await get_database()
-        
-        # Find old sessions for this user/channel
+
+        # Find old sessions for this user/channel WITHIN one tenant
         old_sessions = await db.chat_sessions.find(
             {
+                "company_id": company_id or _config.COMPANY_ID,
                 "channel": channel,
                 "user_identifier": user_identifier,
                 "is_active": True

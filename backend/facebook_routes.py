@@ -18,6 +18,12 @@ import logging
 import httpx
 from datetime import datetime, timezone
 from database import get_database
+from tenant import get_tenant_id
+from services.bot_config import get_bot_config
+from services.messaging_channel_resolver import (
+    resolve_company_from_channel,
+    CHANNEL_FACEBOOK,
+)
 
 # Security imports
 from security.webhook_validator import verify_facebook_webhook, log_webhook_attempt
@@ -46,65 +52,10 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 # Facebook Graph API URL
 FB_GRAPH_API = "https://graph.facebook.com/v18.0"
 
-# Bot system prompt for Facebook (concise but knowledgeable)
-# NOTE: This is wrapped with security hardening at runtime
-_FB_BASE_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
-
-KNOWLEDGE BASE - CGI JOHANNESBURG:
-
-**Office Information:**
-- Address: 2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg
-- Phone: +27 11 783 0202
-- Emergency: (+27) 11 581 9800 (24/7)
-- Email: cons.joburg@mea.gov.in
-- Website: https://www.cgijoburg.gov.in
-- Hours: Mon-Fri 9:00 AM - 5:30 PM
-- Consular Services: Mon-Fri 9:00 AM - 12:30 PM
-
-**Services Offered:**
-1. PASSPORT SERVICES:
-   - New passport: R1,200 (normal), R2,400 (tatkal)
-   - Renewal: R800 (normal), R1,600 (tatkal)
-   - Lost passport: Police report + affidavit required
-   - Processing: 4-6 weeks (normal), 1-2 weeks (tatkal)
-   - Book appointment: passportindia.gov.in
-
-2. OCI (Overseas Citizen of India):
-   - Lifelong visa for Indian origin foreigners
-   - Fee: R1,500 (adult), R750 (minor)
-   - Documents: Current passport, proof of Indian origin, photos
-   - Processing: 6-8 weeks
-
-3. VISA SERVICES:
-   - Tourist, Business, Medical, Student visas
-   - Apply online: indianvisaonline.gov.in
-   - Processing: 3-5 working days
-
-4. CONSULAR SERVICES:
-   - Birth/Death registration
-   - Marriage registration
-   - Power of Attorney attestation
-   - Document attestation
-   - Emergency certificates
-
-5. PIO CARD CONVERSION:
-   - Free conversion to OCI
-   - Bring original PIO card
-
-**FRAUD ALERT:**
-The Consulate NEVER calls asking for money. Report scams to local police.
-
-RESPONSE RULES:
-1. Keep responses SHORT (3-5 sentences max for simple queries)
-2. For complex queries, give brief answer + suggest web portal
-3. Always provide relevant contact/link
-4. Match user's language (Hindi/English/Zulu/Afrikaans)
-5. Be friendly and professional
-
-RESPOND TO USER:"""
-
-# Create hardened system prompt
-FB_SYSTEM_PROMPT = create_safe_system_prompt(_FB_BASE_PROMPT)
+# Bot system prompt is now per-tenant: loaded from `tenant_bot_config` via
+# the bot_config service. The legacy hardcoded `_FB_BASE_PROMPT` /
+# `FB_SYSTEM_PROMPT` constants moved into migration 0005's seed row (under
+# `system_prompt_template`) — see services/bot_config.py.
 
 
 # =====================================================================
@@ -205,23 +156,27 @@ fb_service = FacebookMessengerService()
 # =====================================================================
 # AI RESPONSE GENERATION
 # =====================================================================
-async def generate_fb_ai_response(user_message: str, session_id: str) -> str:
-    """Generate AI response for Facebook user"""
+async def generate_fb_ai_response(user_message: str, session_id: str, company_id: str) -> str:
+    """Generate AI response for Facebook user. System prompt is per-tenant
+    via the bot_config service, wrapped with security hardening on every call."""
+    cfg = await get_bot_config(company_id)
+
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
-        return "Thank you for your message. For detailed assistance, visit our web portal."
-    
+        return cfg.fallback("error") or "Thank you for your message. For detailed assistance, visit our web portal."
+
     try:
+        system_prompt = create_safe_system_prompt(cfg.system_prompt())
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
-            system_message=FB_SYSTEM_PROMPT
+            system_message=system_prompt
         ).with_model("openai", "gpt-5.2")
-        
+
         response = await chat.send_message(UserMessage(text=user_message))
         return response
     except Exception as e:
         logger.error(f"FB AI response error: {e}")
-        return "I apologize, I'm having trouble right now. Please try again."
+        return cfg.fallback("error") or "I apologize, I'm having trouble right now. Please try again."
 
 
 # =====================================================================
@@ -294,11 +249,16 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
         
         db = await get_database()
         
-        # Process each entry
+        # Process each entry. Facebook sends `recipient.id` = the FB Page ID
+        # the user messaged, which identifies the owning tenant via the
+        # channel resolver (today returns the env-var default).
         for entry in body.get("entry", []):
+            page_id = entry.get("id") or ""
+            company_id = await resolve_company_from_channel(CHANNEL_FACEBOOK, page_id)
+
             for messaging_event in entry.get("messaging", []):
                 sender_id = messaging_event.get("sender", {}).get("id")
-                
+
                 # Handle message
                 if "message" in messaging_event:
                     message = messaging_event["message"]
@@ -313,7 +273,8 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     
                     if not sanitization_result.is_safe:
                         logger.warning(f"[SECURITY] Blocked unsafe FB input from {sanitize_logs(sender_id)}: {sanitization_result.detected_patterns}")
-                        ai_response = "I cannot process that request. Please ask about consular services."
+                        _cfg = await get_bot_config(company_id)
+                        ai_response = _cfg.fallback("blocked_input") or "I cannot process that request."
                         await fb_service.send_message(sender_id, ai_response)
                         continue
                     
@@ -323,14 +284,15 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     
                     logger.info(f"FB message from {sanitize_logs(sender_id)}: {sanitize_logs(message_text[:50])}...")
                     
-                    # Get or create user
+                    # Get or create user (tenant-scoped)
                     user = await db.facebook_users.find_one(
-                        {"fb_id": sender_id}, {"_id": 0}
+                        {"company_id": company_id, "fb_id": sender_id}, {"_id": 0}
                     )
                     if not user:
                         user_id = str(uuid.uuid4())
                         user = {
                             "id": user_id,
+                            "company_id": company_id,
                             "fb_id": sender_id,
                             "created_at": datetime.now(timezone.utc).isoformat(),
                             "last_interaction": datetime.now(timezone.utc).isoformat()
@@ -339,21 +301,22 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     else:
                         user_id = user['id']
                         await db.facebook_users.update_one(
-                            {"fb_id": sender_id},
+                            {"company_id": company_id, "fb_id": sender_id},
                             {"$set": {"last_interaction": datetime.now(timezone.utc).isoformat()}}
                         )
-                    
-                    # Get or create secure session
+
+                    # Get or create secure session — thread company_id
                     session = await session_manager.get_or_create_session(
                         channel="facebook",
                         user_identifier=sender_id,
-                        metadata={"fb_message_id": message_id}
+                        metadata={"fb_message_id": message_id, "company_id": company_id}
                     )
                     session_id = session['id']
-                    
+
                     # Store incoming message
                     await db.facebook_messages.insert_one({
                         "id": str(uuid.uuid4()),
+                        "company_id": company_id,
                         "fb_message_id": message_id,
                         "user_id": user_id,
                         "fb_sender_id": sender_id,
@@ -365,7 +328,7 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     })
                     
                     # Generate and send AI response
-                    ai_response = await generate_fb_ai_response(sanitized_message, session_id)
+                    ai_response = await generate_fb_ai_response(sanitized_message, session_id, company_id)
                     
                     # Validate and sanitize output
                     output_result = guardrail_service.validate_output(ai_response)
@@ -380,6 +343,7 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     # Store outgoing message
                     await db.facebook_messages.insert_one({
                         "id": str(uuid.uuid4()),
+                        "company_id": company_id,
                         "fb_message_id": result.get("message_id"),
                         "user_id": user_id,
                         "fb_sender_id": sender_id,
@@ -399,7 +363,8 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
                     
                     # Handle different postback payloads
                     if payload == "GET_STARTED":
-                        welcome_msg = "🙏 Namaste! Welcome to Seva Setu Bot. I can help you with Indian consular services. What do you need help with?"
+                        _cfg = await get_bot_config(company_id)
+                        welcome_msg = _cfg.fallback("greeting") or "Hello! How can I help?"
                         await fb_service.send_message(sender_id, welcome_msg)
         
         return Response(status_code=200)
@@ -412,15 +377,19 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 @router.post("/send")
-async def send_facebook_message(request: SendFBMessageRequest):
-    """Send a Facebook message to a user"""
+async def send_facebook_message(
+    request: SendFBMessageRequest,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Send a Facebook message to a user (admin endpoint, tenant-scoped)."""
     db = await get_database()
-    
+
     result = await fb_service.send_message(request.recipient_id, request.message)
-    
+
     # Store outgoing message
     await db.facebook_messages.insert_one({
         "id": str(uuid.uuid4()),
+        "company_id": tenant_id,
         "fb_sender_id": request.recipient_id,
         "direction": "outbound",
         "message": request.message,
@@ -438,11 +407,12 @@ async def send_facebook_message(request: SendFBMessageRequest):
 
 
 @router.get("/conversations")
-async def get_facebook_conversations():
-    """Get all Facebook conversations for admin view"""
+async def get_facebook_conversations(tenant_id: str = Depends(get_tenant_id)):
+    """Get all Facebook conversations for admin view (tenant-scoped)."""
     db = await get_database()
-    
+
     pipeline = [
+        {"$match": {"company_id": tenant_id}},
         {"$sort": {"timestamp": -1}},
         {"$group": {
             "_id": "$fb_sender_id",
@@ -453,7 +423,7 @@ async def get_facebook_conversations():
         {"$sort": {"last_timestamp": -1}},
         {"$limit": 50}
     ]
-    
+
     conversations = await db.facebook_messages.aggregate(pipeline).to_list(50)
     
     return {
@@ -470,12 +440,16 @@ async def get_facebook_conversations():
 
 
 @router.get("/messages/{fb_id}")
-async def get_fb_conversation_messages(fb_id: str, limit: int = 50):
-    """Get messages for a specific Facebook conversation"""
+async def get_fb_conversation_messages(
+    fb_id: str,
+    limit: int = 50,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Get messages for a specific Facebook conversation (tenant-scoped)."""
     db = await get_database()
-    
+
     messages = await db.facebook_messages.find(
-        {"fb_sender_id": fb_id},
+        {"company_id": tenant_id, "fb_sender_id": fb_id},
         {"_id": 0}
     ).sort("timestamp", 1).limit(limit).to_list(limit)
     

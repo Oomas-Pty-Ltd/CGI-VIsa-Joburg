@@ -11,7 +11,7 @@ Admin dashboard API for:
 ====================================================================
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi import status as http_status
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -20,7 +20,19 @@ import uuid
 import logging
 
 from database import get_database
-from auth_utils import verify_super_admin, verify_local_admin
+from auth_utils import verify_super_admin, verify_local_admin, verify_admin, enforce_tenant_scope
+from tenant import get_tenant_id
+from services.audit_service import audit_service, AuditCategory, AuditSeverity
+
+
+async def _audit_safe(db, **kwargs):
+    """Best-effort audit write — never block the request on audit failures."""
+    try:
+        await audit_service.log(db=db, **kwargs)
+    except Exception:
+        pass
+
+
 from services.escalation_service import (
     escalation_service, 
     EscalationStatus, 
@@ -55,18 +67,28 @@ class UpdateEscalationRequest(BaseModel):
 async def get_escalations(
     esc_status: Optional[str] = None,
     limit: int = 50,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Get all escalations (Super Admin only)"""
+    """List escalations.
+
+    Super-admin: pass ``?company_id=<UUID>`` to scope to one tenant, or
+    omit for the cross-tenant view. Local admins are forced to their
+    own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
     if esc_status:
         try:
             status_enum = EscalationStatus(esc_status)
-            escalations = await escalation_service.get_escalations_by_status(status_enum, limit)
+            escalations = await escalation_service.get_escalations_by_status(
+                status_enum, limit, company_id=company_id,
+            )
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {esc_status}")
     else:
-        escalations = await escalation_service.get_open_escalations(limit)
-    
+        escalations = await escalation_service.get_open_escalations(
+            limit, company_id=company_id,
+        )
+
     return {
         "escalations": escalations,
         "count": len(escalations)
@@ -74,18 +96,24 @@ async def get_escalations(
 
 
 @router.get("/escalations/stats")
-async def get_escalation_stats(payload: dict = Depends(verify_super_admin)):
-    """Get escalation statistics"""
-    return await escalation_service.get_escalation_stats()
+async def get_escalation_stats(
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin),
+):
+    """Get escalation statistics. Local admins are forced to their own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    return await escalation_service.get_escalation_stats(company_id=company_id)
 
 
 @router.get("/escalations/{escalation_id}")
 async def get_escalation(
     escalation_id: str,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Get single escalation details"""
-    escalation = await escalation_service.get_escalation(escalation_id)
+    """Get single escalation details. Local admins are forced to their own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    escalation = await escalation_service.get_escalation(escalation_id, company_id=company_id)
     if not escalation:
         raise HTTPException(status_code=404, detail="Escalation not found")
     return escalation
@@ -95,32 +123,39 @@ async def get_escalation(
 async def update_escalation(
     escalation_id: str,
     request: UpdateEscalationRequest,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Update escalation status"""
+    """Update escalation status. Local admins can only mutate their own
+    tenant's tickets."""
+    company_id = enforce_tenant_scope(payload, company_id)
     status_enum = None
     if request.esc_status:
         try:
             status_enum = EscalationStatus(request.esc_status)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.esc_status}")
-    
+
     success = await escalation_service.update_escalation(
         escalation_id=escalation_id,
         status=status_enum,
         assigned_to=request.assigned_to,
-        resolution_notes=request.resolution_notes
+        resolution_notes=request.resolution_notes,
+        company_id=company_id,
     )
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="Escalation not found")
-    
+
     return {"success": True, "message": "Escalation updated"}
 
 
 # =====================================================================
 # KNOWLEDGE BASE MANAGEMENT
 # =====================================================================
+
+VALID_EVENT_STATUSES = {"past", "present", "future", "general"}
+
 
 class CreateKnowledgeRequest(BaseModel):
     category: str
@@ -129,6 +164,9 @@ class CreateKnowledgeRequest(BaseModel):
     answer: str
     keywords: List[str]
     source: Optional[str] = ""
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    event_status: Optional[str] = None
 
 
 class UpdateKnowledgeRequest(BaseModel):
@@ -139,6 +177,9 @@ class UpdateKnowledgeRequest(BaseModel):
     source: Optional[str] = None
     source_verified: Optional[bool] = None
     entry_status: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    event_status: Optional[str] = None
 
 
 @router.get("/knowledge")
@@ -146,26 +187,32 @@ async def get_knowledge_entries(
     category: Optional[str] = None,
     entry_status: Optional[str] = None,
     limit: int = 100,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Get all knowledge entries"""
+    """Get all knowledge entries. Pass ``?company_id`` to scope to one
+    tenant; omit for the cross-tenant super-admin view. Local admins
+    are forced to their own tenant regardless of the query param."""
+    company_id = enforce_tenant_scope(payload, company_id)
     category_enum = None
     status_enum = None
-    
+
     if category:
         try:
             category_enum = KnowledgeCategory(category)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
-    
+
     if entry_status:
         try:
             status_enum = KnowledgeStatus(entry_status)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {entry_status}")
-    
-    entries = await knowledge_service.get_all_entries(category_enum, status_enum, limit)
-    
+
+    entries = await knowledge_service.get_all_entries(
+        category_enum, status_enum, limit, company_id=company_id,
+    )
+
     return {
         "entries": entries,
         "count": len(entries)
@@ -173,18 +220,25 @@ async def get_knowledge_entries(
 
 
 @router.get("/knowledge/stats")
-async def get_knowledge_stats(payload: dict = Depends(verify_super_admin)):
-    """Get knowledge base statistics"""
-    return await knowledge_service.get_stats()
+async def get_knowledge_stats(
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin),
+):
+    """Get knowledge base statistics. Pass ``?company_id`` to scope to one tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    return await knowledge_service.get_stats(company_id=company_id)
 
 
 @router.get("/knowledge/{entry_id}")
 async def get_knowledge_entry(
     entry_id: str,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Get single knowledge entry"""
-    entry = await knowledge_service.get_entry(entry_id)
+    """Get single knowledge entry. Pass ``?company_id`` to require the
+    entry belong to that tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    entry = await knowledge_service.get_entry(entry_id, company_id=company_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
     return entry
@@ -193,10 +247,12 @@ async def get_knowledge_entry(
 @router.get("/knowledge/{entry_id}/history")
 async def get_knowledge_history(
     entry_id: str,
-    payload: dict = Depends(verify_super_admin)
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Get version history for knowledge entry"""
-    history = await knowledge_service.get_entry_history(entry_id)
+    """Get version history for knowledge entry, optionally scoped by tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    history = await knowledge_service.get_entry_history(entry_id, company_id=company_id)
     return {
         "entry_id": entry_id,
         "history": history,
@@ -207,24 +263,54 @@ async def get_knowledge_history(
 @router.post("/knowledge")
 async def create_knowledge_entry(
     request: CreateKnowledgeRequest,
-    payload: dict = Depends(verify_super_admin)
+    company_id: str,
+    http_request: Request,
+    payload: dict = Depends(verify_admin)
 ):
-    """Create new knowledge entry"""
+    """Create new knowledge entry for a specific tenant. ``company_id``
+    is required — super-admin must explicitly pick which tenant the
+    entry belongs to (entries without a tenant would never be searchable).
+    Local admins can only create entries for their own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
     try:
         category_enum = KnowledgeCategory(request.category)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")
-    
+
+    if request.event_status and request.event_status not in VALID_EVENT_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"event_status must be one of {sorted(VALID_EVENT_STATUSES)} or omitted",
+        )
+
     entry = await knowledge_service.create_entry(
+        company_id=company_id,
         category=category_enum,
         title=request.title,
         question=request.question,
         answer=request.answer,
         keywords=request.keywords,
         source=request.source,
-        created_by=payload.get("user_id", "admin")
+        created_by=payload.get("user_id", "admin"),
+        valid_from=request.valid_from or None,
+        valid_until=request.valid_until or None,
+        event_status=request.event_status or None,
     )
-    
+
+    db = await get_database()
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="create_knowledge_entry",
+        user_id=payload.get("user_id"),
+        user_type=payload.get("user_type"),
+        resource_type="knowledge_entry",
+        resource_id=entry.id,
+        company_id=company_id,
+        new_value={"title": request.title, "category": request.category},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
     return {
         "success": True,
         "entry_id": entry.id,
@@ -236,11 +322,16 @@ async def create_knowledge_entry(
 async def update_knowledge_entry(
     entry_id: str,
     request: UpdateKnowledgeRequest,
-    payload: dict = Depends(verify_super_admin)
+    http_request: Request,
+    company_id: Optional[str] = None,
+    payload: dict = Depends(verify_admin)
 ):
-    """Update knowledge entry (creates new version)"""
+    """Update knowledge entry (creates new version). Pass ``?company_id``
+    to restrict the update to a specific tenant's entry. Local admins
+    are forced to their own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
     updates = {}
-    
+
     if request.title:
         updates["title"] = request.title
     if request.question:
@@ -259,19 +350,48 @@ async def update_knowledge_entry(
             updates["status"] = request.entry_status
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.entry_status}")
-    
+    # valid_from / valid_until / event_status — distinguish "not provided"
+    # from "explicitly cleared". An empty string clears the field; ``None``
+    # leaves it alone. Pydantic v2 lets us see which keys were set.
+    if "valid_from" in request.model_fields_set:
+        updates["valid_from"] = request.valid_from or None
+    if "valid_until" in request.model_fields_set:
+        updates["valid_until"] = request.valid_until or None
+    if "event_status" in request.model_fields_set:
+        if request.event_status and request.event_status not in VALID_EVENT_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"event_status must be one of {sorted(VALID_EVENT_STATUSES)} or omitted",
+            )
+        updates["event_status"] = request.event_status or None
+
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
-    
+
     success = await knowledge_service.update_entry(
         entry_id=entry_id,
         updates=updates,
-        updated_by=payload.get("user_id", "admin")
+        updated_by=payload.get("user_id", "admin"),
+        company_id=company_id,
     )
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="Entry not found")
-    
+
+    db = await get_database()
+    await _audit_safe(
+        db,
+        category=AuditCategory.DATA_MODIFICATION,
+        action="update_knowledge_entry",
+        user_id=payload.get("user_id"),
+        user_type=payload.get("user_type"),
+        resource_type="knowledge_entry",
+        resource_id=entry_id,
+        company_id=company_id,
+        new_value=updates,
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
     return {"success": True, "message": "Knowledge entry updated"}
 
 
@@ -420,18 +540,24 @@ class ErrorReport(BaseModel):
 
 
 @router.post("/error-report")
-async def receive_error_report(report: ErrorReport):
+async def receive_error_report(
+    report: ErrorReport,
+    company_id: str = Depends(get_tenant_id),
+):
     """
     Receive error reports from frontend for monitoring and alerting.
     No auth required to ensure errors are always reported.
+    Tenant comes from X-Company-Id (widget sets it), falling back to env-var
+    default so legacy clients keep working.
     """
     db = await get_database()
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Store error report
     error_doc = {
         "id": str(uuid.uuid4()),
+        "company_id": company_id,
         "error_type": report.error_type,
         "error_message": report.error_message,
         "stack_trace": report.stack_trace,
@@ -442,7 +568,7 @@ async def receive_error_report(report: ErrorReport):
         "acknowledged_at": None,
         "resolved_at": None
     }
-    
+
     await db.error_reports.insert_one(error_doc)
     
     # For critical/high severity, notify admin via notification service

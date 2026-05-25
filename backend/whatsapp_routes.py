@@ -17,6 +17,12 @@ import os
 import logging
 from datetime import datetime, timezone
 from database import get_database
+from tenant import get_tenant_id
+from services.bot_config import get_bot_config
+from services.messaging_channel_resolver import (
+    resolve_company_from_channel,
+    CHANNEL_WHATSAPP_TWILIO,
+)
 
 # Security imports
 from security.webhook_validator import verify_twilio_webhook, log_webhook_attempt
@@ -50,65 +56,13 @@ TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', '')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
-# Bot system prompt for WhatsApp (concise but knowledgeable)
-# NOTE: This is wrapped with security hardening at runtime
-_WHATSAPP_BASE_PROMPT = """You are Seva Setu, the official AI assistant for the Consulate General of India, Johannesburg (CGI Johannesburg).
-
-KNOWLEDGE BASE - CGI JOHANNESBURG:
-
-**Office Information:**
-- Address: 2nd Floor, Sandown Mews East, 88 Stella Street, Sandton, Johannesburg
-- Phone: +27 11 783 0202
-- Emergency: (+27) 11 581 9800 (24/7)
-- Email: cons.joburg@mea.gov.in
-- Website: https://www.cgijoburg.gov.in
-- Hours: Mon-Fri 9:00 AM - 5:30 PM
-- Consular Services: Mon-Fri 9:00 AM - 12:30 PM
-
-**Services Offered:**
-1. PASSPORT SERVICES:
-   - New passport: R1,200 (normal), R2,400 (tatkal)
-   - Renewal: R800 (normal), R1,600 (tatkal)
-   - Lost passport: Police report + affidavit required
-   - Processing: 4-6 weeks (normal), 1-2 weeks (tatkal)
-   - Book appointment: passportindia.gov.in
-
-2. OCI (Overseas Citizen of India):
-   - Lifelong visa for Indian origin foreigners
-   - Fee: R1,500 (adult), R750 (minor)
-   - Documents: Current passport, proof of Indian origin, photos
-   - Processing: 6-8 weeks
-
-3. VISA SERVICES:
-   - Tourist, Business, Medical, Student visas
-   - Apply online: indianvisaonline.gov.in
-   - Processing: 3-5 working days
-
-4. CONSULAR SERVICES:
-   - Birth/Death registration
-   - Marriage registration
-   - Power of Attorney attestation
-   - Document attestation
-   - Emergency certificates
-
-5. PIO CARD CONVERSION:
-   - Free conversion to OCI
-   - Bring original PIO card
-
-**FRAUD ALERT:**
-The Consulate NEVER calls asking for money. Report scams to local police.
-
-RESPONSE RULES:
-1. Keep responses SHORT (3-5 sentences max for simple queries)
-2. For complex queries, give brief answer + suggest web portal
-3. Always provide relevant contact/link
-4. Match user's language (Hindi/English/Zulu/Afrikaans)
-5. Be helpful and professional
-
-RESPOND TO USER:"""
-
-# Create hardened system prompt
-WHATSAPP_SYSTEM_PROMPT = create_safe_system_prompt(_WHATSAPP_BASE_PROMPT)
+# Bot system prompt is now per-tenant: loaded from `tenant_bot_config` via
+# the bot_config service. The legacy hardcoded `_WHATSAPP_BASE_PROMPT` /
+# `WHATSAPP_SYSTEM_PROMPT` constants moved into migration 0005's seed row
+# (under `system_prompt_template`) — see services/bot_config.py.
+#
+# generate_ai_response() resolves it per request and wraps with
+# create_safe_system_prompt() for security hardening, same as before.
 
 
 # =====================================================================
@@ -194,23 +148,30 @@ twilio_service = TwilioWhatsAppService()
 # =====================================================================
 # AI RESPONSE GENERATION
 # =====================================================================
-async def generate_ai_response(user_message: str, session_id: str) -> str:
-    """Generate AI response for WhatsApp user"""
+async def generate_ai_response(user_message: str, session_id: str, company_id: str) -> str:
+    """Generate AI response for WhatsApp user. System prompt is per-tenant
+    (resolved from tenant_bot_config) and wrapped with security hardening
+    on every call."""
+    cfg = await get_bot_config(company_id)
+
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
-        return "Thank you for your message. For detailed assistance, please visit our web portal."
-    
+        # cfg.fallback("error") covers this case; fall back to a generic
+        # message only if the tenant hasn't customised one.
+        return cfg.fallback("error") or "Thank you for your message. For detailed assistance, please visit our web portal."
+
     try:
+        system_prompt = create_safe_system_prompt(cfg.system_prompt())
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
-            system_message=WHATSAPP_SYSTEM_PROMPT
+            system_message=system_prompt
         ).with_model("openai", "gpt-5.2")
-        
+
         response = await chat.send_message(UserMessage(text=user_message))
         return response
     except Exception as e:
         logger.error(f"AI response error: {e}")
-        return "I apologize, I'm having trouble processing your request. Please try again or visit our web portal."
+        return cfg.fallback("error") or "I apologize, I'm having trouble processing your request. Please try again or visit our web portal."
 
 
 # =====================================================================
@@ -251,20 +212,27 @@ async def whatsapp_webhook(
                 raise
         
         form_data = await request.form()
-        
+
         # Extract message details
         from_number = form_data.get("From", "").replace("whatsapp:", "")
+        to_number = form_data.get("To", "").replace("whatsapp:", "")   # tenant channel
         message_body = form_data.get("Body", "").strip()
         message_sid = form_data.get("MessageSid", "")
         profile_name = form_data.get("ProfileName", "")
         num_media = int(form_data.get("NumMedia", 0))
+
+        # Resolve which company owns the inbound channel. Today the resolver
+        # ignores its args and returns the env-var default; the contract is
+        # in place so flipping to a real channel map is a single-function change.
+        company_id = await resolve_company_from_channel(CHANNEL_WHATSAPP_TWILIO, to_number)
         
         # Sanitize and validate input
         sanitization_result = sanitize_user_input(message_body, context="whatsapp")
         
         if not sanitization_result.is_safe:
             logger.warning(f"[SECURITY] Blocked unsafe input from {sanitize_logs(from_number)}: {sanitization_result.detected_patterns}")
-            ai_response = sanitization_result.warnings[0] if sanitization_result.warnings else "I cannot process that request. Please ask about consular services."
+            _cfg = await get_bot_config(company_id)
+            ai_response = sanitization_result.warnings[0] if sanitization_result.warnings else (_cfg.fallback("blocked_input") or "I cannot process that request.")
         else:
             # Mask PII in input before processing
             input_result = guardrail_service.validate_input(message_body)
@@ -274,12 +242,15 @@ async def whatsapp_webhook(
             
             db = await get_database()
             
-            # Get or create user
-            user = await db.whatsapp_users.find_one({"phone_number": from_number}, {"_id": 0})
+            # Get or create user (tenant-scoped lookup)
+            user = await db.whatsapp_users.find_one(
+                {"company_id": company_id, "phone_number": from_number}, {"_id": 0}
+            )
             if not user:
                 user_id = str(uuid.uuid4())
                 user = {
                     "id": user_id,
+                    "company_id": company_id,
                     "phone_number": from_number,
                     "profile_name": profile_name,
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -290,21 +261,22 @@ async def whatsapp_webhook(
                 user_id = user['id']
                 # Update last interaction for WhatsApp 24-hour window tracking
                 await db.whatsapp_users.update_one(
-                    {"phone_number": from_number},
+                    {"company_id": company_id, "phone_number": from_number},
                     {"$set": {"last_interaction": datetime.now(timezone.utc).isoformat()}}
                 )
-            
-            # Get or create secure session
+
+            # Get or create secure session — thread company_id into metadata
             session = await session_manager.get_or_create_session(
                 channel="whatsapp",
                 user_identifier=from_number,
-                metadata={"profile_name": profile_name, "twilio_sid": message_sid}
+                metadata={"profile_name": profile_name, "twilio_sid": message_sid, "company_id": company_id}
             )
             session_id = session['id']
-            
+
             # Store incoming message (with PII masked in logs)
             await db.whatsapp_messages.insert_one({
                 "id": str(uuid.uuid4()),
+                "company_id": company_id,
                 "twilio_sid": message_sid,
                 "user_id": user_id,
                 "phone_number": from_number,
@@ -317,7 +289,7 @@ async def whatsapp_webhook(
             })
             
             # Generate AI response using sanitized input
-            ai_response = await generate_ai_response(sanitized_message, session_id)
+            ai_response = await generate_ai_response(sanitized_message, session_id, company_id)
             
             # Validate and sanitize output
             output_result = guardrail_service.validate_output(ai_response)
@@ -329,6 +301,7 @@ async def whatsapp_webhook(
             # Store outgoing message
             await db.whatsapp_messages.insert_one({
                 "id": str(uuid.uuid4()),
+                "company_id": company_id,
                 "user_id": user_id,
                 "phone_number": from_number,
                 "direction": "outbound",
@@ -353,15 +326,19 @@ async def whatsapp_webhook(
 
 
 @router.post("/send")
-async def send_whatsapp_message(request: SendWhatsAppRequest):
-    """Send a WhatsApp message to a user"""
+async def send_whatsapp_message(
+    request: SendWhatsAppRequest,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Send a WhatsApp message to a user (admin endpoint, tenant-scoped)."""
     db = await get_database()
-    
+
     result = twilio_service.send_message(request.to_number, request.message)
-    
+
     # Store outgoing message
     await db.whatsapp_messages.insert_one({
         "id": str(uuid.uuid4()),
+        "company_id": tenant_id,
         "phone_number": request.to_number,
         "direction": "outbound",
         "message": request.message,
@@ -379,12 +356,13 @@ async def send_whatsapp_message(request: SendWhatsAppRequest):
 
 
 @router.get("/conversations")
-async def get_whatsapp_conversations():
-    """Get all WhatsApp conversations for admin view"""
+async def get_whatsapp_conversations(tenant_id: str = Depends(get_tenant_id)):
+    """Get all WhatsApp conversations for admin view (tenant-scoped)."""
     db = await get_database()
-    
-    # Get unique users with their last message
+
+    # Get unique users with their last message — scoped to caller's tenant
     pipeline = [
+        {"$match": {"company_id": tenant_id}},
         {"$sort": {"timestamp": -1}},
         {"$group": {
             "_id": "$phone_number",
@@ -395,7 +373,7 @@ async def get_whatsapp_conversations():
         {"$sort": {"last_timestamp": -1}},
         {"$limit": 50}
     ]
-    
+
     conversations = await db.whatsapp_messages.aggregate(pipeline).to_list(50)
     
     return {
@@ -412,12 +390,16 @@ async def get_whatsapp_conversations():
 
 
 @router.get("/messages/{phone_number}")
-async def get_conversation_messages(phone_number: str, limit: int = 50):
-    """Get messages for a specific conversation"""
+async def get_conversation_messages(
+    phone_number: str,
+    limit: int = 50,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Get messages for a specific conversation (tenant-scoped)."""
     db = await get_database()
-    
+
     messages = await db.whatsapp_messages.find(
-        {"phone_number": phone_number},
+        {"company_id": tenant_id, "phone_number": phone_number},
         {"_id": 0}
     ).sort("timestamp", 1).limit(limit).to_list(limit)
     

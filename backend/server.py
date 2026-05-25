@@ -74,6 +74,14 @@ async def lifespan(app: FastAPI):
         company_id = await validate_company_id(db)
         logger.info(f"Company validated: {company_id}")
 
+        # Apply any pending schema/data migrations BEFORE the app accepts traffic.
+        # Each migration is a numbered file in backend/migrations/. Idempotent +
+        # multi-replica-safe (unique index on schema_migrations.version).
+        from migrations.runner import run_pending as run_migrations
+        results = await run_migrations(db)
+        for r in results:
+            logger.info("Migration %s: %s", r.get("version"), r.get("status"))
+
         # Initialize super admin
         await init_super_admin()
         logger.info("Super admin initialization complete")

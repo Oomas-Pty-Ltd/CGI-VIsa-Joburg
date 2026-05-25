@@ -1,11 +1,16 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Building2, Plus, Settings, TrendingUp, LogOut,
+  Building2, Plus, TrendingUp, LogOut,
   MessageSquare, Shield, Download, ChevronLeft, ChevronRight,
   X, RefreshCw, Copy, Check, BookOpen, Upload, Trash2, FileText,
-  Calendar, Clock, AlertCircle, Files, Search, Ban, Unlock
+  Calendar, Clock, AlertCircle, Files, Search, Ban, Unlock,
+  Workflow, Smartphone, Bot, Globe, UserPlus, KeyRound,
 } from "lucide-react";
+import ChannelMappingsTab from "./super-admin/ChannelMappingsTab";
+import TenantServicesTab from "./super-admin/TenantServicesTab";
+import BotConfigTab from "./super-admin/BotConfigTab";
+import ScrapersTab from "./super-admin/ScrapersTab";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -46,7 +51,10 @@ const TABS = [
   { key: "audit-logs", label: "Audit Logs", icon: Shield },
   { key: "seva-applications", label: "Seva Applications", icon: Files },
   { key: "knowledge", label: "Knowledge Base", icon: BookOpen },
-  { key: "settings", label: "Settings", icon: Settings },
+  { key: "tenant-services", label: "Services", icon: Workflow },
+  { key: "channel-mappings", label: "Channels", icon: Smartphone },
+  { key: "bot-config", label: "Bot Config", icon: Bot },
+  { key: "scrapers", label: "Scrapers", icon: Globe },
 ];
 
 const CHANNEL_COLORS = {
@@ -521,11 +529,12 @@ function EventBadge({ status }) {
   );
 }
 
-function KnowledgeTab({ token }) {
+function KnowledgeTab({ token, companies = [] }) {
   /* ── upload state ── */
   const [file, setFile]           = useState(null);
   const [docTitle, setDocTitle]   = useState("");
   const [category, setCategory]   = useState("general");
+  const [uploadCompanyId, setUploadCompanyId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver]   = useState(false);
   const fileInputRef = useRef(null);
@@ -537,6 +546,7 @@ function KnowledgeTab({ token }) {
   const [loadingList, setLoadingList] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
+  const [filterCompany, setFilterCompany]   = useState(""); // Sprint 14
   const [pdfFiles, setPdfFiles]       = useState([]);
   const [filterFile, setFilterFile]   = useState("");
 
@@ -549,6 +559,13 @@ function KnowledgeTab({ token }) {
     "general","visa","passport","oci","pcc","fees","emergency","services","event","announcement","other"
   ];
 
+  const companyName = (id) => companies.find((c) => c.id === id)?.name ?? id;
+
+  // Default the upload selector to the first tenant once companies loads
+  useEffect(() => {
+    if (!uploadCompanyId && companies.length > 0) setUploadCompanyId(companies[0].id);
+  }, [companies, uploadCompanyId]);
+
   const fetchEntries = useCallback(async () => {
     setLoadingList(true);
     try {
@@ -556,6 +573,7 @@ function KnowledgeTab({ token }) {
       if (filterStatus)   params.set("event_status",  filterStatus);
       if (filterCategory) params.set("category",      filterCategory);
       if (filterFile)     params.set("pdf_filename",  filterFile);
+      if (filterCompany)  params.set("company_id",    filterCompany);
       const [entriesRes, filesRes] = await Promise.all([
         fetch(`${API}/super-admin/knowledge/entries?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -574,7 +592,7 @@ function KnowledgeTab({ token }) {
     } finally {
       setLoadingList(false);
     }
-  }, [page, filterStatus, filterCategory, filterFile, token]);
+  }, [page, filterStatus, filterCategory, filterFile, filterCompany, token]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
@@ -582,12 +600,14 @@ function KnowledgeTab({ token }) {
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file) { toast.error("Please select a PDF file."); return; }
+    if (!uploadCompanyId) { toast.error("Pick a tenant to upload the PDF under."); return; }
     setUploading(true);
     try {
       const form = new FormData();
-      form.append("file",     file);
-      form.append("title",    docTitle);
-      form.append("category", category);
+      form.append("file",       file);
+      form.append("title",      docTitle);
+      form.append("category",   category);
+      form.append("company_id", uploadCompanyId);
 
       let res;
       try {
@@ -720,7 +740,7 @@ function KnowledgeTab({ token }) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label className="text-sm text-gray-600 mb-1 block">Document Title (optional)</Label>
               <Input
@@ -738,6 +758,19 @@ function KnowledgeTab({ token }) {
                 <SelectContent>
                   {CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-sm text-gray-600 mb-1 block">Tenant</Label>
+              <Select value={uploadCompanyId} onValueChange={setUploadCompanyId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick a tenant" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -803,6 +836,16 @@ function KnowledgeTab({ token }) {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-5">
+          <div>
+            <Label className="text-xs text-gray-500 mb-1 block">Tenant</Label>
+            <Select value={filterCompany || "all"} onValueChange={(v) => { setFilterCompany(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-52 h-9 text-sm"><SelectValue placeholder="All tenants" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All tenants</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div>
             <Label className="text-xs text-gray-500 mb-1 block">Date Status</Label>
             <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
@@ -1217,22 +1260,71 @@ function BlockedKeywordsPanel({ token }) {
 
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 // ─── Seva Setu Applications tab ──────────────────────────────────────────────────
-function SevaApplicationsTab({ token }) {
+const SEVA_APP_STATUSES = ["created", "submitted", "confirmed"];
+
+function SevaApplicationsTab({ token, companies = [] }) {
   const [applications, setApplications] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selectedApp, setSelectedApp] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
+  const [services, setServices] = useState([]);
+  const [filters, setFilters] = useState({
+    company_id: "",
+    status: "",
+    service_type: "",
+    search: "",
+    from_date: "",
+    to_date: "",
+    with_documents: true,
+  });
 
   const limit = 50;
+
+  // Service dropdown only makes sense when scoped to one tenant — service_key
+  // is per-tenant so the same key can map to different services across tenants.
+  useEffect(() => {
+    if (!filters.company_id) { setServices([]); return; }
+    (async () => {
+      try {
+        const { data } = await axios.get(
+          `${API}/super-admin/services/${filters.company_id}?include_disabled=true`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        setServices(data.services || []);
+      } catch {
+        setServices([]);
+      }
+    })();
+  }, [filters.company_id, token]);
+
+  // When the operator switches company, drop the now-meaningless service filter.
+  useEffect(() => {
+    setFilters((f) => f.service_type ? { ...f, service_type: "" } : f);
+  }, [filters.company_id]);
+
+  const buildParams = (extra = {}) => {
+    const p = {
+      page, limit,
+      with_documents: filters.with_documents,
+      ...extra,
+    };
+    if (filters.company_id)   p.company_id   = filters.company_id;
+    if (filters.status)       p.status       = filters.status;
+    if (filters.service_type) p.service_type = filters.service_type;
+    if (filters.search)       p.search       = filters.search;
+    if (filters.from_date)    p.from_date    = filters.from_date;
+    if (filters.to_date)      p.to_date      = filters.to_date;
+    return p;
+  };
 
   const fetchApplications = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await axios.get(`${API}/super-admin/seva-setu/applications`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { page, limit, with_documents: true },
+        params: buildParams(),
       });
       setApplications(data.applications);
       setTotal(data.total);
@@ -1241,13 +1333,32 @@ function SevaApplicationsTab({ token }) {
     } finally {
       setLoading(false);
     }
-  }, [page, token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, token, filters]);
 
   useEffect(() => { fetchApplications(); }, [fetchApplications]);
 
+  const setFilter = (patch) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setPage(1);
+  };
+
+  const clearFilters = () => {
+    setFilters({ company_id: "", status: "", service_type: "", search: "", from_date: "", to_date: "", with_documents: true });
+    setPage(1);
+  };
+
+  const hasActiveFilters = ["company_id", "status", "service_type", "search", "from_date", "to_date"].some((k) => filters[k]);
+
   const handleCsvDownload = async () => {
     try {
-      const res = await fetch(`${API}/super-admin/seva-setu/applications-export/csv?with_documents=true`, {
+      const qs = new URLSearchParams();
+      Object.entries(buildParams()).forEach(([k, v]) => {
+        if (v === "" || v === undefined || v === null) return;
+        if (k === "page" || k === "limit") return; // CSV is full-export, not paginated
+        qs.set(k, String(v));
+      });
+      const res = await fetch(`${API}/super-admin/seva-setu/applications-export/csv?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error();
@@ -1274,13 +1385,103 @@ function SevaApplicationsTab({ token }) {
   return (
     <div>
       {/* Filters row */}
-      <div className="flex flex-wrap items-end gap-3 mb-5">
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">Company</Label>
+          <Select
+            value={filters.company_id || "all"}
+            onValueChange={(v) => setFilter({ company_id: v === "all" ? "" : v })}
+          >
+            <SelectTrigger className="w-44 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All companies</SelectItem>
+              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">Status</Label>
+          <Select
+            value={filters.status || "all"}
+            onValueChange={(v) => setFilter({ status: v === "all" ? "" : v })}
+          >
+            <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {SEVA_APP_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">Service</Label>
+          <Select
+            value={filters.service_type || "all"}
+            onValueChange={(v) => setFilter({ service_type: v === "all" ? "" : v })}
+            disabled={!filters.company_id}
+          >
+            <SelectTrigger className="w-44 h-9 text-sm">
+              <SelectValue placeholder={filters.company_id ? "All services" : "Pick a company first"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All services</SelectItem>
+              {services.map((s) => (
+                <SelectItem key={s.service_key} value={s.service_key}>{s.name || s.service_key}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">Search reference</Label>
+          <input
+            type="text"
+            className="border rounded h-9 px-2 text-sm w-44"
+            placeholder="e.g. PASS-2024"
+            value={filters.search}
+            onChange={(e) => setFilter({ search: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">From</Label>
+          <input
+            type="date"
+            className="border rounded h-9 px-2 text-sm"
+            value={filters.from_date}
+            onChange={(e) => setFilter({ from_date: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-gray-500 mb-1 block">To</Label>
+          <input
+            type="date"
+            className="border rounded h-9 px-2 text-sm"
+            value={filters.to_date}
+            onChange={(e) => setFilter({ to_date: e.target.value })}
+          />
+        </div>
         <Button variant="outline" size="sm" onClick={fetchApplications} className="h-9">
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
         <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-[#2E8B57] hover:bg-[#246b43] text-white ml-auto">
           <Download className="w-4 h-4 mr-1" /> Export CSV
         </Button>
+      </div>
+
+      {/* Second row: with_documents toggle + count + clear */}
+      <div className="flex items-center gap-4 mb-3 text-xs text-gray-600">
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filters.with_documents}
+            onChange={(e) => setFilter({ with_documents: e.target.checked })}
+          />
+          With documents only
+        </label>
+        <span>{total} application{total === 1 ? "" : "s"}{hasActiveFilters && <span className="ml-1 text-gray-400">(filtered)</span>}</span>
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-xs">
+            Clear filters
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -1302,7 +1503,9 @@ function SevaApplicationsTab({ token }) {
               <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
             )}
             {!loading && applications.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-10 text-gray-400">No applications with documents found.</td></tr>
+              <tr><td colSpan={7} className="text-center py-10 text-gray-400">
+                {hasActiveFilters ? "No applications match these filters." : "No applications found."}
+              </td></tr>
             )}
             {!loading && applications.map((app, i) => (
               <tr key={app.id || i} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
@@ -1503,6 +1706,7 @@ export default function SuperAdminDashboard() {
   const [analytics, setAnalytics] = useState({});
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [adminsForCompany, setAdminsForCompany] = useState(null);  // Sprint 11
   const [newCompany, setNewCompany] = useState({
     name: "", email: "", admin_password: "", llm_model: "gpt-5.2",
   });
@@ -1510,7 +1714,7 @@ export default function SuperAdminDashboard() {
   const token = localStorage.getItem("token");
 
   useEffect(() => {
-    if (!token) { navigate("/super-admin/login"); return; }
+    if (!token) { navigate("/login"); return; }
     fetchData();
   }, []);
 
@@ -1685,6 +1889,13 @@ export default function SuperAdminDashboard() {
                             Created {formatDate(company.created_at)}
                           </p>
                         )}
+                        <Button
+                          size="sm" variant="outline" className="mt-2"
+                          onClick={() => setAdminsForCompany(company)}
+                          data-testid={`manage-admins-${company.id}`}
+                        >
+                          <UserPlus className="w-3 h-3 mr-1" /> Admins
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1719,7 +1930,7 @@ export default function SuperAdminDashboard() {
           <>
             <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Seva Setu Applications</h1>
             <div className="bg-white rounded-xl shadow-md p-6">
-              <SevaApplicationsTab token={token} />
+              <SevaApplicationsTab token={token} companies={companies} />
             </div>
           </>
         )}
@@ -1728,21 +1939,241 @@ export default function SuperAdminDashboard() {
         {activeTab === "knowledge" && (
           <>
             <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Knowledge Base</h1>
-            <KnowledgeTab token={token} />
+            <KnowledgeTab token={token} companies={companies} />
             <div className="mt-8">
               <BlockedKeywordsPanel token={token} />
             </div>
           </>
         )}
 
-        {/* ── Settings tab ── */}
-        {activeTab === "settings" && (
+        {/* ── Tenant Services tab (Sprint 4D/4E) ── */}
+        {activeTab === "tenant-services" && (
           <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Settings</h1>
-            <div className="bg-white rounded-xl shadow-md p-6 text-gray-500">
-              Settings coming soon.
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Services</h1>
+            <div className="bg-white rounded-xl shadow-md p-6">
+              <TenantServicesTab companies={companies} token={token} />
             </div>
           </>
+        )}
+
+        {/* ── Channel Mappings tab (Sprint 5) ── */}
+        {activeTab === "channel-mappings" && (
+          <>
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Channel Mappings</h1>
+            <div className="bg-white rounded-xl shadow-md p-6">
+              <ChannelMappingsTab companies={companies} token={token} />
+            </div>
+          </>
+        )}
+
+        {/* ── Bot Config tab (Sprint 3D) ── */}
+        {activeTab === "bot-config" && (
+          <>
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Bot Config</h1>
+            <div className="bg-white rounded-xl shadow-md p-6">
+              <BotConfigTab companies={companies} token={token} />
+            </div>
+          </>
+        )}
+
+        {/* ── Scrapers tab (Sprint 2F) ── */}
+        {activeTab === "scrapers" && (
+          <>
+            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Scrapers</h1>
+            <div className="bg-white rounded-xl shadow-md p-6">
+              <ScrapersTab companies={companies} token={token} />
+            </div>
+          </>
+        )}
+
+      </div>
+
+      {/* Sprint 11 — admins manager modal */}
+      {adminsForCompany && (
+        <AdminsModal
+          company={adminsForCompany}
+          token={token}
+          onClose={() => setAdminsForCompany(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─── Sprint 11 — Admins manager modal ─────────────────────────────────── */
+
+function AdminsModal({ company, token, onClose }) {
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPass, setNewPass]   = useState("");
+  const [resetting, setResetting] = useState(null); // admin row when reset prompt open
+  const [resetPass, setResetPass] = useState("");
+
+  const fetchAdmins = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed");
+      setAdmins(data.admins || []);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [company.id, token]);
+
+  useEffect(() => { fetchAdmins(); }, [fetchAdmins]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (newPass.length < 8) { toast.error("Initial password must be at least 8 characters"); return; }
+    setAdding(true);
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newEmail.trim(), initial_password: newPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed");
+      toast.success(`Added ${data.email}. They'll be forced to set a new password on first login.`);
+      setNewEmail(""); setNewPass("");
+      fetchAdmins();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDelete = async (admin) => {
+    if (!window.confirm(`Remove admin ${admin.email}? They'll lose access immediately.`)) return;
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${admin.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Failed");
+      toast.success("Admin removed");
+      fetchAdmins();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleReset = async () => {
+    if (resetPass.length < 8) { toast.error("New password must be at least 8 characters"); return; }
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${resetting.id}/reset-password`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ new_password: resetPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed");
+      toast.success(`Password reset for ${resetting.email}. They'll be forced to change it on next login.`);
+      setResetting(null); setResetPass("");
+      fetchAdmins();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold">Admins — {company.name}</h3>
+            <p className="text-xs text-slate-400">Tenant {company.id.slice(0, 8)}…</p>
+          </div>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+
+        {loading ? (
+          <div className="text-center text-slate-400 py-4">Loading…</div>
+        ) : (
+          <table className="w-full text-sm mb-6">
+            <thead className="bg-slate-50 text-left text-slate-600">
+              <tr>
+                <th className="px-3 py-2">Email</th>
+                <th className="px-3 py-2">Created</th>
+                <th className="px-3 py-2">Reset?</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {admins.map((a) => (
+                <tr key={a.id} className="border-t">
+                  <td className="px-3 py-2 font-mono text-xs">{a.email}</td>
+                  <td className="px-3 py-2 text-xs text-slate-500">{(a.created_at || "").slice(0, 10)}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {a.password_change_required ? <span className="text-amber-600">forced change pending</span> : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right space-x-1">
+                    <Button size="sm" variant="ghost" onClick={() => { setResetting(a); setResetPass(""); }}>
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => handleDelete(a)} disabled={admins.length <= 1}>
+                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {admins.length === 0 && (
+                <tr><td colSpan={4} className="text-center py-4 text-slate-400">No admins yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+
+        {/* Add admin form */}
+        <form onSubmit={handleAdd} className="border-t pt-4 space-y-3">
+          <div className="text-sm font-medium text-[#1A2E40]">Add admin</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Email</Label>
+              <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
+                     type="email" required placeholder="admin@example.com" />
+            </div>
+            <div>
+              <Label className="text-xs">Initial password (≥8 chars)</Label>
+              <Input value={newPass} onChange={(e) => setNewPass(e.target.value)}
+                     type="text" required placeholder="They'll be forced to change it" />
+            </div>
+          </div>
+          <Button type="submit" disabled={adding} className="bg-[#E06F2C] hover:bg-[#C55D20] text-white">
+            <UserPlus className="w-4 h-4 mr-2" /> {adding ? "Adding…" : "Add admin"}
+          </Button>
+        </form>
+
+        {/* Reset password sub-modal */}
+        {resetting && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setResetting(null)}>
+            <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <h4 className="font-semibold mb-2">Reset password</h4>
+              <p className="text-sm text-slate-500 mb-3">
+                Set a new bootstrap password for <strong>{resetting.email}</strong>. They'll be forced
+                to change it on next login.
+              </p>
+              <Input
+                value={resetPass}
+                onChange={(e) => setResetPass(e.target.value)}
+                placeholder="New password (≥8 chars)"
+                type="text"
+              />
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" onClick={() => setResetting(null)}>Cancel</Button>
+                <Button onClick={handleReset}>Reset password</Button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

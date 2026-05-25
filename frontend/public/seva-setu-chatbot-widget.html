@@ -78,10 +78,11 @@
 
   <div class="embed-box">
     <h2>Embed on any website — copy this 1 line:</h2>
-    <pre>&lt;script src="https://sevasetu.seva.org.za/seva-widget.js" data-bot-id="1"&gt;&lt;/script&gt;</pre>
+    <pre>&lt;script src="https://sevasetu.seva.org.za/seva-widget.js" data-company-id="YOUR-COMPANY-UUID"&gt;&lt;/script&gt;</pre>
     <p class="note">
       Replace <strong>YOUR-HOST.com/seva-widget.js</strong> with wherever you host the built file
       (<code>dist/widget/seva-widget.js</code> after running <code>yarn build:widget</code>).
+      Replace <strong>YOUR-COMPANY-UUID</strong> with the tenant ID issued by the super-admin dashboard.
       The backend URL is baked in at build time via <code>REACT_APP_BACKEND_URL</code>.
     </p>
   </div>
@@ -90,7 +91,8 @@
 <div class="arrow">↘</div>
 
 <!-- EMBED SNIPPET — paste this 1 line anywhere on your site -->
-<script src="/seva-widget.js" data-bot-id="1"></script>
+<!-- Chatbot widget -->
+<script src="http://localhost:3000/seva-widget.js" data-company-id="3350431e-c50c-4008-b7ee-00cb5b1a5574"></script>
 
 </body>
 </html>
