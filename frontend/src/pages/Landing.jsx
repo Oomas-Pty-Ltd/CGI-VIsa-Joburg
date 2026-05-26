@@ -1,5 +1,5 @@
 import React from "react";
-import { Building2, Shield, Globe, Zap } from "lucide-react";
+import { Building2, Shield, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 
@@ -7,16 +7,19 @@ export default function Landing() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-blue-50">
-      <nav className="container mx-auto px-6 py-6 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <Shield className="w-8 h-8 text-[#E06F2C]" />
-          <h1 className="text-2xl font-bold text-[#1A2E40]">Seva Setu Bot</h1>
+    <div className="min-h-screen bg-background text-foreground">
+      <nav className="container mx-auto px-6 py-5 flex justify-between items-center">
+        <div className="flex items-center gap-2.5">
+          <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center">
+            <Shield className="w-4 h-4 text-primary-foreground" />
+          </div>
+          <h1 className="text-base font-semibold tracking-tight">
+            {process.env.REACT_APP_SITE_NAME || "Bot Console"}
+          </h1>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-2">
           <Button
-            variant="outline"
-            className="border-[#1A2E40] text-[#1A2E40] hover:bg-[#1A2E40] hover:text-white"
+            variant="ghost"
             onClick={() => navigate("/login")}
             data-testid="login-btn"
           >
@@ -25,47 +28,69 @@ export default function Landing() {
         </div>
       </nav>
 
-      <main className="container mx-auto px-6 py-20">
-        <div className="max-w-4xl mx-auto text-center space-y-8">
-          <h1 className="text-5xl md:text-6xl font-bold text-[#1A2E40] tracking-tight" data-testid="landing-heading">
-            Multi-Tenant Consular Automation Platform
+      <main className="container mx-auto px-6 pt-16 pb-20">
+        <div className="max-w-3xl mx-auto text-center space-y-6">
+          <h1 className="text-4xl md:text-5xl font-semibold tracking-tight" data-testid="landing-heading">
+            Multi-tenant service automation
           </h1>
-          <p className="text-xl text-gray-700 leading-relaxed max-w-2xl mx-auto">
-            Your friendly AI assistant for consular services. Save time, get instant help, 
-            and complete your applications with ease. Available 24/7 in 50+ languages.
+          <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl mx-auto">
+            Your AI assistant for service applications. Save time, get instant
+            help, and complete applications with ease — 24/7, in the languages
+            your operator configures.
           </p>
 
-          <div className="flex gap-4 justify-center pt-8">
+          <div className="flex gap-3 justify-center pt-4">
             <Button
-              className="bg-[#E06F2C] hover:bg-[#C55D20] text-white px-8 py-6 text-lg rounded-md shadow-lg hover:shadow-xl transition-all"
+              size="lg"
               onClick={() => navigate("/consular")}
               data-testid="start-consular-bot-btn"
             >
-              Start Consular Application
+              Start application
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              onClick={() => navigate("/login")}
+            >
+              Sign in
             </Button>
           </div>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-16">
-            <div className="bg-white rounded-xl p-8 shadow-md hover:shadow-lg transition-all" data-testid="feature-card-multi-tenant">
-              <Building2 className="w-12 h-12 text-[#E06F2C] mb-4 mx-auto" />
-              <h3 className="text-xl font-semibold text-[#1A2E40] mb-2">Multi-Tenant</h3>
-              <p className="text-gray-600">Isolated company accounts with dedicated admin portals</p>
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-md hover:shadow-lg transition-all" data-testid="feature-card-secure">
-              <Shield className="w-12 h-12 text-[#2E8B57] mb-4 mx-auto" />
-              <h3 className="text-xl font-semibold text-[#1A2E40] mb-2">Secure & Private</h3>
-              <p className="text-gray-600">Your data is protected with enterprise-grade security</p>
-            </div>
-
-            <div className="bg-white rounded-xl p-8 shadow-md hover:shadow-lg transition-all" data-testid="feature-card-multilingual">
-              <Globe className="w-12 h-12 text-[#E06F2C] mb-4 mx-auto" />
-              <h3 className="text-xl font-semibold text-[#1A2E40] mb-2">50+ Languages</h3>
-              <p className="text-gray-600">Hindi, Zulu, Afrikaans, and more supported</p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-20 max-w-5xl mx-auto">
+          <FeatureCard
+            icon={Building2}
+            title="Multi-tenant"
+            body="Isolated company accounts with dedicated admin portals."
+            testId="feature-card-multi-tenant"
+          />
+          <FeatureCard
+            icon={Shield}
+            title="Secure"
+            body="Data scoped to each tenant; per-request validation on every endpoint."
+            testId="feature-card-secure"
+          />
+          <FeatureCard
+            icon={Globe}
+            title="Multilingual"
+            body="Speech, text, and PDFs in the languages your tenants configure."
+            testId="feature-card-multilingual"
+          />
         </div>
       </main>
+    </div>
+  );
+}
+
+function FeatureCard({ icon: Icon, title, body, testId }) {
+  return (
+    <div
+      className="rounded-lg border border-border bg-card p-6 hover:border-foreground/20 transition-colors"
+      data-testid={testId}
+    >
+      <Icon className="w-5 h-5 text-foreground mb-3" />
+      <h3 className="text-sm font-semibold mb-1">{title}</h3>
+      <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
     </div>
   );
 }

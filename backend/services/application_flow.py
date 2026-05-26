@@ -35,23 +35,54 @@ logger = logging.getLogger(__name__)
 # =====================================================================
 
 
-CONTACT_INFO = (
-    "📞 **+27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800**\n"
-    "📧 ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
-    "🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-    "🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-    "🌐 https://www.cgijoburg.gov.in"
-)
+CONTACT_INFO = "Please contact us directly using the contact details on our website."
 
 
 # =====================================================================
 # KEYWORD DETECTION
+# Platform-default keyword sets. Per-tenant overrides come from
+# ``tenant_bot_config.flow_keywords`` (see services.bot_config).
+# Use :py:func:`preload_flow_keywords` at the start of a request handler
+# to populate the tenant cache so the sync helpers below pick up overrides.
 # =====================================================================
-_APPLY_KW    = {"apply", "register", "start", "begin", "application", "करना", "चाहिए", "लगाना", "apply now"}
-_YES_KW      = {"yes", "yeah", "ok", "okay", "sure", "confirm", "proceed", "हाँ", "हां", "ha", "yep", "y"}
-_NO_KW       = {"no", "nope", "cancel", "नहीं", "nahi", "n"}
-_DISCARD_KW  = {"discard", "cancel", "stop", "quit", "exit", "छोड़", "बंद", "abort", "back", "go back", "main menu"}
-_CONTINUE_KW = {"continue", "resume", "जारी", "चालू", "go on", "yes continue"}
+_DEFAULT_APPLY_KW    = {"apply", "register", "start", "begin", "application", "apply now"}
+_DEFAULT_YES_KW      = {"yes", "yeah", "ok", "okay", "sure", "confirm", "proceed", "ha", "yep", "y"}
+_DEFAULT_NO_KW       = {"no", "nope", "cancel", "n"}
+_DEFAULT_DISCARD_KW  = {"discard", "cancel", "stop", "quit", "exit", "abort", "back", "go back", "main menu"}
+_DEFAULT_CONTINUE_KW = {"continue", "resume", "go on", "yes continue"}
+
+# Per-tenant cache populated by ``preload_flow_keywords``. Keyed by
+# ``company_id``; each value is a dict of category → set[str].
+_TENANT_KW_CACHE: Dict[str, Dict[str, set]] = {}
+
+
+async def preload_flow_keywords(company_id: Optional[str]) -> None:
+    """Populate the per-tenant flow-keyword cache. Call once per request
+    before invoking the sync ``is_apply_intent`` / ``is_yes`` / etc.
+    helpers. Safe to call repeatedly — relies on bot_config's own 60s cache.
+    """
+    if not company_id:
+        return
+    try:
+        from services.bot_config import get_bot_config
+        cfg = await get_bot_config(company_id)
+        _TENANT_KW_CACHE[company_id] = {
+            "apply":    set(cfg.flow_keywords("apply",    _DEFAULT_APPLY_KW)),
+            "yes":      set(cfg.flow_keywords("yes",      _DEFAULT_YES_KW)),
+            "no":       set(cfg.flow_keywords("no",       _DEFAULT_NO_KW)),
+            "discard":  set(cfg.flow_keywords("discard",  _DEFAULT_DISCARD_KW)),
+            "continue": set(cfg.flow_keywords("continue", _DEFAULT_CONTINUE_KW)),
+        }
+    except Exception:
+        pass
+
+
+def _kw(category: str, default: set, tenant_id: Optional[str] = None) -> set:
+    """Return the resolved keyword set for ``category`` — tenant override
+    when available, otherwise the platform default."""
+    if tenant_id and tenant_id in _TENANT_KW_CACHE:
+        return _TENANT_KW_CACHE[tenant_id].get(category, default)
+    return default
 
 
 def _words(msg: str):
@@ -65,30 +96,32 @@ def _contains(msg: str, kw_set):
 _TRACKING_RE  = re.compile(r'\b[A-Z]{2,20}-\d{8}-[A-Z0-9]{4,10}\b', re.IGNORECASE)
 _LOOKUP_KW    = {"track", "status", "my application", "find my", "check my", "where is my", "application status"}
 
-def is_apply_intent(msg: str) -> bool:
-    return _contains(msg, _APPLY_KW)
+def is_apply_intent(msg: str, tenant_id: Optional[str] = None) -> bool:
+    return _contains(msg, _kw("apply", _DEFAULT_APPLY_KW, tenant_id))
 
 def is_tracking_query(msg: str) -> bool:
     """True if message contains a tracking ID."""
     return bool(_TRACKING_RE.search(msg))
 
 
-def is_yes(msg: str) -> bool:
+def is_yes(msg: str, tenant_id: Optional[str] = None) -> bool:
+    kws = _kw("yes", _DEFAULT_YES_KW, tenant_id)
     m = msg.lower().strip().rstrip(".")
-    return m in _YES_KW or _contains(msg, _YES_KW)
+    return m in kws or _contains(msg, kws)
 
 
-def is_no(msg: str) -> bool:
+def is_no(msg: str, tenant_id: Optional[str] = None) -> bool:
+    kws = _kw("no", _DEFAULT_NO_KW, tenant_id)
     m = msg.lower().strip().rstrip(".")
-    return m in _NO_KW or _contains(msg, _NO_KW)
+    return m in kws or _contains(msg, kws)
 
 
-def is_discard(msg: str) -> bool:
-    return _contains(msg, _DISCARD_KW)
+def is_discard(msg: str, tenant_id: Optional[str] = None) -> bool:
+    return _contains(msg, _kw("discard", _DEFAULT_DISCARD_KW, tenant_id))
 
 
-def is_continue(msg: str) -> bool:
-    return _contains(msg, _CONTINUE_KW) or is_yes(msg)
+def is_continue(msg: str, tenant_id: Optional[str] = None) -> bool:
+    return _contains(msg, _kw("continue", _DEFAULT_CONTINUE_KW, tenant_id)) or is_yes(msg, tenant_id)
 
 
 def is_question(msg: str) -> bool:
@@ -117,92 +150,121 @@ def _is_info_query(msg: str) -> bool:
     return any(p in low for p in info_phrases)
 
 
-_SERVICE_PATTERNS: Dict[str, list] = {
+# Platform-default service-detection patterns. These match the legacy
+# CGI-Joburg service catalogue and fire only when a tenant hasn't
+# preloaded its own patterns via :py:func:`preload_service_patterns`.
+# New tenants get tenant-specific service detection automatically — the
+# patterns below are derived from each tenant's ``tenant_services[].keywords``.
+_DEFAULT_SERVICE_PATTERNS: Dict[str, list] = {
     "passport": [
         "passport", "पासपोर्ट", "renew passport", "passport renewal", "new passport",
-        "fresh passport", "passport expired", "travel document", "tatkal",
-        "passportindia", "passport application", "emergency passport",
-        "lost passport", "damaged passport", "passport reissue",
+        "fresh passport", "passport expired", "travel document",
+        "passport application", "lost passport", "damaged passport", "passport reissue",
     ],
     "visa": [
         "visa", "वीजा", "tourist visa", "business visa", "student visa",
-        "medical visa", "e-visa", "evisa", "entry visa", "visit india",
-        "travel to india", "go to india", "trip to india", "travel india",
-        "indianvisaonline", "vfs", "vfs global", "vfs appointment",
-        "visa application", "visa fee", "visa processing", "visa stamping",
-        "visa on arrival", "conference visa", "employment visa",
+        "medical visa", "e-visa", "evisa", "entry visa",
+        "visa application", "visa fee", "visa processing", "visa on arrival",
     ],
     "oci": [
         "oci", "overseas citizen", "overseas citizenship", "oci card",
         "person of indian origin", "indian origin", "pio card",
         "lifelong visa", "oci registration", "oci renewal", "oci reissue",
-        "oci child", "oci minor", "oci spouse", "ociservices",
-        "indian origin card", "proof of indian origin",
     ],
     "pcc": [
         "pcc", "police clearance", "clearance certificate",
         "police certificate", "criminal record", "criminal clearance",
         "good standing certificate", "no criminal record",
         "background check", "character certificate", "clearance letter",
-        "immigration clearance", "police verification",
     ],
     "marriage": [
         "marriage certificate", "marriage registration", "marry", "married",
-        "wedding certificate", "matrimonial", "nikah certificate",
-        "register marriage", "marriage abroad", "marriage in south africa",
+        "wedding certificate", "register marriage", "marriage abroad",
         "spouse visa", "marriage attestation", "marriage document",
     ],
     "birth": [
         "birth certificate", "birth registration", "register birth",
         "born abroad", "child born", "newborn", "baby registration",
-        "birth record", "birth abroad", "child registration",
+        "birth record", "birth abroad",
     ],
     "attestation": [
         "attestation", "apostille", "notarization", "notary",
         "document attestation", "attest document", "certify document",
-        "degree attestation", "certificate attestation", "affidavit",
-        "power of attorney", "poa", "document authentication",
+        "affidavit", "power of attorney", "poa", "document authentication",
         "legalization", "stamp document",
-    ],
-    "renunciation": [
-        "renunciation", "renounce", "surrender passport", "give up citizenship",
-        "renounce indian citizenship", "surrender indian passport",
-        "change citizenship", "foreign citizenship", "new citizenship",
-        "took south african citizenship", "naturalisation", "surrender",
-        "surrender citizenship", "surrender indian citizenship",
     ],
     "ec_death": [
         "emergency certificate", "ec certificate", "death certificate",
         "death registration", "register death", "deceased", "passed away",
-        "death abroad", "indian died", "indian national died",
-        "emergency travel document", "lost passport emergency",
-        "ec for travel", "emergency cert",
+        "emergency travel document",
     ],
     "misc": [
-        "miscellaneous", "misc", "other service", "other consular",
-        "affidavit", "power of attorney", "poa", "gpa", "general power of attorney",
-        "life certificate", "jeevan pramaan", "attestation",
-        "apostille", "notarization", "document authentication", "legalization",
-        "stamp document", "certify document", "degree attestation",
-        "certificate attestation", "attest document", "other form",
-        "other document", "other request",
+        "miscellaneous", "misc", "other service",
+        "affidavit", "power of attorney", "poa", "gpa",
+        "other form", "other document", "other request",
     ],
 }
 
-# Services that can be detected from website keywords even if not in SERVICES
-_WEBSITE_ONLY_KEYWORDS: Dict[str, str] = {
-    "income certificate":   "Income Certificate",
-    "domicile":             "Domicile Certificate",
-    "nri":                  "NRI Services",
-    "pension":              "Pension Services",
-}
+# Website-info-only categories — tenant-supplied via the
+# ``tenant_bot_config.website_only_services`` config slot when needed.
+# Empty platform default; legacy CGI categories like "Income Certificate"
+# / "NRI Services" / "pension" are no longer hardcoded here.
+_WEBSITE_ONLY_KEYWORDS: Dict[str, str] = {}
 
 
-def detect_service(msg: str) -> Optional[str]:
-    """Return a SERVICES key if message matches, else None."""
+# Per-tenant service-pattern cache. Each entry mirrors the structure of
+# ``_DEFAULT_SERVICE_PATTERNS`` but is derived from the tenant's actual
+# ``tenant_services[].keywords`` lists. Populated by
+# :py:func:`preload_service_patterns` at the request entry point.
+_TENANT_SERVICE_PATTERNS: Dict[str, Dict[str, list]] = {}
+
+
+async def preload_service_patterns(company_id: Optional[str]) -> None:
+    """Populate the per-tenant service-detection cache.
+
+    Reads ``tenant_services`` for the tenant and builds a
+    ``{service_key: keyword_list}`` map. Call once per request before any
+    sync :py:func:`detect_service` invocations downstream. Safe to call
+    repeatedly (relies on the service_registry's own 60s cache).
+    """
+    if not company_id:
+        return
+    try:
+        from services.service_registry import list_services
+        services = await list_services(company_id)
+        out: Dict[str, list] = {}
+        for s in services:
+            if not s.enabled:
+                continue
+            kws = [str(k).lower() for k in (s.raw.get("keywords") or []) if k]
+            # Always include the service name + key itself as keywords —
+            # avoids tenants having to repeat the obvious ones.
+            kws.append(s.service_key.lower())
+            if s.name:
+                kws.append(s.name.lower())
+            out[s.service_key] = sorted(set(kws), key=len, reverse=True)  # longest-first → "tourist visa" beats "visa"
+        if out:
+            _TENANT_SERVICE_PATTERNS[company_id] = out
+    except Exception as exc:
+        logger.debug("[preload_service_patterns] %s: %s", company_id, exc)
+
+
+def detect_service(msg: str, tenant_id: Optional[str] = None) -> Optional[str]:
+    """Return a service_key if the message matches, else None.
+
+    When ``tenant_id`` is supplied AND the tenant's patterns have been
+    preloaded, the tenant's own ``tenant_services[].keywords`` drive
+    detection. Falls back to ``_DEFAULT_SERVICE_PATTERNS`` (legacy CGI
+    vocabulary) only when the tenant cache is empty.
+    """
     low = msg.lower()
-    for service, patterns in _SERVICE_PATTERNS.items():
-        if any(p in low for p in patterns):
+    patterns = (
+        _TENANT_SERVICE_PATTERNS.get(tenant_id)
+        if tenant_id and tenant_id in _TENANT_SERVICE_PATTERNS
+        else _DEFAULT_SERVICE_PATTERNS
+    )
+    for service, kws in patterns.items():
+        if any(p in low for p in kws):
             return service
     return None
 
@@ -385,128 +447,61 @@ def _website_only_info_page(service_label: str, scraped_summary: str = "") -> st
         )
 
     parts.append(
-        f"**For this service, please contact the consulate directly:**\n\n"
-        f"{CONTACT_INFO}\n\n"
-        f"You may also visit **https://www.cgijoburg.gov.in** for the latest updates."
+        f"**For this service, please contact us directly:**\n\n"
+        f"{CONTACT_INFO}"
     )
     return "\n\n".join(parts)
 
 
-_PASSPORT_SUBTYPES = {
-    "lost": {
-        "label": "Lost/Stolen Passport — Re-issue",
-        "description": (
-            "To re-issue a lost or stolen Indian passport, you must apply online at "
-            "https://passportindia.gov.in (select 'Re-issue') and submit in person at "
-            "the VFS Global Passport Centre, Johannesburg with an appointment.\n\n"
-            "**Important:** A police report (FIR) for the lost/stolen passport is mandatory. "
-            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page) — includes ICWF ZAR 30. "
-            "Processing time: 3–4 weeks."
-        ),
-        "extra_docs": [
-            "Original FIR / Police Report for lost or stolen passport (mandatory)",
-            "Proof of Indian citizenship (if original passport not available)",
-            "Sworn affidavit explaining circumstances of loss",
-        ],
-    },
-    "stolen": {
-        "label": "Lost/Stolen Passport — Re-issue",
-        "description": (
-            "To re-issue a stolen Indian passport, apply online at "
-            "https://passportindia.gov.in (select 'Re-issue') and submit at VFS Global, Johannesburg.\n\n"
-            "**Important:** A police report (FIR) is mandatory. "
-            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page). Processing: 3–4 weeks."
-        ),
-        "extra_docs": [
-            "Original FIR / Police Report for stolen passport (mandatory)",
-            "Proof of Indian citizenship (Aadhaar / PAN / birth certificate)",
-            "Sworn affidavit explaining circumstances of theft",
-        ],
-    },
-    "damaged": {
-        "label": "Damaged Passport — Re-issue",
-        "description": (
-            "To re-issue a damaged Indian passport, apply online at "
-            "https://passportindia.gov.in (select 'Re-issue') and submit at VFS Global, Johannesburg.\n\n"
-            "A passport is considered damaged if it has ink/water stains, scribbling, torn pages, "
-            "missing data page, or spine damage. "
-            "Fees: ZAR 2,280 (36-page) | ZAR 2,655 (60-page). Processing: 3–4 weeks."
-        ),
-        "extra_docs": [
-            "Original damaged passport (must be submitted)",
-        ],
-    },
-    "emergency": {
-        "label": "Emergency Travel Document",
-        "description": (
-            "An Emergency Travel Document (ETD) is issued for a single journey to India when a valid "
-            "Indian passport is not available due to loss, theft, or damage.\n\n"
-            "Required: police report (if lost/stolen), proof of identity, 2 photographs, proof of travel. "
-            "Fees: ZAR 780 (includes ICWF). Processing: 2–3 working days."
-        ),
-        "extra_docs": [
-            "Police report (FIR) if passport was lost or stolen",
-            "Proof of identity (Aadhaar / PAN / any government ID)",
-            "Proof of travel (flight ticket or booking confirmation)",
-            "2 recent passport-size photographs",
-        ],
-    },
-    "tatkal": {
-        "label": "Tatkal (Urgent) Passport",
-        "description": (
-            "Tatkal is an urgent passport scheme for Indian nationals who require a passport quickly. "
-            "Apply online at https://passportindia.gov.in (select 'Tatkal') and submit at VFS Global, Johannesburg.\n\n"
-            "Tatkal fee is higher than normal; processing is typically 2–5 working days after verification."
-        ),
-        "extra_docs": [],
-    },
-}
+def _detect_subtype(svc: Service, query: str) -> Optional[Dict[str, Any]]:
+    """Match a user query against this service's configured subtypes.
 
-_PASSPORT_SUBTYPE_KEYWORDS = {
-    "lost":      ["lost passport", "lost my passport", "passport lost", "misplaced passport"],
-    "stolen":    ["stolen passport", "passport stolen", "passport was stolen", "passport theft"],
-    "damaged":   ["damaged passport", "passport damaged", "torn passport", "wet passport", "stained passport"],
-    "emergency": ["emergency travel", "emergency document", "emergency passport", "etd", "stranded without passport"],
-    "tatkal":    ["tatkal", "tatkaal", "urgent passport", "urgent travel"],
-}
+    Subtypes live on ``tenant_services[].subtypes`` (see Service dataclass).
+    Each entry has a ``keywords`` list; the first subtype whose keywords
+    overlap the user's lower-cased query is returned. Returns None when
+    the service has no subtypes or no match.
 
-
-def _detect_passport_subtype(query: str) -> Optional[str]:
+    Replaces the previous hardcoded ``_PASSPORT_SUBTYPES`` dict that
+    embedded ZAR fees, VFS Global Johannesburg, passportindia.gov.in,
+    FIR requirements, and tatkal scheme references — all CGI-specific.
+    Tenants now configure subtypes per service via the super-admin UI.
+    """
+    if not query:
+        return None
+    subtypes = svc.subtypes or []
+    if not subtypes:
+        return None
     low = query.lower()
-    for subtype, phrases in _PASSPORT_SUBTYPE_KEYWORDS.items():
-        if any(p in low for p in phrases):
-            return subtype
-    # Single word fallbacks
-    if "lost" in low.split() or "lose" in low.split():
-        return "lost"
-    if "stolen" in low.split() or "theft" in low.split():
-        return "stolen"
-    if "damaged" in low.split() or "damage" in low.split():
-        return "damaged"
-    if "emergency" in low.split():
-        return "emergency"
-    if "tatkal" in low.split():
-        return "tatkal"
+    for st in subtypes:
+        if not isinstance(st, dict):
+            continue
+        kws = [str(k).lower() for k in (st.get("keywords") or []) if k]
+        if any(kw in low for kw in kws):
+            return st
     return None
 
 
 def _service_info_page(svc: Service, scraped_summary: str = "", user_query: str = "", channel: str = "web") -> str:
     """Full info card shown when a user asks about a service.
     Combines static description + live scraped data + docs required + apply offer.
-    For passport, detects sub-type (lost/stolen/damaged/emergency/tatkal) from user_query."""
 
-    # Passport sub-type customisation
-    subtype_info = None
-    if svc.service_key == "passport" and user_query:
-        subtype_key = _detect_passport_subtype(user_query)
-        subtype_info = _PASSPORT_SUBTYPES.get(subtype_key)
+    For any service that has ``subtypes`` configured on its tenant_services
+    row, the user's query is matched against subtype keywords; on a hit
+    the subtype's description + extra docs are prepended to the service
+    info card. Previously this logic was hardcoded for ``service_key ==
+    "passport"`` only — now any tenant service can opt in by populating
+    ``subtypes``.
+    """
+
+    # Subtype customisation — tenant-configurable per service.
+    subtype_info = _detect_subtype(svc, user_query)
 
     if subtype_info:
-        title = subtype_info["label"]
-        description = subtype_info["description"]
+        title = subtype_info.get("label") or svc.name
+        description = subtype_info.get("description") or svc.description
         base_docs = list(svc.documents)
-        # Prepend sub-type specific docs (FIR etc.) before generic list
-        extra = subtype_info.get("extra_docs", [])
+        # Prepend subtype-specific docs (e.g. police report) before generic list
+        extra = list(subtype_info.get("extra_docs") or [])
         all_docs = extra + [d for d in base_docs if d not in extra]
         docs = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(all_docs))
         parts = [f"## {title}\n\n{description}"]
@@ -612,16 +607,23 @@ def _match_field_key(svc: Service, user_label: str) -> Optional[str]:
     if normalised in field_keys:
         return normalised
 
-    # 2. Alias lookup
+    # 2. Tenant-supplied aliases on the field itself (preferred)
+    for f in fields:
+        for alias in (f.get("aliases") or []):
+            if low == str(alias).lower().strip():
+                return f["key"]
+
+    # 3. Built-in alias map (kept as a fallback for legacy services
+    #    that haven't been edited since the schema added per-field aliases).
     alias = _FIELD_ALIASES.get(low)
     if alias and alias in field_keys:
         return alias
 
-    # 3. Substring match against key words or question text
+    # 4. Substring match against key words or question text
     for f in fields:
         key_words = f["key"].replace("_", " ")
-        q_words   = f["question"].lower()
-        if low in key_words or low in q_words:
+        q_words   = (f.get("question") or "").lower()
+        if low in key_words or (q_words and low in q_words):
             return f["key"]
 
     return None
@@ -879,7 +881,8 @@ async def process_flow(
             new_value  = _corr.group(2).strip()
             field_key  = _match_field_key(svc_obj, user_label) if svc_obj else None
             if field_key:
-                validation_error = _validate_field(field_key, new_value)
+                _fc = _field_cfg(svc_obj, field_key) if svc_obj else {}
+                validation_error = _validate_field(field_key, new_value, _fc)
                 if validation_error:
                     return (
                         f"⚠️ {validation_error}\n\nPlease try again.",
@@ -910,22 +913,132 @@ async def process_flow(
 
         # ── TC 4.3 — Final submission ─────────────────────────────────
         if "submit" in message.lower():
+            # ── pre_submit hooks ──────────────────────────────────────
+            # Run with the full form data in scope so rules can branch on
+            # field values (fee_amount > 10000 → require_review, etc.).
+            # Actions handled here:
+            #   * block          — refuse the submission with a message
+            #   * require_review — mark application "pending_review"
+            #                      instead of "submitted"
+            #   * set_field      — override a form field before persist
+            from services.service_hooks import evaluate_hooks, first_action
+            _form_data = dict(flow.get("data", {}) or {})
+            _hook_ctx_submit = {
+                "service": svc_obj.service_key if svc_obj else service,
+                "service_name": svc_name,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "channel": channel,
+                "tracking_id": tracking_id,
+                **_form_data,
+            }
+            _pre_actions = evaluate_hooks(
+                (svc_obj.hooks or {}).get("pre_submit") if svc_obj else [],
+                _hook_ctx_submit,
+            )
+
+            _blocked = first_action(_pre_actions, "block")
+            if _blocked:
+                return (
+                    _blocked.get("message")
+                    or "Your application can't be submitted as configured. Please correct the highlighted issue and try again.",
+                    False, "docs_pending",
+                )
+
+            # Apply set_field actions to the form data BEFORE we persist.
+            # Each set_field action looks like {"action":"set_field","field":"X","value":Y}.
+            for _act in _pre_actions:
+                if _act.get("action") == "set_field" and _act.get("field"):
+                    _form_data[_act["field"]] = _act.get("value")
+            flow["data"] = _form_data  # keep flow in sync if we save later
+
+            # require_review flips the persisted status from "submitted"
+            # to "pending_review" + records the rule's reason for later
+            # admin/UI surfacing. The user still gets a positive
+            # confirmation; the operator sees the review queue.
+            _review_action = first_action(_pre_actions, "require_review")
+            _persist_status = "pending_review" if _review_action else "submitted"
+            _persist_extra = {}
+            if _review_action:
+                _persist_extra["review_reason"] = _review_action.get("reason", "rule_triggered")
+                if _review_action.get("reviewer"):
+                    _persist_extra["assigned_reviewer"] = _review_action["reviewer"]
+
             if app_id:
                 await _update_application(app_id, {
-                    "status":       "submitted",
+                    "status":       _persist_status,
                     "submitted_at": datetime.now(timezone.utc).isoformat(),
-                    "form_data":    flow.get("data", {}),
+                    "form_data":    _form_data,
                     "documents":    flow.get("uploaded_docs", []),
+                    **_persist_extra,
                 })
-            await _clear_flow(session_id)
-            return (
-                f"🎉 Your **{svc_name}** application has been **submitted successfully**!\n\n"
-                f"🔖 **Tracking ID:** `{tracking_id}`\n\n"
-                f"You can check your application status anytime using this tracking ID.\n\n"
-                f"You will be contacted at the email/phone you provided.\n\n"
-                f"For follow-up:\n{CONTACT_INFO}",
-                False, "submitted"
+
+            # ── post_submit hooks ─────────────────────────────────────
+            # Run after the application is persisted. Mostly side-effect
+            # actions:
+            #   * send_email — fire an async notification (compliance
+            #     team, partner, etc.)
+            #   * show_message — append text to the success reply
+            _post_actions = evaluate_hooks(
+                (svc_obj.hooks or {}).get("post_submit") if svc_obj else [],
+                {**_hook_ctx_submit, "status": _persist_status},
             )
+            for _act in _post_actions:
+                if _act.get("action") == "send_email":
+                    try:
+                        # Fire-and-forget — failures are logged but never
+                        # block the user's confirmation. The notification
+                        # service has its own retry/queueing.
+                        from services.notification_service import (
+                            notification_service,
+                            NotificationType,
+                            NotificationChannel,
+                            NotificationPriority,
+                        )
+                        _to = _act.get("to") or _act.get("recipient")
+                        _subj = _act.get("subject") or f"New {svc_name} application"
+                        _body = _act.get("body") or _act.get("message") or (
+                            f"New application submitted.\n\n"
+                            f"Tracking ID: {tracking_id}\nService: {svc_name}\nStatus: {_persist_status}"
+                        )
+                        db = await get_database()
+                        await notification_service.create_notification(
+                            db=db,
+                            user_id=_to or "external_recipient",
+                            notification_type=NotificationType.SYSTEM_ALERT,
+                            channel=NotificationChannel.EMAIL,
+                            priority=NotificationPriority.MEDIUM,
+                            data={"message": _body, "subject": _subj, "tracking_id": tracking_id},
+                        )
+                    except Exception as exc:
+                        logger.warning("[post_submit send_email] %s", exc)
+
+            await _clear_flow(session_id)
+
+            # Tailor the confirmation copy to the actual persisted status.
+            _extra_messages = "\n\n".join(
+                a.get("message", "")
+                for a in _post_actions
+                if a.get("action") == "show_message" and a.get("message")
+            )
+            if _persist_status == "pending_review":
+                _confirmation = (
+                    f"📥 Your **{svc_name}** application has been **received** and is now in review.\n\n"
+                    f"🔖 **Tracking ID:** `{tracking_id}`\n\n"
+                    f"A team member will be in touch shortly. "
+                    f"You can check the status anytime using this tracking ID."
+                )
+            else:
+                _confirmation = (
+                    f"🎉 Your **{svc_name}** application has been **submitted successfully**!\n\n"
+                    f"🔖 **Tracking ID:** `{tracking_id}`\n\n"
+                    f"You can check your application status anytime using this tracking ID.\n\n"
+                    f"You will be contacted at the email/phone you provided."
+                )
+            if _extra_messages:
+                _confirmation += "\n\n" + _extra_messages
+            _confirmation += f"\n\nFor follow-up:\n{CONTACT_INFO}"
+            return (_confirmation, False, "submitted")
         if is_discard(message):
             if app_id:
                 await _update_application(app_id, {"status": "discarded"})
@@ -933,7 +1046,7 @@ async def process_flow(
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
         if is_question(message) or _is_info_query(message):
             if channel == "whatsapp":
-                asked_svc = detect_service(message)
+                asked_svc = detect_service(message, tenant_id=tenant_id)
                 asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
@@ -973,7 +1086,7 @@ async def process_flow(
 
         if (is_question(message) or _is_info_query(message)) and not has_image:
             if channel == "whatsapp":
-                asked_svc = detect_service(message)
+                asked_svc = detect_service(message, tenant_id=tenant_id)
                 asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
@@ -1069,8 +1182,12 @@ async def process_flow(
                 # Accept the OCR-extracted value
                 accepted_value = prefilled_value
             else:
-                # User typed their own value — validate it
-                validation_error = _validate_field(fields[fi]["key"], message.strip())
+                # User typed their own value — validate it (using the
+                # tenant's per-field validation config if supplied).
+                validation_error = _validate_field(
+                    fields[fi]["key"], message.strip(),
+                    field_cfg=fields[fi] if isinstance(fields[fi], dict) else None,
+                )
                 if validation_error:
                     return (
                         f"⚠️ {validation_error}\n\n"
@@ -1111,7 +1228,7 @@ async def process_flow(
         # ── Normal collecting flow ────────────────────────────────────
         if (is_question(message) or _is_info_query(message)) and not _looks_like_answer(message, fields[fi]["key"]):
             if channel == "whatsapp":
-                asked_svc = detect_service(message)
+                asked_svc = detect_service(message, tenant_id=tenant_id)
                 asked_svc_obj = await get_service(tenant_id, asked_svc) if asked_svc else None
                 if app_id:
                     await _update_application(app_id, {"status": "discarded"})
@@ -1136,8 +1253,11 @@ async def process_flow(
             await _clear_flow(session_id)
             return ("Application **discarded**. All data cleared. How can I help you?", False, "idle")
 
-        # Validate the answer before accepting
-        validation_error = _validate_field(fields[fi]["key"], message.strip())
+        # Validate the answer before accepting (tenant per-field config aware).
+        validation_error = _validate_field(
+            fields[fi]["key"], message.strip(),
+            field_cfg=fields[fi] if isinstance(fields[fi], dict) else None,
+        )
         if validation_error:
             await _save_flow(session_id, flow)
             return (
@@ -1242,7 +1362,7 @@ async def process_flow(
     # STATE: info_shown / idle  — detect apply intent
     # ------------------------------------------------------------------
     if is_apply_intent(message) or state == "consent_pending":
-        detected_svc = detect_service(message)
+        detected_svc = detect_service(message, tenant_id=tenant_id)
         # Fall back to session service when:
         #   - already in consent_pending (mid-flow), OR
         #   - info_shown (user just asked about this service, "apply" means that service)
@@ -1259,10 +1379,44 @@ async def process_flow(
         target_svc = await get_service(tenant_id, svc_key) if svc_key else None
 
         if target_svc:
+            # ── pre_consent hooks ──────────────────────────────────────
+            # Run before the consent prompt is shown. Use cases:
+            #   * show_message — prepend an advisory ("processing for
+            #     this country takes 3 weeks")
+            #   * block        — short-circuit before the user even
+            #     commits ("this service is suspended this week")
+            # See services.service_hooks for the rule schema.
+            from services.service_hooks import evaluate_hooks, first_action
+            _hooks = (target_svc.hooks or {}).get("pre_consent") or []
+            _hook_ctx = {
+                "service": target_svc.service_key,
+                "service_name": target_svc.name,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "channel": channel,
+                "message": message,
+            }
+            _actions = evaluate_hooks(_hooks, _hook_ctx)
+            _blocked = first_action(_actions, "block")
+            if _blocked:
+                # Don't change state — user stays in idle so they can
+                # try a different service or ask a question.
+                return (
+                    _blocked.get("message")
+                    or f"Sorry — {target_svc.name} is currently unavailable. Please try again later.",
+                    False, state or "idle",
+                )
+
             flow["state"]   = "consent_pending"
             flow["service"] = target_svc.service_key
             await _save_flow(session_id, flow)
-            return (_consent_prompt(target_svc, scraped_summary), False, "consent_pending")
+            _prompt = _consent_prompt(target_svc, scraped_summary)
+            # Prepend each show_message action's text above the consent
+            # prompt so the user reads the advisory before saying yes.
+            _msgs = [a.get("message") for a in _actions if a.get("action") == "show_message" and a.get("message")]
+            if _msgs:
+                _prompt = "\n\n".join(_msgs) + "\n\n---\n\n" + _prompt
+            return (_prompt, False, "consent_pending")
 
         # Apply intent detected but no recognisable (or no enabled) service — ask the user
         if is_apply_intent(message):
@@ -1278,7 +1432,7 @@ async def process_flow(
     # Service info request — show structured info (scraped + static)
     # Triggers from idle OR info_shown (user switches service or asks again)
     # ------------------------------------------------------------------
-    detected_key = detect_service(message)
+    detected_key = detect_service(message, tenant_id=tenant_id)
     if detected_key and state in ("idle", "info_shown"):
         detected_svc = await get_service(tenant_id, detected_key)
         if detected_svc:
@@ -1325,19 +1479,79 @@ def _looks_like_answer(msg: str, field_key: str) -> bool:
     return len(msg) < 120 and "?" not in msg
 
 
-def _validate_field(key: str, value: str) -> Optional[str]:
+def _field_cfg(svc, key: str) -> Dict[str, Any]:
+    """Return the per-field config dict from a Service, by ``key``.
+    Returns an empty dict if not found — callers should treat it as
+    "no tenant overrides, use defaults"."""
+    if not svc:
+        return {}
+    fields = getattr(svc, "fields", None) or []
+    for f in fields:
+        if isinstance(f, dict) and f.get("key") == key:
+            return f
+    return {}
+
+
+def _validation_type_for_key(key: str) -> str:
+    """Best-effort guess of validation type for a bare field key (no tenant
+    config). Tenants should set ``validation_type`` explicitly on the
+    field; this is only the fallback for legacy services that haven't been
+    edited since the schema was added."""
+    name_keys     = {"full_name", "child_name", "father_name", "mother_name", "spouse_name"}
+    date_keys     = {"dob", "marriage_date"}
+    passport_keys = {"passport_number", "indian_passport", "new_passport", "father_passport"}
+    if key in name_keys:     return "name"
+    if key in date_keys:     return "date"
+    if key in passport_keys: return "passport"
+    if key == "email":       return "email"
+    if key == "phone":       return "phone"
+    if key == "travel_dates":return "travel_dates"
+    return "free_text"
+
+
+def _validate_field(key: str, value: str, field_cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """
     Validate a form field value.
+
+    ``field_cfg`` is the per-field dict from ``tenant_services[].fields[]``;
+    keys checked on it (all optional):
+
+      * ``validation_regex``  — custom regex; failure shows ``error_message``.
+      * ``validation_type``   — one of ``name|date|email|phone|passport|free_text``.
+        Overrides the key-based heuristic below.
+      * ``validation_min``    — min length / min age in days for dob.
+      * ``validation_max``    — max length / max year-back for dob.
+      * ``error_message``     — friendly message shown on failure.
+      * ``required``          — when False, an empty value is accepted.
+
     Returns an error message string if invalid, or None if valid.
     """
     import re
     from datetime import date
 
     v = value.strip()
+    field_cfg = field_cfg or {}
+
+    if not v:
+        if field_cfg.get("required") is False:
+            return None
+        return "This field cannot be empty. Please provide a valid answer."
+
+    # 1) Tenant-supplied custom regex wins outright if present.
+    custom_rx = field_cfg.get("validation_regex")
+    if custom_rx:
+        try:
+            if not re.search(custom_rx, v):
+                return field_cfg.get("error_message") or "Value does not match the expected format."
+            return None
+        except re.error:
+            logger.warning("[_validate_field] invalid tenant regex for %s: %r", key, custom_rx)
+
+    # 2) Resolve which validation_type to use: tenant override → key-based default.
+    vt = (field_cfg.get("validation_type") or "").lower() or _validation_type_for_key(key)
 
     # --- Name fields ---
-    _name_keys = {"full_name", "child_name", "father_name", "mother_name", "spouse_name"}
-    if key in _name_keys:
+    if vt == "name":
         if len(v) < 2:
             return "Name is too short. Please enter your full name."
         if re.search(r"\d", v):
@@ -1347,11 +1561,10 @@ def _validate_field(key: str, value: str) -> Optional[str]:
         return None
 
     # --- Date fields (DD/MM/YYYY) ---
-    _date_keys = {"dob", "marriage_date"}
-    if key in _date_keys:
+    if vt == "date":
         m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", v)
         if not m:
-            return "Please enter the date in **DD/MM/YYYY** format (e.g. 15/08/1990)."
+            return field_cfg.get("error_message") or "Please enter the date in **DD/MM/YYYY** format (e.g. 15/08/1990)."
         try:
             day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
             entered = date(year, month, day)
@@ -1371,36 +1584,36 @@ def _validate_field(key: str, value: str) -> Optional[str]:
         return None
 
     # --- Passport / document numbers ---
-    _passport_keys = {"passport_number", "indian_passport", "new_passport", "father_passport"}
-    if key in _passport_keys:
-        # Indian passport: 1 letter + 7 digits (e.g. A1234567)
-        # Foreign passports vary — require at least 5 alphanumeric chars
+    if vt == "passport":
         cleaned = re.sub(r"[\s\-]", "", v).upper()
-        if len(cleaned) < 5:
-            return "Passport number is too short. Please enter a valid passport number."
+        min_len = field_cfg.get("validation_min") or 5
+        if len(cleaned) < min_len:
+            return field_cfg.get("error_message") or f"Passport number is too short (minimum {min_len} characters)."
         if not re.match(r"^[A-Z0-9]+$", cleaned):
             return "Passport number should contain only letters and digits."
         return None
 
     # --- Email ---
-    if key == "email":
+    if vt == "email":
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
-            return "Please enter a valid email address (e.g. name@example.com)."
+            return field_cfg.get("error_message") or "Please enter a valid email address (e.g. name@example.com)."
         return None
 
     # --- Phone ---
-    if key == "phone":
+    if vt == "phone":
         digits = re.sub(r"[\s\+\-\(\)]", "", v)
         if not digits.isdigit():
-            return "Phone number should contain only digits (and optional +, spaces, or dashes)."
-        if len(digits) < 7:
-            return "Phone number is too short. Please enter a valid phone number."
-        if len(digits) > 15:
-            return "Phone number is too long. Please enter a valid phone number."
+            return field_cfg.get("error_message") or "Phone number should contain only digits (and optional +, spaces, or dashes)."
+        min_len = field_cfg.get("validation_min") or 7
+        max_len = field_cfg.get("validation_max") or 15
+        if len(digits) < min_len:
+            return f"Phone number is too short (minimum {min_len} digits)."
+        if len(digits) > max_len:
+            return f"Phone number is too long (maximum {max_len} digits)."
         return None
 
     # --- Travel dates (DD/MM/YYYY – DD/MM/YYYY) ---
-    if key == "travel_dates":
+    if vt == "travel_dates" or key == "travel_dates":
         # Normalise separators: en-dash, em-dash, hyphen → "-"
         normalised = re.sub(r"[–—]", "-", v)
         # Extract all date-like tokens (must be DD/MM/YYYY — 4-digit year required)

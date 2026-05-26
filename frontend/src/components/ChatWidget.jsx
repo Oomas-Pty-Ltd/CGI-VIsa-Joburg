@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import axios from 'axios';
-import { GREETING_MESSAGE, ADVISORY_MESSAGES } from '../config/botMessages';
+// botMessages.js is kept as a historical reference but NO content from it
+// is shown at runtime — tenant config (or empty defaults) replace everything.
 import { fetchBranding } from '../lib/widgetConfig';
 import './ChatWidget.css';
 
@@ -52,7 +53,7 @@ const API = `${API_BASE}/api`;
 // (or while the /widget-config fetch is in flight). Per-tenant override comes
 // from the backend `tenant_bot_config.bot_avatar_url`.
 const BOT_IMAGE = 'https://www.image2url.com/r2/default/images/1777573167951-14d72ab0-5694-47e9-91f4-318ff86d81c1.jpeg?v=2';
-const DEFAULT_BOT_NAME = 'Seva Setu';
+const DEFAULT_BOT_NAME = '';
 const ALL_LANGS = [
   { code: 'en',  name: 'English',                flag: '🇬🇧' },
   { code: 'hi',  name: 'हिंदी (Hindi)',            flag: '🇮🇳' },
@@ -111,61 +112,11 @@ const LANG_PLACEHOLDERS = {
   tn:  'Kwala potso ya gago ka Setswana kgotsa Sekgoa...',
 };
 
-// ── Service catalogue ──────────────────────────────────────────────────────
-const SERVICE_INFO = {
-  passport: {
-    key: 'passport', name: 'Passport Services', emoji: '🛂', category: 'TYPE_A',
-    gov_url: 'https://passportindia.gov.in',
-    description: 'Apply for a new Indian passport, renew your existing passport, or update personal details via the official Passport Seva portal.',
-    documents: ['Valid / Expired Indian Passport (original + copy)', 'Completed Application Form', '2 recent passport-size photographs (white background)', 'Proof of South African address', 'Birth Certificate (for new applicants)'],
-  },
-  visa: {
-    key: 'visa', name: 'Indian Visa', emoji: '✈️', category: 'TYPE_A',
-    gov_url: 'https://indianvisaonline.gov.in',
-    description: 'Apply for an Indian visa (tourist, business, medical, or student) via the official Indian Visa Online portal.',
-    documents: ['Valid Passport (min 6 months validity)', 'Completed Visa Application Form', '2 recent passport-size photographs', 'Travel itinerary / confirmed tickets', 'Bank statement (last 3 months)'],
-  },
-  pcc: {
-    key: 'pcc', name: 'Police Clearance Certificate (PCC)', emoji: '📋', category: 'TYPE_A',
-    gov_url: 'https://passportindia.gov.in/pcc',
-    description: 'Obtain a PCC required for immigration or employment abroad via the Passport Seva portal.',
-    documents: ['Valid Indian Passport (original + copy)', 'Completed PCC Application Form', 'Proof of current South African residential address', '2 passport-size photographs'],
-  },
-  oci: {
-    key: 'oci', name: 'OCI (Overseas Citizen of India)', emoji: '🇮🇳', category: 'TYPE_B',
-    description: 'Apply for an OCI card — lifelong multiple-entry visa to India. Application processed at this consulate.',
-    documents: ['Proof of Indian origin (old Indian passport / parent\'s Indian passport)', 'Current valid foreign passport (copy)', '2 recent passport-size photographs (50×50mm, white background)', 'Renunciation / Surrender Certificate (if applicable)'],
-  },
-  ec_death: {
-    key: 'ec_death', name: 'EC / Death Certificate', emoji: '📄', category: 'TYPE_B',
-    description: 'Apply for an Emergency Certificate or get a Death Certificate attested. Processed at this consulate.',
-    documents: ['Indian Passport of the deceased (copy)', 'South African Death Certificate (original + notarised copy)', 'Proof of relationship to deceased', 'Applicant\'s valid Indian Passport or OCI card'],
-  },
-  surrender: {
-    key: 'surrender', name: 'Surrender / Renunciation', emoji: '📜', category: 'TYPE_B',
-    description: 'Surrender your Indian passport and renounce Indian citizenship after acquiring foreign nationality.',
-    documents: ['Original Indian Passport (to be surrendered)', 'Copy of acquired foreign citizenship / naturalisation certificate', 'Completed Renunciation Form (Form I)', '2 passport-size photographs'],
-  },
-  marriage: {
-    key: 'marriage', name: 'Marriage Certificate', emoji: '💍', category: 'TYPE_B',
-    description: 'Register your marriage or get your South African marriage certificate attested for use in India.',
-    documents: ['Valid Indian Passport or OCI card (copy)', 'South African Marriage Certificate (original + copy)', '2 passport-size photographs of both spouses'],
-  },
-  misc: {
-    key: 'misc', name: 'Miscellaneous / Other', emoji: '🗂️', category: 'TYPE_B',
-    description: 'For other consular services — affidavits, power of attorney, document attestation, name correction, and more.',
-    documents: ['Valid Indian Passport or OCI card (copy)', 'Relevant supporting documents (case-specific)', '2 passport-size photographs'],
-  },
-  appointment: {
-    key: 'appointment', name: 'Book An Appointment', emoji: '📅',
-    url: 'https://appointment.cgijoburg.gov.in/',
-  },
-};
-
 // Greetings (English + common Indian/SA/Arabic/French) — whole-message match.
 // Allows trailing punctuation/emoji and a few optional fillers ("hi there", "good morning sir").
 const GREETING_PATTERN = /^\s*(hi|hii+|hey+|hello+|hola|yo|howdy|greetings|namaste|namaskar|namaskaram|salaam|salam|salam alaikum|assalam(?:u)? ?alaikum|vanakkam|sat sri akal|adab|pranam|jai hind|good\s*(morning|afternoon|evening|day)|bonjour|sawubona|molo|hallo|dumela|sanibonani)\b[\s\W]*(there|sir|madam|ma'am|bot|seva|setu|team)?[\s\W]*$/i;
-const GREETING_REPLY = "🙏 Namaste! How can I help you today? Pick a service below or type your question.";
+// Neutral fallback when the tenant hasn't configured a greeting in bot_config.
+const DEFAULT_GREETING_REPLY = "Hello! How can I help you today? Pick a service below or type your question.";
 
 function timeNow() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -180,18 +131,43 @@ function dataUrlToFile(dataUrl, filename = 'photo.jpg') {
   return new File([arr], filename, { type: mime });
 }
 
-function buildWelcomeMessages() {
+// Last-resort emoji for legacy service_keys when the tenant hasn't set
+// `tenant_services.emoji`. Per-tenant overrides (the admin emoji field on
+// each service row) take precedence — see the mapper in fetchBranding.
+const SERVICE_EMOJI_FALLBACK = {
+  passport: '🛂', visa: '✈️', pcc: '📋',
+  ec_death: '📄', marriage: '💍', misc: '🗂️',
+  appointment: '📅',
+};
+
+// Welcome messages are built entirely from tenant config.
+// If a tenant has not configured a greeting or advisories, we show a neutral
+// default — never CGI-specific copy from botMessages.js.
+const GENERIC_GREETING = "Hello! How can I help you today? Pick a service below or type your question.";
+
+function buildWelcomeMessages(opts = {}) {
+  const greeting = opts.greeting || GENERIC_GREETING;
+  const advisories = (opts.advisories && opts.advisories.length)
+    ? opts.advisories
+    : [];
   const msgs = [
-    { id: 'welcome', role: 'bot', html: false, content: GREETING_MESSAGE, time: timeNow() }
+    { id: 'welcome', role: 'bot', html: false, content: greeting, time: timeNow() }
   ];
-  ADVISORY_MESSAGES.filter(a => a.active).forEach(adv => {
-    msgs.push({ id: adv.id, role: 'advisory', type: adv.type, title: adv.title, content: adv.content, time: timeNow() });
+  advisories.forEach((adv, idx) => {
+    msgs.push({
+      id: adv.id || `adv_${idx}`,
+      role: 'advisory',
+      type: adv.type || 'info',
+      title: adv.title || '',
+      content: adv.content || '',
+      time: timeNow(),
+    });
   });
   msgs.push({ id: `seva_tabs_${Date.now()}`, role: 'seva_service_tabs' });
   return msgs;
 }
 
-// ── TypeA card: gov portal link + gov-ref input ────────────────────────────
+// ── TypeA card: gov portal link + reference input ─────────────────────────
 const TypeACard = ({ msg, onFinalize }) => {
   const [govRef, setGovRef] = React.useState('');
   const [submitted, setSubmitted] = React.useState(false);
@@ -211,7 +187,7 @@ const TypeACard = ({ msg, onFinalize }) => {
   return (
     <div className="seva-svc-card">
       <div className="seva-svc-card-row">
-        <span className="seva-svc-label">Seva Setu Reference</span>
+        <span className="seva-svc-label">Reference</span>
         <span className="seva-svc-refid">{msg.service?.reference_id}</span>
       </div>
       {(msg.service?.documents_required || []).length > 0 && (
@@ -224,21 +200,27 @@ const TypeACard = ({ msg, onFinalize }) => {
           </ul>
         </div>
       )}
-      <a
-        href={msg.govUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="seva-svc-primary-btn"
-      >
-        🔗 Open application Portal
-      </a>
+      {msg.govUrl && (
+        <a
+          href={msg.govUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="seva-svc-primary-btn"
+        >
+          🔗 Open Application Portal
+        </a>
+      )}
       {!submitted ? (
         <div>
-          <p className="seva-svc-gov-hint">After applying on the portal, enter your Government Reference / Application Number to record it and receive your PDF:</p>
+          <p className="seva-svc-gov-hint">
+            {msg.govUrl
+              ? 'After completing the application on the portal, enter your reference or application number below to record it and receive your PDF:'
+              : 'Enter your reference or application number below to record it and receive your PDF:'}
+          </p>
           <div className="seva-svc-input-row">
             <input
               type="text"
-              placeholder="e.g. AP2026XXXXXXX"
+              placeholder="Your application / reference number"
               value={govRef}
               onChange={e => setGovRef(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSubmit()}
@@ -291,15 +273,17 @@ const ServiceInfoCard = ({ svc }) => (
         <span className="seva-svc-badge">Gov Portal</span>
       )}
     </div>
-    <p className="seva-svc-desc">{svc.description}</p>
-    <div>
-      <p className="seva-svc-docs-title">Required Documents</p>
-      <ul className="seva-svc-docs-list">
-        {svc.documents.map((doc, i) => (
-          <li key={i}><span className="seva-svc-dot">•</span>{doc}</li>
-        ))}
-      </ul>
-    </div>
+    {svc.description && <p className="seva-svc-desc">{svc.description}</p>}
+    {svc.documents && svc.documents.length > 0 && (
+      <div>
+        <p className="seva-svc-docs-title">Required Documents</p>
+        <ul className="seva-svc-docs-list">
+          {svc.documents.map((doc, i) => (
+            <li key={i}><span className="seva-svc-dot">•</span>{doc}</li>
+          ))}
+        </ul>
+      </div>
+    )}
   </div>
 );
 
@@ -322,11 +306,31 @@ export default function ChatWidget() {
   // declares the same vars with the legacy hex values as defaults, so the
   // widget renders correctly during the fetch and if the fetch fails.
   const [brandingStyle, setBrandingStyle] = useState({});
+  // Tenant-driven chat-chrome copy. Empty strings render the legacy hardcoded
+  // values (see fallbacks at the render sites) so an unconfigured tenant
+  // still gets a sensible default.
+  const [headerTagline, setHeaderTagline] = useState('');
+  const [footerCopy, setFooterCopy] = useState('');
+  const [orgName, setOrgName] = useState('');
+  const [orgShortName, setOrgShortName] = useState('');
+  const [tenantGreeting, setTenantGreeting] = useState('');
+  const [tenantAdvisories, setTenantAdvisories] = useState([]);
+  // Tenant language list — codes the operator has enabled. Empty = all languages.
+  // Falls back to ['en'] when branding fetch fails (default_language is 'en').
+  const [tenantLanguageCodes, setTenantLanguageCodes] = useState(['en']);
+  // Tenant services from /widget-config. Until populated (null), the menu shows nothing.
+  const [tenantServices, setTenantServices] = useState(null); // null = still loading
 
   useEffect(() => {
     let cancelled = false;
     fetchBranding().then((branding) => {
-      if (cancelled || !branding) return;
+      if (cancelled) return;
+      if (!branding) {
+        // Endpoint down — leave defaults in place but populate services with
+        // empty array so the menu shows the empty state rather than a spinner.
+        setTenantServices([]);
+        return;
+      }
       if (branding.bot_name) setBotName(branding.bot_name);
       if (branding.bot_avatar_url) setBotAvatarUrl(branding.bot_avatar_url);
       const b = branding.branding || {};
@@ -334,6 +338,31 @@ export default function ChatWidget() {
       if (b.primary_color)   style['--seva-primary']   = b.primary_color;
       if (b.secondary_color) style['--seva-secondary'] = b.secondary_color;
       if (Object.keys(style).length) setBrandingStyle(style);
+
+      if (typeof branding.header_tagline === 'string') setHeaderTagline(branding.header_tagline);
+      if (typeof branding.footer_copy === 'string')    setFooterCopy(branding.footer_copy);
+      if (branding.org_name)        setOrgName(branding.org_name);
+      if (branding.org_short_name)  setOrgShortName(branding.org_short_name);
+      if (branding.greeting)        setTenantGreeting(branding.greeting);
+      if (Array.isArray(branding.advisories)) setTenantAdvisories(branding.advisories);
+
+      // Language whitelist — only show languages the operator enabled.
+      if (Array.isArray(branding.supported_languages) && branding.supported_languages.length > 0) {
+        setTenantLanguageCodes(branding.supported_languages.map(l => l.code).filter(Boolean));
+      }
+
+      // Reshape services to the {key, name, emoji, category, gov_url, description, documents}
+      // shape the rest of the widget already expects.
+      const services = Array.isArray(branding.services) ? branding.services : [];
+      setTenantServices(services.map((s) => ({
+        key:         s.key,
+        name:        s.name,
+        category:    s.category || 'TYPE_A',
+        emoji:       s.emoji || SERVICE_EMOJI_FALLBACK[s.key] || '',
+        gov_url:     s.external_url || null,
+        description: s.description || '',
+        documents:   s.documents || [],
+      })));
     });
     return () => { cancelled = true; };
   }, []);
@@ -445,12 +474,31 @@ export default function ChatWidget() {
     return () => { if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); };
   }, [cameraStream]);
 
-  // Open widget → show welcome (scroll to bottom so service tabs are visible)
+  // Open widget → show welcome (scroll to bottom so service tabs are visible).
+  // The effect re-runs when tenant copy arrives, but the messages.length===0
+  // guard means we only build the welcome once per open session — we don't
+  // overwrite the user's chat history.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isOpen && messages.length === 0) {
-      setMessages(buildWelcomeMessages());
+      setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
     }
-  }, [isOpen, messages.length]);
+  }, [isOpen, messages.length, tenantGreeting, tenantAdvisories]);
+
+  // If the user opened the chat before /widget-config returned, the welcome
+  // was built with hardcoded fallbacks. Replace it in place when the tenant
+  // copy arrives, but ONLY while the conversation is still on its initial
+  // welcome view (no user turns yet). Detected by: every message is one of
+  // the welcome-screen roles.
+  useEffect(() => {
+    if (!isOpen || messages.length === 0) return;
+    const initialRoles = new Set(['bot', 'advisory', 'seva_service_tabs']);
+    const onWelcome = messages.every((m) => initialRoles.has(m.role));
+    if (!onWelcome) return;
+    if (!tenantGreeting && (!tenantAdvisories || tenantAdvisories.length === 0)) return;
+    setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantGreeting, tenantAdvisories]);
 
   // Load services catalogue on mount
   useEffect(() => {
@@ -657,7 +705,7 @@ export default function ChatWidget() {
     sessionIdRef.current = null;
 
     scrollToTopNextRef.current = true;
-    setMessages(buildWelcomeMessages());
+    setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
     setInput('');
 
     if (isTimeout) {
@@ -690,7 +738,7 @@ export default function ChatWidget() {
           time: timeNow(),
         }]);
 
-        if (appRes.service_category === 'TYPE_A') {
+        if (appRes.service_category === 'TYPE_A' && appRes.gov_url) {
           setMessages(prev => [...prev,
             { id: Date.now() + 1, role: 'seva_type_a', service: appRes, govUrl: appRes.gov_url },
           ]);
@@ -792,11 +840,11 @@ export default function ChatWidget() {
         setSevaCurrentApp(appRes);
         const svc = sevaSelectedService;
 
-        if (appRes.service_category === 'TYPE_A') {
+        if (appRes.service_category === 'TYPE_A' && appRes.gov_url) {
           setMessages(prev => [...prev,
             {
               id: Date.now(), role: 'bot', html: false,
-              content: `✅ **Verified!** Your Reference ID is \`${appRes.reference_id}\`.\n\n🔗 Click below to open the official government portal for **${svc.name}**.`,
+              content: `✅ **Verified!** Your Reference ID is \`${appRes.reference_id}\`.\n\n🔗 Click below to open the application portal for **${svc.name}**.`,
               time: timeNow(),
             },
             { id: Date.now() + 1, role: 'seva_type_a', service: appRes, govUrl: appRes.gov_url },
@@ -1119,7 +1167,7 @@ export default function ChatWidget() {
       setMessages(prev => [
         ...prev,
         { id: now, role: 'user', content: trimmed, time: timeNow() },
-        { id: now + 1, role: 'bot', html: false, content: GREETING_REPLY, time: timeNow() },
+        { id: now + 1, role: 'bot', html: false, content: (tenantGreeting || DEFAULT_GREETING_REPLY), time: timeNow() },
         { id: now + 2, role: 'seva_service_tabs' },
       ]);
       return;
@@ -1479,10 +1527,9 @@ export default function ChatWidget() {
     langChangedRef.current = false;
 
     scrollToTopNextRef.current = true;
-    const advisories = ADVISORY_MESSAGES.filter(a => a.active).map(adv => ({
-      id: adv.id, role: 'advisory', type: adv.type, title: adv.title, content: adv.content, time: timeNow(),
-    }));
-    setMessages([...advisories, { id: 'lang-greet', role: 'bot', html: false, content: '', time: timeNow() }]);
+    // Show just the greeting placeholder while we fetch from backend —
+    // advisories are not repeated on language switch (user already saw them).
+    setMessages([{ id: 'lang-greet', role: 'bot', html: false, content: '', time: timeNow() }]);
 
     const code = currentLangRef.current;
     (async () => {
@@ -1526,7 +1573,7 @@ export default function ChatWidget() {
       } catch {
         setMessages(prev => {
           const updated = [...prev];
-          updated[updated.length - 1] = { ...updated[updated.length - 1], content: GREETING_MESSAGE };
+          updated[updated.length - 1] = { ...updated[updated.length - 1], content: GENERIC_GREETING };
           return updated;
         });
       } finally {
@@ -1591,7 +1638,7 @@ export default function ChatWidget() {
             onClick={e => { e.stopPropagation(); setShowTip(false); }}
             aria-label="Dismiss"
           >✕</button>
-          🇮🇳 Team India in South Africa Welcomes you
+          👋 Chat with {botName}
         </div>
       )}
 
@@ -1628,7 +1675,11 @@ export default function ChatWidget() {
             {/* LANGUAGE DROPDOWN */}
             <div className="lang-dropdown-wrap" style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
               {(() => {
-                const cur = ALL_LANGS.find(l => l.code === currentLang) || ALL_LANGS[0];
+                // Filter to the languages the operator has enabled.
+                // If only one language is configured, hide the picker entirely.
+                const availLangs = ALL_LANGS.filter(l => tenantLanguageCodes.includes(l.code));
+                const cur = availLangs.find(l => l.code === currentLang) || availLangs[0] || ALL_LANGS[0];
+                if (availLangs.length <= 1) return null;
                 return (
                   <>
                     <button
@@ -1646,7 +1697,7 @@ export default function ChatWidget() {
                       <div className="lang-dropdown open" id="langDropdown" style={{ position: 'fixed', top: langDropPos.top, right: langDropPos.right, zIndex: 100000 }}>
                         <div className="lang-dropdown-header">Select Language</div>
                         <div className="lang-dropdown-list" id="langList">
-                          {ALL_LANGS.map(l => (
+                          {availLangs.map(l => (
                             <button
                               key={l.code}
                               className={`lang-item${currentLang === l.code ? ' active' : ''}`}
@@ -1686,19 +1737,16 @@ export default function ChatWidget() {
                 <div className="voice-row-sub">Tap to hear spoken answers</div>
               </div>
             </div>
-            <div style={{ fontSize: '10px', color: 'rgba(255,255,255,.35)', fontWeight: 500, letterSpacing: '.03em' }}>🇮🇳 Team Bharat SA</div>
+            {headerTagline && (
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,.35)', fontWeight: 500, letterSpacing: '.03em' }}>{headerTagline}</div>
+            )}
           </div>
         </div>
 
-        {/* ADVISORY BANNER - Only show when no active session */}
-        {!sevaToken && (
-          <div className="advisory">
-            <div className="advisory-icon">⚠️</div>
-            <div className="advisory-text">
-              <strong>Advisory:</strong> The Consulate never calls demanding money. Beware of fraud calls using spoofed numbers.
-            </div>
-          </div>
-        )}
+        {/* Advisory banner: driven by tenant config — advisories are shown
+            inline as chat cards (role='advisory') in the message flow.
+            A separate always-visible banner would duplicate and was
+            previously hardcoded to CGI copy, so it is intentionally absent. */}
 
         {/* AUTHENTICATED ACTION BAR — Applications + Logout */}
         {sevaToken && (
@@ -1804,8 +1852,13 @@ export default function ChatWidget() {
                   <div className={`seva-msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
                     <img src={botAvatarUrl} alt="" />
                   </div>
+                  {tenantServices === null ? (
+                    <div style={{ padding: '8px 12px', fontSize: 12, color: 'rgba(0,0,0,.5)' }}>
+                      Loading services…
+                    </div>
+                  ) : tenantServices.length === 0 ? null : (
                   <ServiceTabs
-                    services={Object.values(SERVICE_INFO)}
+                    services={tenantServices}
                     onPick={(svc) => {
                       const now = Date.now();
                       if (svc.url) {
@@ -1817,7 +1870,7 @@ export default function ChatWidget() {
                         {
                           id: now,
                           role: 'user',
-                          content: `${svc.emoji} ${svc.name}`,
+                          content: `${svc.emoji || ''} ${svc.name}`.trim(),
                           time: timeNow(),
                         },
                         {
@@ -1825,9 +1878,15 @@ export default function ChatWidget() {
                           role: 'seva_service_info',
                           svc,
                         },
+                        {
+                          id: now + 2,
+                          role: 'seva_service_action',
+                          svc,
+                        },
                       ]);
                     }}
                   />
+                  )}
                 </div>
               )
             ) : msg.role === 'seva_service_action' ? (
@@ -2504,10 +2563,18 @@ export default function ChatWidget() {
           )}
         </div>
 
-        {/* FOOTER NOTE */}
-        <div className="chat-footer-note">
-          Official service of <span>Consulate General of India</span> · Johannesburg
-        </div>
+        {/* FOOTER NOTE — admin-configured copy wins; otherwise compose from
+            org_name / org_short_name; otherwise hide. The previous hardcoded
+            CGI line is the worst-case visible default only for very old
+            unconfigured tenants and is preserved as a sentinel. */}
+        {(footerCopy || orgName) && (
+          <div className="chat-footer-note">
+            {footerCopy
+              ? footerCopy
+              : <>Official service of <span>{orgName}</span>{orgShortName ? <> · {orgShortName}</> : null}</>
+            }
+          </div>
+        )}
       </div>
 
       {/* LANG TOAST */}
@@ -2581,7 +2648,7 @@ export default function ChatWidget() {
                   resetSevaAppState();
                   setShowDiscardConfirm(false);
                   scrollToTopNextRef.current = true;
-                  setMessages(buildWelcomeMessages());
+                  setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
                 }}
                 style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >
@@ -2622,7 +2689,7 @@ export default function ChatWidget() {
                   resetSevaAppState();
                   setShowAuthDiscardConfirm(false);
                   scrollToTopNextRef.current = true;
-                  setMessages(buildWelcomeMessages());
+                  setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
                 }}
                 style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >

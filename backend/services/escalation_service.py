@@ -90,75 +90,107 @@ class EscalationRequest:
 
 
 # =====================================================================
-# ESCALATION TRIGGERS
+# ESCALATION TRIGGERS — moved to tenant_bot_config.escalation_rules
+# (resolved via services.bot_config.BotConfig.escalation()). Kept here as
+# the fallback so callers that don't have a tenant id still work.
 # =====================================================================
-ESCALATION_TRIGGERS = {
+_DEFAULT_RULES = {
     "keywords": [
         "speak to human", "talk to person", "real person", "agent",
         "complaint", "complain", "frustrated", "angry", "upset",
         "manager", "supervisor", "not working", "useless", "terrible",
-        "sue", "lawyer", "legal", "court", "refund"
+        "sue", "lawyer", "legal", "court", "refund",
     ],
     "patterns": [
         r"(speak|talk).*(human|person|agent|someone)",
         r"(file|make|lodge).*complaint",
         r"(frustrated|angry|upset|disappointed)",
         r"not.*(helpful|working|satisfied|happy)",
-        r"(lawyer|legal|court|sue)"
+        r"(lawyer|legal|court|sue)",
     ],
+    "complaint_keywords": ["complaint", "complain", "sue", "lawyer", "legal", "refund"],
     "emergency_keywords": [
         "emergency", "urgent", "help", "arrested", "detained",
-        "hospital", "accident", "death", "stranded", "crisis"
-    ]
+        "hospital", "accident", "death", "stranded", "crisis",
+    ],
+    "consecutive_failure_threshold": 3,
 }
 
 
 class EscalationService:
     """
     Manages escalation of conversations to human agents.
+
+    Trigger keyword / pattern lists are per-tenant via
+    ``services.bot_config.BotConfig.escalation()``. Callers that pass a
+    ``company_id`` to :py:meth:`should_escalate` get tenant-scoped rules;
+    legacy callers fall back to the platform defaults defined above.
     """
-    
+
     def __init__(self):
-        self.triggers = ESCALATION_TRIGGERS
         self.escalation_count = 0
         self.resolved_count = 0
-    
-    def should_escalate(self, text: str, context: Dict = None) -> tuple[bool, EscalationReason, EscalationPriority]:
-        """
-        Check if message should trigger escalation.
-        
-        Returns: (should_escalate, reason, priority)
+
+    async def _rules_for(self, company_id: Optional[str]) -> Dict:
+        """Resolve tenant rules with the platform defaults underneath."""
+        if not company_id:
+            return _DEFAULT_RULES
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            return cfg.escalation()
+        except Exception as exc:
+            logger.debug("[escalation_service._rules_for] %s: %s", company_id, exc)
+            return _DEFAULT_RULES
+
+    async def should_escalate(
+        self,
+        text: str,
+        context: Dict = None,
+        company_id: Optional[str] = None,
+    ) -> tuple[bool, EscalationReason, EscalationPriority]:
+        """Check if a message should trigger escalation.
+
+        Returns: (should_escalate, reason, priority).
+
+        Pass ``company_id`` so per-tenant keyword/pattern overrides apply.
+        Without it, the platform defaults are used.
         """
         text_lower = text.lower()
-        
-        # Check emergency keywords (highest priority)
-        for keyword in self.triggers["emergency_keywords"]:
-            if keyword in text_lower:
+        rules = await self._rules_for(company_id)
+
+        # Emergency keywords — highest priority. Both the single list and
+        # the per-language map are checked so a tenant can configure either.
+        for keyword in rules.get("emergency_keywords", []):
+            if keyword.lower() in text_lower:
                 return True, EscalationReason.EMERGENCY, EscalationPriority.URGENT
-        
-        # Check complaint keywords
-        complaint_keywords = ["complaint", "complain", "sue", "lawyer", "legal", "refund"]
-        for keyword in complaint_keywords:
-            if keyword in text_lower:
+        for _lang, kws in (rules.get("emergency_keywords_by_lang") or {}).items():
+            for kw in (kws or []):
+                if kw.lower() in text_lower:
+                    return True, EscalationReason.EMERGENCY, EscalationPriority.URGENT
+
+        for keyword in rules.get("complaint_keywords", []):
+            if keyword.lower() in text_lower:
                 return True, EscalationReason.COMPLAINT, EscalationPriority.HIGH
-        
-        # Check user request keywords
-        for keyword in self.triggers["keywords"]:
-            if keyword in text_lower:
+
+        for keyword in rules.get("keywords", []):
+            if keyword.lower() in text_lower:
                 return True, EscalationReason.USER_REQUEST, EscalationPriority.MEDIUM
-        
-        # Check patterns
-        import re
-        for pattern in self.triggers["patterns"]:
-            if re.search(pattern, text_lower):
-                return True, EscalationReason.USER_REQUEST, EscalationPriority.MEDIUM
-        
-        # Check context for repeated failures
+
+        import re as _re
+        for pattern in rules.get("patterns", []):
+            try:
+                if _re.search(pattern, text_lower):
+                    return True, EscalationReason.USER_REQUEST, EscalationPriority.MEDIUM
+            except _re.error:
+                logger.warning("[escalation] invalid regex %r — skipped", pattern)
+
         if context:
             failure_count = context.get("consecutive_failures", 0)
-            if failure_count >= 3:
+            threshold = rules.get("consecutive_failure_threshold", 3)
+            if failure_count >= threshold:
                 return True, EscalationReason.REPEATED_FAILURE, EscalationPriority.MEDIUM
-        
+
         return False, None, None
     
     async def create_escalation(
@@ -373,48 +405,47 @@ class EscalationService:
             }
         }
     
-    def get_escalation_response(self, priority: EscalationPriority) -> str:
-        """Get appropriate response for escalation"""
-        if priority == EscalationPriority.URGENT:
-            return """🚨 **Emergency Escalation Created**
+    async def get_escalation_response(
+        self,
+        priority: EscalationPriority,
+        company_id: Optional[str] = None,
+    ) -> str:
+        """Resolve the response shown to the user when an escalation fires.
 
-Your request has been marked as **URGENT** and sent to our emergency response team.
-
-**Immediate Actions:**
-📞 **Emergency Helpline:** (+27) 11 581 9800 (24/7)
-
-A consular officer will contact you as soon as possible.
-
-If this is a life-threatening emergency, please also contact local emergency services (10111)."""
-
-        elif priority == EscalationPriority.HIGH:
-            return """⚠️ **High Priority Escalation Created**
-
-Your concern has been flagged as **high priority** and assigned to a senior officer.
-
-**Expected Response:** Within 4 business hours
-
-**In the meantime:**
-📞 Phone: +27 11 783 0202
-📧 Email: cons.joburg@mea.gov.in
-
-Reference ID has been generated for tracking."""
-
-        else:
-            return """✅ **Escalation Request Received**
-
-Your request to speak with a human agent has been recorded.
-
-**Expected Response:** Within 1 business day
-
-**Contact Options:**
-📞 Phone: +27 11 783 0202
-📧 Email: cons.joburg@mea.gov.in
-
-**Office Hours:**
-Mon-Fri: 9:00 AM - 5:30 PM
-
-Thank you for your patience."""
+        Reads ``escalation_rules.priority_responses[priority]`` on the tenant
+        config when ``company_id`` is supplied; falls back to platform
+        defaults if the tenant left that priority blank.
+        """
+        platform_defaults = {
+            EscalationPriority.URGENT: (
+                "🚨 **Emergency Escalation Created**\n\n"
+                "Your request has been marked as **URGENT** and sent to our emergency response team.\n\n"
+                "A representative will contact you as soon as possible.\n\n"
+                "If this is a life-threatening emergency, please contact your local emergency services immediately."
+            ),
+            EscalationPriority.HIGH: (
+                "⚠️ **High Priority Escalation Created**\n\n"
+                "Your concern has been flagged as **high priority** and assigned to a senior team member.\n\n"
+                "**Expected Response:** Within 4 business hours\n\n"
+                "Reference ID has been generated for tracking."
+            ),
+            EscalationPriority.MEDIUM: (
+                "✅ **Escalation Request Received**\n\n"
+                "Your request to speak with a human agent has been recorded.\n\n"
+                "**Expected Response:** Within 1 business day\n\n"
+                "Thank you for your patience."
+            ),
+            EscalationPriority.LOW: (
+                "✅ **Escalation Request Received**\n\n"
+                "Thank you — we'll get back to you when we can."
+            ),
+        }
+        rules = await self._rules_for(company_id)
+        responses = rules.get("priority_responses") or {}
+        tenant_msg = (responses.get(priority.value) or "").strip()
+        if tenant_msg:
+            return tenant_msg
+        return platform_defaults.get(priority, platform_defaults[EscalationPriority.MEDIUM])
 
 
 # Global escalation service instance

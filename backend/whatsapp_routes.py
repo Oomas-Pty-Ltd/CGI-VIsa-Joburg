@@ -159,13 +159,27 @@ async def generate_ai_response(user_message: str, session_id: str, company_id: s
         # message only if the tenant hasn't customised one.
         return cfg.fallback("error") or "Thank you for your message. For detailed assistance, please visit our web portal."
 
+    # Resolve the LLM model: env default → company override (same precedence
+    # as the web and consular routes).
+    llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    if company_id:
+        from database import get_database
+        _co = await (await get_database()).companies.find_one(
+            {"id": company_id}, {"_id": 0, "llm_model": 1}
+        )
+        if _co and _co.get("llm_model"):
+            llm_model = _co["llm_model"]
+
     try:
-        system_prompt = create_safe_system_prompt(cfg.system_prompt())
+        system_prompt = create_safe_system_prompt(
+            cfg.system_prompt(),
+            bot_name=cfg.bot_name,
+        )
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
             system_message=system_prompt
-        ).with_model("openai", "gpt-5.2")
+        ).with_model("openai", llm_model)
 
         response = await chat.send_message(UserMessage(text=user_message))
         return response
@@ -411,16 +425,24 @@ async def get_conversation_messages(
 # =====================================================================
 @router.post("/status-callback")
 async def whatsapp_status_callback(request: Request):
-    """Handle Twilio message status callbacks"""
+    """Handle Twilio message status callbacks.
+
+    No tenant header on this endpoint — Twilio doesn't send our
+    ``X-Company-Id``. Twilio MessageSIDs are globally unique
+    (``SM`` + 32 hex chars allocated by Twilio), so a lookup keyed on
+    ``twilio_sid`` cannot collide across tenants; the message's
+    ``company_id`` is whatever was set when it was originally inserted.
+    Sprint-2 audit reviewed and accepted: filter by SID alone is safe.
+    """
     try:
         form_data = await request.form()
-        
+
         message_sid = form_data.get("MessageSid")
         message_status = form_data.get("MessageStatus")
         error_code = form_data.get("ErrorCode")
-        
+
         db = await get_database()
-        
+
         await db.whatsapp_messages.update_one(
             {"twilio_sid": message_sid},
             {"$set": {

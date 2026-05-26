@@ -23,18 +23,22 @@ import { toast } from "sonner";
 import TenantServicesTab from "./super-admin/TenantServicesTab";
 import BotConfigTab from "./super-admin/BotConfigTab";
 import ScrapersTab from "./super-admin/ScrapersTab";
+import AdminShell from "@/components/AdminShell";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Mirrors SuperAdminDashboard's grouped TABS so role-switching feels
+// like the same product. Local admin gets fewer items (no platform
+// settings, no channel mappings — those are super-admin only).
 const TABS = [
-  { key: "dashboard",         label: "Dashboard",       icon: TrendingUp },
-  { key: "conversations",     label: "Conversations",   icon: MessageSquare },
-  { key: "audit-logs",        label: "Audit Logs",      icon: Shield },
-  { key: "seva-applications", label: "Applications",    icon: Files },
-  { key: "knowledge",         label: "Knowledge Base",  icon: BookOpen },
-  { key: "tenant-services",   label: "Services",        icon: Workflow },
-  { key: "bot-config",        label: "Bot Config",      icon: Bot },
-  { key: "scrapers",          label: "Scrapers",        icon: Globe },
+  { key: "dashboard",         label: "Overview",        icon: TrendingUp,    group: "Overview" },
+  { key: "conversations",     label: "Conversations",   icon: MessageSquare, group: "Activity" },
+  { key: "audit-logs",        label: "Audit logs",      icon: Shield,        group: "Activity" },
+  { key: "seva-applications", label: "Applications",    icon: Files,         group: "Activity" },
+  { key: "tenant-services",   label: "Services",        icon: Workflow,      group: "Content" },
+  { key: "knowledge",         label: "Knowledge base",  icon: BookOpen,      group: "Content" },
+  { key: "bot-config",        label: "Bot config",      icon: Bot,           group: "Configuration" },
+  { key: "scrapers",          label: "Scrapers",        icon: Globe,         group: "Configuration" },
 ];
 
 export default function LocalAdminDashboard() {
@@ -86,119 +90,51 @@ export default function LocalAdminDashboard() {
   // admin it's just a single-entry list of their own tenant.
   const companies = company ? [company] : [];
 
+  const userEmail = (() => {
+    try { return JSON.parse(atob((token || "").split(".")[1] || ""))?.sub || ""; }
+    catch { return ""; }
+  })();
+
+  // Per-tab page-level headers — keeps the shell generic and pulls the
+  // human-readable title close to the content it labels.
+  const PAGE_META = {
+    "dashboard":         { title: "Overview" },
+    "conversations":     { title: "Conversations",   description: "User conversations from chat, WhatsApp, and Facebook channels." },
+    "audit-logs":        { title: "Audit logs",      description: "Authentication, admin actions, and data-access events." },
+    "seva-applications": { title: "Applications",    description: "Submitted applications and their PDFs." },
+    "knowledge":         { title: "Knowledge base",  description: "Q&A entries and PDF uploads the bot draws from." },
+    "tenant-services":   { title: "Services",        description: "The catalogue of services your bot offers." },
+    "bot-config":        { title: "Bot configuration", description: "Identity, branding, languages, contact, and security." },
+    "scrapers":          { title: "Scrapers",        description: "Site crawler for keeping the knowledge base fresh." },
+  };
+  const meta = PAGE_META[activeTab] || {};
+
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="w-64 bg-[#1A2E40] text-white flex flex-col">
-        <div className="p-6 border-b border-white/10">
-          <div className="flex items-center gap-2 mb-1">
-            <Building2 className="w-7 h-7 text-[#E06F2C]" />
-            <div className="text-lg font-bold">Tenant Admin</div>
-          </div>
-          {company && (
-            <div className="text-xs text-white/60 truncate" title={company.name}>
-              {company.name}
-            </div>
-          )}
-        </div>
-
-        <nav className="flex-1 p-3 space-y-1">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <Button
-              key={key}
-              variant="ghost"
-              onClick={() => setActiveTab(key)}
-              className={`w-full justify-start text-white hover:bg-white/10 ${activeTab === key ? "bg-white/20" : ""}`}
-              data-testid={`tab-${key}`}
-            >
-              <Icon className="w-4 h-4 mr-2" />
-              {label}
-            </Button>
-          ))}
-        </nav>
-
-        <div className="p-3 border-t border-white/10">
-          <Button
-            variant="ghost"
-            onClick={handleLogout}
-            className="w-full justify-start text-white hover:bg-white/10"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </aside>
-
-      {/* Main area */}
-      <div className="flex-1 p-8 overflow-x-auto">
-        {activeTab === "dashboard" && (
-          <DashboardOverview company={company} stats={dashboardStats} onRefresh={fetchTenant} />
-        )}
-
-        {activeTab === "conversations" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Conversations</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ConversationsTab token={token} />
-            </div>
-          </>
-        )}
-
-        {activeTab === "audit-logs" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Audit Logs</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <AuditLogsTab token={token} />
-            </div>
-          </>
-        )}
-
-        {activeTab === "seva-applications" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Seva Applications</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ApplicationsTab token={token} companyId={companyId} />
-            </div>
-          </>
-        )}
-
-        {activeTab === "knowledge" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Knowledge Base</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <KnowledgeTab token={token} companyId={companyId} />
-            </div>
-          </>
-        )}
-
-        {activeTab === "tenant-services" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Services</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <TenantServicesTab companies={companies} token={token} singleTenant />
-            </div>
-          </>
-        )}
-
-        {activeTab === "bot-config" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Bot Config</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <BotConfigTab companies={companies} token={token} singleTenant />
-            </div>
-          </>
-        )}
-
-        {activeTab === "scrapers" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Scrapers</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ScrapersTab companies={companies} token={token} singleTenant />
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    <AdminShell
+      title="Tenant Admin"
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      user={{
+        email: userEmail,
+        type: "local_admin",
+        company_name: company?.name,
+      }}
+      onLogout={handleLogout}
+      pageTitle={meta.title}
+      pageDescription={meta.description}
+    >
+      {activeTab === "dashboard" && (
+        <DashboardOverview company={company} stats={dashboardStats} onRefresh={fetchTenant} />
+      )}
+      {activeTab === "conversations" && <ConversationsTab token={token} />}
+      {activeTab === "audit-logs" && <AuditLogsTab token={token} />}
+      {activeTab === "seva-applications" && <ApplicationsTab token={token} companyId={companyId} />}
+      {activeTab === "knowledge" && <KnowledgeTab token={token} companyId={companyId} />}
+      {activeTab === "tenant-services" && <TenantServicesTab companies={companies} token={token} singleTenant />}
+      {activeTab === "bot-config" && <BotConfigTab companies={companies} token={token} singleTenant />}
+      {activeTab === "scrapers" && <ScrapersTab companies={companies} token={token} singleTenant />}
+    </AdminShell>
   );
 }
 
@@ -210,10 +146,9 @@ export default function LocalAdminDashboard() {
 function DashboardOverview({ company, stats, onRefresh }) {
   return (
     <>
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-4xl font-bold text-[#1A2E40]">Dashboard</h1>
-        <Button variant="outline" onClick={onRefresh}>
-          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+      <div className="flex justify-end mb-4">
+        <Button variant="outline" size="sm" onClick={onRefresh}>
+          <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
         </Button>
       </div>
 
@@ -229,16 +164,16 @@ function DashboardOverview({ company, stats, onRefresh }) {
         <div className="bg-white rounded-xl shadow-md p-6">
           <h2 className="text-lg font-semibold mb-4">Tenant details</h2>
           <div className="grid grid-cols-2 gap-y-3 text-sm">
-            <span className="text-slate-500">Name</span>
+            <span className="text-muted-foreground">Name</span>
             <span>{company.name}</span>
-            <span className="text-slate-500">Company ID</span>
-            <code className="text-xs font-mono text-slate-600">{company.id}</code>
-            <span className="text-slate-500">Email</span>
+            <span className="text-muted-foreground">Company ID</span>
+            <code className="text-xs font-mono text-foreground">{company.id}</code>
+            <span className="text-muted-foreground">Email</span>
             <span>{company.email || "—"}</span>
-            <span className="text-slate-500">LLM model</span>
+            <span className="text-muted-foreground">LLM model</span>
             <span><Badge variant="secondary">{company.llm_model || "—"}</Badge></span>
-            <span className="text-slate-500">Created</span>
-            <span className="text-xs text-slate-600">{(company.created_at || "").replace("T", " ").slice(0, 19)}</span>
+            <span className="text-muted-foreground">Created</span>
+            <span className="text-xs text-foreground">{(company.created_at || "").replace("T", " ").slice(0, 19)}</span>
           </div>
         </div>
       )}
@@ -271,14 +206,14 @@ function EmbedSnippetCard({ companyId }) {
     <div className="bg-white rounded-xl shadow-md p-6 mt-6">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2">
-          <Code className="w-5 h-5 text-[#E06F2C]" />
+          <Code className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold">Embed on your website</h2>
         </div>
         <Button size="sm" variant="outline" onClick={handleCopy}>
           <Copy className="w-4 h-4 mr-1.5" /> Copy
         </Button>
       </div>
-      <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
         Paste this just before the closing <code>&lt;/body&gt;</code> tag on every page
         where you want the chatbot to appear. The script reads
         <code className="mx-1">data-company-id</code> to route every request to your tenant,
@@ -287,7 +222,7 @@ function EmbedSnippetCard({ companyId }) {
       <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-xs leading-relaxed overflow-x-auto font-mono">
 {snippet}
       </pre>
-      <p className="text-[11px] text-slate-400 mt-2 leading-snug">
+      <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
         Hosting the widget on a CDN? Replace the <code>src</code> URL with your CDN path —
         the <code>data-company-id</code> attribute is what links it to this tenant.
       </p>
@@ -297,13 +232,13 @@ function EmbedSnippetCard({ companyId }) {
 
 function StatCard({ icon: Icon, label, value, valueClass = "" }) {
   return (
-    <div className="bg-white rounded-xl shadow-md p-5 flex items-center gap-4">
-      <div className="bg-orange-50 p-3 rounded-lg">
-        <Icon className="w-6 h-6 text-[#E06F2C]" />
+    <div className="rounded-lg border border-border bg-card shadow-sm p-5 flex items-center gap-4">
+      <div className="bg-secondary p-3 rounded-md">
+        <Icon className="w-5 h-5 text-foreground" />
       </div>
       <div>
-        <div className="text-xs text-slate-500 uppercase">{label}</div>
-        <div className={`text-2xl font-bold text-[#1A2E40] ${valueClass}`}>{value}</div>
+        <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
+        <div className={`text-2xl font-semibold text-foreground ${valueClass}`}>{value}</div>
       </div>
     </div>
   );
@@ -346,18 +281,18 @@ function ConversationsTab({ token }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-500">{total} sessions</div>
+        <div className="text-sm text-muted-foreground">{total} sessions</div>
         <Button variant="outline" size="sm" onClick={fetchRows} disabled={loading}>
           <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
       {loading ? (
-        <div className="text-center text-slate-400 py-8">Loading…</div>
+        <div className="text-center text-muted-foreground py-8">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="text-center text-slate-400 py-8">No conversations yet for your tenant.</div>
+        <div className="text-center text-muted-foreground py-8">No conversations yet for your tenant.</div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-slate-50 text-left text-foreground">
             <tr>
               <th className="px-3 py-2">Channel</th>
               <th className="px-3 py-2">User</th>
@@ -373,8 +308,8 @@ function ConversationsTab({ token }) {
                 <td className="px-3 py-2"><Badge variant="secondary">{s.channel}</Badge></td>
                 <td className="px-3 py-2 text-xs font-mono">{s.user_identifier?.slice(0, 18) ?? "—"}</td>
                 <td className="px-3 py-2 text-center">{s.message_count}</td>
-                <td className="px-3 py-2 text-xs text-slate-500">{(s.created_at || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="px-3 py-2 text-xs text-slate-600 truncate max-w-xs">{s.first_message}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{(s.created_at || "").slice(0, 16).replace("T", " ")}</td>
+                <td className="px-3 py-2 text-xs text-foreground truncate max-w-xs">{s.first_message}</td>
                 <td className="px-3 py-2 text-right">
                   <Button size="sm" variant="ghost" onClick={() => setDetail(s.id)}>View</Button>
                 </td>
@@ -408,19 +343,19 @@ function SessionDetailModal({ token, sessionId, onClose }) {
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div>
             <div className="font-semibold">Session detail</div>
-            <div className="text-xs text-slate-400 font-mono">{sessionId}</div>
+            <div className="text-xs text-muted-foreground font-mono">{sessionId}</div>
           </div>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {!session ? (
-            <div className="text-center text-slate-400 py-6">Loading…</div>
+            <div className="text-center text-muted-foreground py-6">Loading…</div>
           ) : (
             (session.messages || []).map((m, i) => (
               <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`rounded-lg px-3 py-2 max-w-md text-sm ${m.role === "user" ? "bg-orange-500 text-white" : "bg-slate-100"}`}>
                   <div className="whitespace-pre-wrap">{m.content}</div>
-                  <div className={`text-xs mt-1 ${m.role === "user" ? "text-orange-100" : "text-slate-400"}`}>
+                  <div className={`text-xs mt-1 ${m.role === "user" ? "text-orange-100" : "text-muted-foreground"}`}>
                     {m.role} · {(m.timestamp || "").slice(0, 19).replace("T", " ")}
                   </div>
                 </div>
@@ -437,7 +372,7 @@ function Pagination({ page, total, limit, onChange }) {
   const pages = Math.ceil(total / limit);
   return (
     <div className="flex items-center justify-between text-sm">
-      <span className="text-slate-500">Page {page} of {pages}</span>
+      <span className="text-muted-foreground">Page {page} of {pages}</span>
       <div className="space-x-1">
         <Button size="sm" variant="outline" disabled={page === 1} onClick={() => onChange(page - 1)}>Prev</Button>
         <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</Button>
@@ -480,20 +415,20 @@ function AuditLogsTab({ token }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-500">{total} audit entries</div>
+        <div className="text-sm text-muted-foreground">{total} audit entries</div>
         <Button variant="outline" size="sm" onClick={fetchRows} disabled={loading}>
           <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
       {loading ? (
-        <div className="text-center text-slate-400 py-8">Loading…</div>
+        <div className="text-center text-muted-foreground py-8">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="text-center text-slate-400 py-8">
+        <div className="text-center text-muted-foreground py-8">
           No audit entries yet for your tenant. Entries appear as actions are taken.
         </div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-slate-50 text-left text-foreground">
             <tr>
               <th className="px-3 py-2">Timestamp</th>
               <th className="px-3 py-2">Category</th>
@@ -506,7 +441,7 @@ function AuditLogsTab({ token }) {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-t">
-                <td className="px-3 py-2 text-xs text-slate-500">{(r.timestamp || "").slice(0, 19).replace("T", " ")}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{(r.timestamp || "").slice(0, 19).replace("T", " ")}</td>
                 <td className="px-3 py-2"><Badge variant="secondary">{r.category}</Badge></td>
                 <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
                 <td className="px-3 py-2 text-xs">{r.user_type ? `${r.user_type}` : "—"}</td>
@@ -612,7 +547,7 @@ function ApplicationsTab({ token, companyId }) {
       {/* Filter row */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
         <div className="md:col-span-2">
-          <label className="text-xs text-slate-500 block mb-1">Search reference</label>
+          <label className="text-xs text-muted-foreground block mb-1">Search reference</label>
           <input
             type="text"
             className="w-full border rounded px-2 py-1.5 text-sm"
@@ -622,7 +557,7 @@ function ApplicationsTab({ token, companyId }) {
           />
         </div>
         <div>
-          <label className="text-xs text-slate-500 block mb-1">Status</label>
+          <label className="text-xs text-muted-foreground block mb-1">Status</label>
           <select
             className="w-full border rounded px-2 py-1.5 text-sm bg-white"
             value={filters.status}
@@ -633,7 +568,7 @@ function ApplicationsTab({ token, companyId }) {
           </select>
         </div>
         <div>
-          <label className="text-xs text-slate-500 block mb-1">Service</label>
+          <label className="text-xs text-muted-foreground block mb-1">Service</label>
           <select
             className="w-full border rounded px-2 py-1.5 text-sm bg-white"
             value={filters.service_type}
@@ -646,7 +581,7 @@ function ApplicationsTab({ token, companyId }) {
           </select>
         </div>
         <div>
-          <label className="text-xs text-slate-500 block mb-1">From</label>
+          <label className="text-xs text-muted-foreground block mb-1">From</label>
           <input
             type="date"
             className="w-full border rounded px-2 py-1.5 text-sm"
@@ -655,7 +590,7 @@ function ApplicationsTab({ token, companyId }) {
           />
         </div>
         <div>
-          <label className="text-xs text-slate-500 block mb-1">To</label>
+          <label className="text-xs text-muted-foreground block mb-1">To</label>
           <input
             type="date"
             className="w-full border rounded px-2 py-1.5 text-sm"
@@ -667,11 +602,11 @@ function ApplicationsTab({ token, companyId }) {
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
-          <div className="text-sm text-slate-500">
+          <div className="text-sm text-muted-foreground">
             {total} application{total === 1 ? "" : "s"}
-            {hasActiveFilters && <span className="ml-1 text-xs text-slate-400">(filtered)</span>}
+            {hasActiveFilters && <span className="ml-1 text-xs text-muted-foreground">(filtered)</span>}
           </div>
-          <label className="text-xs text-slate-500 flex items-center gap-1.5 cursor-pointer">
+          <label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
               checked={filters.with_documents}
@@ -691,16 +626,16 @@ function ApplicationsTab({ token, companyId }) {
       </div>
 
       {loading ? (
-        <div className="text-center text-slate-400 py-8">Loading…</div>
+        <div className="text-center text-muted-foreground py-8">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="text-center text-slate-400 py-8">
+        <div className="text-center text-muted-foreground py-8">
           {hasActiveFilters
             ? "No applications match these filters."
             : "No applications yet for your tenant."}
         </div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-slate-50 text-left text-foreground">
             <tr>
               <th className="px-3 py-2">Reference</th>
               <th className="px-3 py-2">Service</th>
@@ -716,7 +651,7 @@ function ApplicationsTab({ token, companyId }) {
                 <td className="px-3 py-2">{a.service_name || a.service_type}</td>
                 <td className="px-3 py-2"><Badge variant="secondary">{a.status}</Badge></td>
                 <td className="px-3 py-2 text-center">{a.document_count}</td>
-                <td className="px-3 py-2 text-xs text-slate-500">{(a.created_at || "").slice(0, 16).replace("T", " ")}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{(a.created_at || "").slice(0, 16).replace("T", " ")}</td>
               </tr>
             ))}
           </tbody>
@@ -756,9 +691,12 @@ function formatDateRange(from, until) {
   return `${from} → ${until}`;
 }
 
+// Neutral platform-default — mirrors backend
+// `services.knowledge_service.DEFAULT_KNOWLEDGE_CATEGORIES`. Tenants override
+// via `tenant_bot_config.knowledge_categories`; backend validates POST
+// /knowledge against the resolved list.
 const KB_PDF_CATEGORIES = [
-  "general", "visa", "passport", "oci", "pcc",
-  "fees", "emergency", "services", "event", "announcement", "other",
+  "general", "fees", "emergency", "office", "announcement", "event", "other",
 ];
 
 function PdfUploadCard({ token, companyId, onUploaded }) {
@@ -823,10 +761,10 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
   return (
     <div className="rounded-xl bg-white p-5 shadow-sm border">
       <div className="flex items-center gap-2 mb-1">
-        <Upload className="h-4 w-4 text-[#E06F2C]" />
-        <h2 className="font-semibold text-[#1A2E40]">Upload PDF to Knowledge Base</h2>
+        <Upload className="h-4 w-4 text-primary" />
+        <h2 className="font-semibold text-foreground">Upload PDF to Knowledge Base</h2>
       </div>
-      <p className="text-xs text-slate-500 mb-4">
+      <p className="text-xs text-muted-foreground mb-4">
         Drop a PDF and it will be split into knowledge entries the bot can search.
         FAQ-style documents are parsed into Q&amp;A pairs; other PDFs are chunked
         by section. Dates in the text are detected and used to mark past/upcoming
@@ -844,7 +782,7 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
           }}
           onClick={() => fileInputRef.current?.click()}
           className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-            dragOver ? "border-[#E06F2C] bg-orange-50" : "border-slate-300 hover:bg-slate-50"
+            dragOver ? "border-primary bg-secondary" : "border-border hover:bg-secondary/50"
           }`}
         >
           <input
@@ -856,12 +794,12 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
           />
           {file ? (
             <div className="text-sm">
-              <div className="font-medium text-slate-700">{file.name}</div>
-              <div className="text-xs text-slate-500">{(file.size / 1024).toFixed(1)} KB — click or drop another to replace</div>
+              <div className="font-medium text-foreground">{file.name}</div>
+              <div className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB — click or drop another to replace</div>
             </div>
           ) : (
-            <div className="text-sm text-slate-500">
-              <Upload className="h-5 w-5 mx-auto mb-2 text-slate-400" />
+            <div className="text-sm text-muted-foreground">
+              <Upload className="h-5 w-5 mx-auto mb-2 text-muted-foreground" />
               Click or drop a PDF here
             </div>
           )}
@@ -869,7 +807,7 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-slate-500">Document title (optional)</label>
+            <label className="text-xs text-muted-foreground">Document title (optional)</label>
             <input
               type="text"
               className="w-full border rounded p-2 text-sm"
@@ -877,12 +815,12 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Auto-filled from filename"
             />
-            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
               Label shown alongside each generated entry. Leave blank to use the filename.
             </p>
           </div>
           <div>
-            <label className="text-xs text-slate-500">Category</label>
+            <label className="text-xs text-muted-foreground">Category</label>
             <select
               className="w-full border rounded p-2 text-sm bg-white"
               value={category}
@@ -890,7 +828,7 @@ function PdfUploadCard({ token, companyId, onUploaded }) {
             >
               {KB_PDF_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
               Topical bucket applied to every entry from this PDF. You can edit it per-entry later.
             </p>
           </div>
@@ -934,7 +872,7 @@ function KnowledgeTab({ token, companyId }) {
       <PdfUploadCard token={token} companyId={companyId} onUploaded={fetchEntries} />
 
       <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-500">{entries.length} entries</div>
+        <div className="text-sm text-muted-foreground">{entries.length} entries</div>
         <div className="space-x-2">
           <Button variant="outline" size="sm" onClick={fetchEntries} disabled={loading}>
             <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -943,14 +881,14 @@ function KnowledgeTab({ token, companyId }) {
         </div>
       </div>
       {loading ? (
-        <div className="text-center text-slate-400 py-8">Loading…</div>
+        <div className="text-center text-muted-foreground py-8">Loading…</div>
       ) : entries.length === 0 ? (
-        <div className="text-center text-slate-400 py-8">
+        <div className="text-center text-muted-foreground py-8">
           No knowledge entries yet. Click <strong>New entry</strong> to add one.
         </div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-600">
+          <thead className="bg-slate-50 text-left text-foreground">
             <tr>
               <th className="px-3 py-2">Title</th>
               <th className="px-3 py-2">Category</th>
@@ -968,12 +906,12 @@ function KnowledgeTab({ token, companyId }) {
                 <td className="px-3 py-2 font-medium">{e.title}</td>
                 <td className="px-3 py-2"><Badge variant="secondary">{e.category}</Badge></td>
                 <td className="px-3 py-2"><EventBadge status={e.event_status} /></td>
-                <td className="px-3 py-2 text-xs text-slate-500">
+                <td className="px-3 py-2 text-xs text-muted-foreground">
                   {formatDateRange((e.valid_from || "").slice(0, 10), (e.valid_until || "").slice(0, 10))}
                 </td>
                 <td className="px-3 py-2 text-xs">{e.status}</td>
                 <td className="px-3 py-2 text-xs">v{e.version}</td>
-                <td className="px-3 py-2 text-xs text-slate-500">{(e.updated_at || "").slice(0, 16).replace("T", " ")}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{(e.updated_at || "").slice(0, 16).replace("T", " ")}</td>
                 <td className="px-3 py-2 text-right">
                   <Button size="sm" variant="ghost" onClick={() => setEditing(e)}>Edit</Button>
                 </td>
@@ -1078,7 +1016,7 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-semibold mb-1">{isNew ? "New knowledge entry" : `Edit: ${entry.title}`}</h3>
-        <p className="text-xs text-slate-500 mb-4">
+        <p className="text-xs text-muted-foreground mb-4">
           Knowledge entries are searched at chat time and used as grounding context for the bot's answers.
           Each entry should cover one topic — split long material into multiple entries.
         </p>
@@ -1096,10 +1034,10 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
             hint="A representative question a user might ask. Helps retrieval match this entry. Optional."
           />
           <div>
-            <label className="text-xs text-slate-500">Answer</label>
+            <label className="text-xs text-muted-foreground">Answer</label>
             <textarea className="w-full border rounded p-2 text-sm" rows={6}
               value={draft.answer} onChange={(e) => set("answer", e.target.value)} />
-            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
               The information the bot should use to answer. Write it as you'd want it spoken to the user. Required.
             </p>
           </div>
@@ -1127,14 +1065,14 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
           {/* Optional date metadata — for time-bound events or to override
               the bot's automatic recency boost. */}
           <div className="border-t pt-3 mt-2">
-            <div className="text-xs font-medium text-slate-700 mb-2">Validity window (optional)</div>
-            <p className="text-[11px] text-slate-500 mb-3 leading-snug">
+            <div className="text-xs font-medium text-foreground mb-2">Validity window (optional)</div>
+            <p className="text-[11px] text-muted-foreground mb-3 leading-snug">
               Set these for events with a clear start/end date, or to override the bot's
               automatic past/future classification. Leave blank for evergreen information.
             </p>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-slate-500">Valid from</label>
+                <label className="text-xs text-muted-foreground">Valid from</label>
                 <input
                   type="date"
                   className="w-full border rounded p-2 text-sm"
@@ -1143,7 +1081,7 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Valid until</label>
+                <label className="text-xs text-muted-foreground">Valid until</label>
                 <input
                   type="date"
                   className="w-full border rounded p-2 text-sm"
@@ -1152,7 +1090,7 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Event status</label>
+                <label className="text-xs text-muted-foreground">Event status</label>
                 <select
                   className="w-full border rounded p-2 text-sm bg-white"
                   value={draft.event_status || ""}
@@ -1164,7 +1102,7 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
                 </select>
               </div>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2 leading-snug">
+            <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
               Search ranks <code>future</code> events highest and <code>past</code> lowest, so an
               upcoming registration deadline outranks a finished one for the same keyword.
             </p>
@@ -1182,7 +1120,7 @@ function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
 function Field({ label, value, onChange, placeholder, hint }) {
   return (
     <div>
-      <label className="text-xs text-slate-500">{label}</label>
+      <label className="text-xs text-muted-foreground">{label}</label>
       <input
         type="text"
         className="w-full border rounded p-2 text-sm"
@@ -1190,7 +1128,7 @@ function Field({ label, value, onChange, placeholder, hint }) {
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
       />
-      {hint && <p className="text-[11px] text-slate-500 mt-1 leading-snug">{hint}</p>}
+      {hint && <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{hint}</p>}
     </div>
   );
 }

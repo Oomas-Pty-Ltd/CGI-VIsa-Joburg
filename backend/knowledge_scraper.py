@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import sys
-from typing import List, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -154,7 +154,6 @@ async def _fetch_with_httpx(url: str) -> str:
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
-        "Referer": "https://www.cgijoburg.gov.in/",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }
@@ -230,70 +229,39 @@ async def _fetch_with_retry(url: str, retries: int = 1) -> str:
     _record_fetch_failure(url, str(last_error))
     raise last_error
 
-OFFICIAL_SOURCES = [
-    "https://www.cgijoburg.gov.in/",
-]
+# Scrape sources are tenant-driven via bot_config.knowledge_sources — read
+# per-tenant via ``_load_scrape_sources()`` below.
+EXCEPTION_EMAIL = os.environ.get("EXCEPTION_EMAIL", "")
 
-# Sub-pages to crawl on CGI Joburg for richer service data.
-# URL list verified against the live cgijoburg.gov.in site (May 2026).
-CGI_SUB_PAGES = [
-    # Passport
-    "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
-    "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-    # Visa
-    "https://www.cgijoburg.gov.in/page/general-visa-guidelines/",
-    "https://www.cgijoburg.gov.in/page/regular-visa/",
-    "https://www.cgijoburg.gov.in/page/visa-fee/",
-    "https://www.cgijoburg.gov.in/page/processing-time/",
-    "https://www.cgijoburg.gov.in/page/foreigners-other-than-south-african-nationals/",
-    # OCI / Citizenship
-    "https://www.cgijoburg.gov.in/page/oci-related-services/",
-    "https://www.cgijoburg.gov.in/page/renunciation-of-indian-citizenship/",
-    "https://www.cgijoburg.gov.in/page/no-objection-certificate-to-apply-for-south-african-citizenship/",
-    # Birth / Marriage / Death / EC
-    "https://www.cgijoburg.gov.in/page/child-birth-registration/",
-    "https://www.cgijoburg.gov.in/page/marriage-certificate/",
-    "https://www.cgijoburg.gov.in/page/death-transfer-of-mortal-remains-related-procedure/",
-    "https://www.cgijoburg.gov.in/page/emergency-travel-document/",
-    # Miscellaneous / Other services
-    "https://www.cgijoburg.gov.in/page/translation-of-indian-driving-license/",
-    "https://www.cgijoburg.gov.in/page/indians-in-distress/",
-    "https://www.cgijoburg.gov.in/page/tracing-the-roots/",
-    # Fees, bank, FAQs, registration
-    "https://www.cgijoburg.gov.in/page/fees-for-passport-oci-misc-services/",
-    "https://www.cgijoburg.gov.in/page/bank-details-and-timings/",
-    "https://www.cgijoburg.gov.in/page/frequently-asked-questions-faq-s/",
-    "https://www.cgijoburg.gov.in/page/faqs/",
-    "https://www.cgijoburg.gov.in/register.php",
-]
 
-EXCEPTION_EMAIL = "mayurakole@example.com"
+async def _load_scrape_sources(company_id: Optional[str] = None) -> Dict[str, Any]:
+    """Return the scrape configuration for ``company_id`` from bot_config.
 
-# Source: www.cgijoburg.gov.in (compiled April 2026)
-CONTACT_FALLBACK = {
-    "phone_main":        "+27 11-4828484 / +27 11-4828485 / +27 11-4828486",
-    "phone_consular":    "+27 11 581 9800",
-    "fax":               "+27 11 482 4648 / +27 11 482 8492",
-    "emergency_contact": "+27 11 581 9800",
-    "email":             "ccom.jburg@mea.gov.in",
-    "email_consular":    "cons.jburg@mea.gov.in",
-    "address": (
-        "Consulate General of India, Johannesburg | "
-        "No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), "
-        "Park Town 2193, PO Box 6805, Johannesburg 2000, South Africa"
-    ),
-    "website":    "https://www.cgijoburg.gov.in",
-    "vfs_address": (
-        "Indian Visa and Consular Application Centre, "
-        "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, "
-        "Boundary Road, Park Town, Johannesburg – 2198"
-    ),
-    "vfs_phone":  "012 425 3007 / 011 484 0327",
-    "vfs_email":  "Info.inza@vfshelpline.com",
-    "vfs_website": "https://services.vfsglobal.com/zaf/en/ind/",
-    "office_hours": "Monday–Friday: 08:30–17:00 (Lunch: 13:00–13:30)",
-    "vfs_hours":    "Submission: 08:00–15:00 | Collection: 11:00–16:00",
-}
+    Expected shape on ``tenant_bot_config.knowledge_sources``::
+
+        {
+          "primary_url":     "https://example.gov.in/",
+          "sub_pages":       ["https://example.gov.in/page/...", ...],
+          "secondary_urls":  ["https://partner.example.com/", ...]
+        }
+
+    All keys optional. Missing keys yield empty lists so the scrape is a
+    no-op for a tenant that hasn't configured sources yet.
+    """
+    if not company_id:
+        return {"primary_url": "", "sub_pages": [], "secondary_urls": []}
+    try:
+        from services.bot_config import get_bot_config
+        cfg = await get_bot_config(company_id)
+        ks = (cfg.raw or {}).get("knowledge_sources") or {}
+        return {
+            "primary_url":    ks.get("primary_url") or "",
+            "sub_pages":      list(ks.get("sub_pages") or []),
+            "secondary_urls": list(ks.get("secondary_urls") or []),
+        }
+    except Exception as exc:
+        logger.debug("[_load_scrape_sources] %s: %s", company_id, exc)
+        return {"primary_url": "", "sub_pages": [], "secondary_urls": []}
 
 
 def _clean_html_text(html: str) -> List[str]:
@@ -332,14 +300,18 @@ def _clean_html_text(html: str) -> List[str]:
 def _extract_contact_details(soup: BeautifulSoup) -> Dict:
     """
     Extract contact details from scraped HTML using targeted selectors and regex.
-    Falls back to CONTACT_FALLBACK for any field not found.
+    Returns only the fields that could be matched; callers can layer their
+    own tenant defaults on top (bot_config.contact).
     """
     full_text = soup.get_text(separator=" ", strip=True)
 
     extracted = {}
 
     # Phone numbers — match +27 or 0 prefix SA numbers
-    phones = re.findall(r"(?:\+27|0)\s*[\d\s\-]{8,14}", full_text)
+    # Phone numbers — generic international format: optional "+" then 1-3
+    # digits (country code), then more digits with optional spaces/dashes.
+    # Replaces the previous "+27|0" SA-only pattern.
+    phones = re.findall(r"\+?\d{1,3}[\s\-]?\d{2,4}[\s\-]?\d{3,4}[\s\-]?\d{3,4}", full_text)
     phones = [re.sub(r"\s+", " ", p).strip() for p in phones]
     if phones:
         extracted["emergency_contact"] = phones[0]
@@ -349,9 +321,11 @@ def _extract_contact_details(soup: BeautifulSoup) -> Dict:
     if emails:
         extracted["email"] = emails[0]
 
-    # Address — look for common address indicators
+    # Address — generic Floor-prefix heuristic. Previously biased to
+    # "johannesburg|joburg"; now matches any city name (or none) after the
+    # floor anchor. Less precise but tenant-agnostic.
     addr_match = re.search(
-        r"(?:(?:\d+(?:st|nd|rd|th)?\s+[Ff]loor|[Ff]loor\s+\d+)[^.]{0,200}(?:johannesburg|joburg))",
+        r"(?:\d+(?:st|nd|rd|th)?\s+[Ff]loor|[Ff]loor\s+\d+)[^.\n]{10,200}",
         full_text, re.IGNORECASE
     )
     if addr_match:
@@ -365,8 +339,7 @@ def _extract_contact_details(soup: BeautifulSoup) -> Dict:
     if hours_match:
         extracted["office_hours"] = re.sub(r"\s+", " ", hours_match.group()).strip()
 
-    # Merge: scraped fields override fallback, fallback fills any gaps
-    return {**CONTACT_FALLBACK, **extracted}
+    return extracted
 
 
 async def _fetch_page_text(url: str) -> str:
@@ -387,399 +360,30 @@ async def _fetch_page_text(url: str) -> str:
         return ""
 
 
-def _get_cgi_pdf_content() -> str:
+async def scrape_cgi_joburg(company_id=None):
+    """Scrape this tenant's *primary* knowledge source.
+
+    URL list comes from ``bot_config.knowledge_sources`` (see
+    ``_load_scrape_sources``). The dict key (``cgi_joburg``) is kept for
+    back-compat with callers; the content is tenant-driven, not CGI-specific.
     """
-    Full content of the CGI Johannesburg official website, sourced from
-    www.cgijoburg.gov.in (compiled April 2026).
-    Used as fallback when the live website cannot be reached.
-    """
-    return """
-[CONSULATE GENERAL OF INDIA, JOHANNESBURG — OFFICIAL INFORMATION]
-Source: www.cgijoburg.gov.in | Compiled: April 2026
-
-=== 1. CONTACT & WORKING HOURS ===
-Name: Consulate General of India, Johannesburg
-Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, PO Box 6805, Johannesburg 2000, South Africa
-Office Hours: Monday to Friday: 08:30 to 17:00 (Lunch: 13:00 to 13:30)
-Telephone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-Facsimile: +27 11 482 4648 / +27 11 482 8492
-Fax (CG): +27 11 482 3640
-Email: ccom.jburg@mea.gov.in
-Consular Services Email: cons.jburg@mea.gov.in
-Website: www.cgijoburg.gov.in
-Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa
-Acting Consul General: Mr. Harish Kumar
-Twitter/X: @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg | YouTube: @Indiainjoburg
-
-=== 2. CONSULAR SERVICES OVERVIEW ===
-Passport Services: Renewal, reissue, lost/stolen/damaged passport, new passport for minors born in South Africa, change of personal particulars.
-Visa Services: Regular visa and e-Visa for foreign nationals wishing to visit India.
-OCI Services: Fresh OCI card, miscellaneous OCI services, PIO to OCI conversion.
-Police Clearance Certificate: Issued for Indian nationals residing in South Africa.
-Birth Registration: Registration of births of children born in South Africa to Indian nationals.
-Document Attestation: Attestation of academic degrees, general power of attorney, documents for Indian and foreign nationals.
-Emergency Travel Document: Issued in cases of lost/stolen passport for emergency travel.
-NOC Services: NOC for South African citizenship, NOC for child passport in India.
-Non-Impediment Letter: For Indian nationals seeking to marry abroad.
-Registration of Indians: Registration of NRIs/PIOs/OCIs residing in South Africa.
-Indians in Distress: Consular assistance for Indian nationals in distress.
-Tracing the Roots: Programme for persons of Indian origin to trace their ancestral roots in India.
-Trade & Commerce: Advisory services, bilateral trade facilitation.
-NOTE: Most passport and visa services are processed through VFS Global. Applicants must submit applications at the VFS Global Centre, not directly at the Consulate.
-
-=== 3. PASSPORT SERVICES FOR INDIAN NATIONALS ===
-All passport services are outsourced to VFS Global. Applicants must complete online applications and submit at VFS Global Johannesburg.
-
-VFS Global Office (Passport/PCC/Consular):
-Address: Indian Visa and Consular Application Centre, 2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, Johannesburg - 2198
-Telephone: 012 425 3007 / 011 484 0327
-Email: Info.inza@vfshelpline.com
-Website: https://services.vfsglobal.com/zaf/en/ind/
-Submission Hours: 08:00 to 15:00
-Collection Hours: 11:00 to 16:00
-Processing Time: Up to one month (provided all documents are in order and security status is clear)
-
-RE-ISSUE OF PASSPORT ON EXPIRY:
-- Completed online application from https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
-- 3 passport-sized photographs (5cm x 5cm, coloured, white background)
-- Original passport (to be returned after verification)
-- Proof of residential address in South Africa
-- Fee: Rand 2,280 for 36-page passport (incl. ICWF fee of Rand 30); Rand 2,655 for 60-page
-
-RE-ISSUE FOR LOST/STOLEN PASSPORT:
-- Online application form duly completed
-- Original FIR/Police Report for lost/stolen passport
-- 3 passport-sized photographs
-- Proof of Indian citizenship (if original passport not available)
-- Proof of residential address in South Africa
-- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page (incl. ICWF of Rand 30)
-- Processing time: Up to one month
-
-RE-ISSUE FOR DAMAGED PASSPORT:
-- Online application form
-- Original damaged passport
-- 3 passport-sized photographs
-- Proof of residential address
-- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page (incl. ICWF of Rand 30)
-
-ISSUE OF PASSPORT TO MINOR CHILD BORN IN SOUTH AFRICA:
-- Completed online application
-- 3 passport-sized photographs
-- Birth registration at the Consulate
-- Birth certificate issued by South African Home Department and local hospital
-- Both parents to sign the form at the declaration column
-- For infants: thumb impression in the box on Page 1 and Page 2 after Serial No. 26
-- Fee: Rand 780 (incl. ICWF of Rand 30); Five-year validity passport issued
-
-RE-ISSUE ON CHANGE OF NAME/PASSPORT PARTICULARS:
-- Online application + documentary evidence of name change (gazette, court order, marriage certificate)
-- Original passport, 3 passport-sized photographs, Proof of residential address
-- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page
-
-RE-ISSUE ON EXHAUSTION OF PAGES:
-- Online application, Original passport, 3 photographs, Proof of residential address
-- Fee: Rand 2,280 for 36-page; Rand 2,655 for 60-page
-
-GENERAL NOTES:
-- Payment by EFT or Credit/Debit Card. Original proof of payment required; photocopies not accepted.
-- Online application at: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
-- Applications must be submitted in person at VFS Global. No direct submissions at the Consulate.
-- Original documents are returned after verification at VFS.
-- Applicants may be called for interview if required by the Consulate.
-
-=== 4. PASSPORT & CONSULAR FEES SCHEDULE ===
-(Revised fees as on April 1, 2023. All fees include ICWF component of Rand 30)
-
-PASSPORT FEES:
-Re-issue on expiry: 36-page ZAR 2,280 | 60-page ZAR 2,655
-Re-issue (lost/stolen): 36-page ZAR 2,280 | 60-page ZAR 2,655
-Re-issue (damaged): 36-page ZAR 2,280 | 60-page ZAR 2,655
-Re-issue (change of name/particulars): 36-page ZAR 2,280 | 60-page ZAR 2,655
-Re-issue (exhaustion of pages): 36-page ZAR 2,280 | 60-page ZAR 2,655
-Minor child (new passport): ZAR 780 (N/A for 60-page)
-Emergency Travel Document: ZAR 780
-
-OCI & MISCELLANEOUS CONSULAR FEES:
-Fresh OCI Card (Adult): As per MEA notification
-Fresh OCI Card (Minor): As per MEA notification
-OCI Miscellaneous Service: Gratis (free) for qualifying updates
-PIO to OCI Conversion: As per MEA notification
-Police Clearance Certificate: As per VFS schedule
-Attestation of Documents: As per schedule
-Birth Registration: Gratis (free)
-Non-Impediment Letter: As per schedule
-NOC for South African Citizenship: As per schedule
-Emergency Travel Document: ZAR 780
-
-ICWF: A fee of Rand 30 is included in all consular, passport and visa services (Gazette of India Notification No. 704 G.S.R. 1027(E) dated 16/08/2017, effective from 01.06.2019).
-
-PAYMENT METHODS:
-- EFT (Electronic Funds Transfer) — Original proof of payment required
-- Credit Card / Debit Card at VFS Global or the Consulate
-- Photocopy, faxed copy or scanned copy of payment proof NOT acceptable
-
-=== 5. VISA SERVICES FOR FOREIGN NATIONALS ===
-GENERAL VISA GUIDELINES:
-- All foreign nationals, including children, require a visa to enter India.
-- Applications submitted online at https://indianvisaonline.gov.in/ — no manual forms accepted.
-- South African nationals are issued visas GRATIS (free of charge) to visit India.
-- Biometric data is captured at VFS at time of application submission.
-- Passport must be valid for a minimum of six months from the date of departure from India.
-- Passport must have at least 2 blank pages. Consulate cannot waive this requirement.
-- South African nationals holding diplomatic and official passports are exempted from visa for up to 90 days (bilateral agreement).
-- The Government of India does not allow Thuraya/Iridium satellite phones in India for security reasons.
-- No requirement for HIV/AIDS test for visiting India.
-
-REGULAR VISA — VFS ADDRESS (VISA APPLICATIONS):
-Apply Online: https://indianvisaonline.gov.in/visa/index.html
-VFS Address: 1st Floor Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, Johannesburg
-VFS Phone: 012 425 3007 / 011 484 0327
-VFS Email: Info.inza@vfshelpline.com
-Biometrics: Mandatory for all regular visa applicants (w.e.f. 17 July 2017)
-Important: No visa applications accepted directly at the Consulate. All through VFS only.
-
-VISA TYPES ISSUED: Tourist, Business, Employment, Student, Medical, Research, Journalist, Conference, Transit, Entry (X) Visa, Medical Attendant, Missionary/Religious Worker
-
-Foreigners other than South African Nationals: Foreign nationals from third countries residing in South Africa should contact the Consulate for specific requirements.
-Pakistan Nationals and Persons of Pakistan Origin: Special procedures apply. Contact the Consulate directly.
-
-=== 6. E-VISA INFORMATION ===
-South African nationals are eligible for e-Visa on a GRATIS basis (no visa fee charged).
-Apply online at: https://indianvisaonline.gov.in/evisa/tvoa.html
-Apply minimum 5 working days in advance from the date of departure.
-
-E-VISA SUB-CATEGORIES:
-e-Tourist Visa: 30 days / 1 year / 5 years — Double/Multiple entry. Tourism, casual visit to meet friends/relatives.
-e-Business Visa: 1 year (Multiple entry) — Business-related visits.
-e-Medical Visa: 60 days (Triple entry) — For medical treatment in India.
-e-Medical Attendant Visa: 60 days (Triple entry) — Max 2 attendants per e-Medical Visa.
-e-Conference Visa: 30 days — For attending conferences/seminars. Can club with e-Tourist activities only.
-
-E-VISA RULES:
-- e-Visa is linked to specific ports of entry. Must arrive/depart through designated airports/seaports.
-- Available for entry through 30+ designated international airports and 5 designated seaports.
-- Only two e-Medical Attendant Visas will be granted against one e-Medical Visa.
-
-=== 7. OCI (OVERSEAS CITIZEN OF INDIA) SERVICES ===
-The OCI scheme allows persons of Indian origin (other than Pakistan and Bangladesh nationals) to be registered as Overseas Citizens of India. OCI cards provide a multi-purpose, multi-entry life-long visa for India.
-
-ELIGIBILITY:
-- A person who was a citizen of India at any time since 26 January 1950 or was eligible to become a citizen of India on 26 January 1950.
-- A person who is a citizen of another country but whose parents/grandparents/great-grandparents were citizens of India.
-- The spouse of foreign origin of a citizen of India or OCI cardholder (marriage registered and subsisting for not less than 2 years).
-- Minor children where both parents are Indian citizens, or one parent is Indian citizen.
-
-OCI APPLICATION PROCEDURE:
-- Register online at: https://ociservices.gov.in/
-- Submit computer-generated application form (bearing registration number), photo, and signatures.
-- For minors: only thumb impression (no signature).
-- Two photos: 51mm x 51mm — one pasted on form, one attached separately.
-- Submit form with all required documents to the Consulate (appointment required).
-- Appointment: Email cons.jburg@mea.gov.in for OCI appointment.
-
-DOCUMENTS REQUIRED (FRESH OCI):
-- Proof of present citizenship (current foreign passport)
-- Proof of renunciation of Indian citizenship / surrender certificate
-- Proof of Indian origin (Indian passport, school certificate, birth certificate, land records)
-- For spouse of Indian citizen: marriage certificate and copy of spouse's Indian passport
-- Self-attested copy of marriage certificate and copy of foreign passport of spouse (if applicable)
-- Proof of residential address in South Africa (utility bill, lease agreement, property papers)
-- Proof of payment
-- Any other document as specified by the Consular Officer
-
-MISCELLANEOUS OCI SERVICES (RE-ISSUANCE REQUIRED FOR):
-- Issuance of new passport (once after completing 20 years of age)
-- Change of personal particulars (name, father's name, nationality, etc.)
-- Loss or damage of OCI registration certificate
-- Gratis services: updating new passport details (each time up to age 20 and once after age 50), change of address/occupation/contact details
-
-IMPORTANT OCI RESTRICTIONS:
-- OCI card does NOT entitle holder to undertake missionary work, mountaineering, or research without prior permission from Government of India.
-- Fees are not refunded if OCI is not granted.
-- Husband and wife must each claim OCI on strength of their own parents/grandparents — not each other.
-- Foreign military personnel (serving or retired) of Indian origin are NOT eligible for OCI.
-- OCI registration may be cancelled if obtained by fraud or if holder shows disaffection towards the Constitution of India.
-
-PIO TO OCI CONVERSION: PIO card holders should visit https://ociservices.gov.in/ to apply for conversion. PIO card remains valid until its expiry or conversion.
-
-=== 8. POLICE CLEARANCE CERTIFICATE (PCC) ===
-PCC is required for immigration, change of nationality, employment abroad, or longer stay in another country.
-
-FOR INDIAN NATIONALS:
-- PCC service is outsourced to VFS Global.
-- Apply online at: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-- Select CGI Johannesburg and submit at VFS Global Johannesburg.
-- Applicants in Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg.
-- VFS Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
-
-FOR FOREIGN NATIONALS:
-- Foreign nationals requiring PCC from Indian authorities should apply at the nearest Indian Mission/Post.
-- Required documents and procedures are available at the VFS Global portal.
-
-=== 9. SERVICES RENDERED AT THE CONSULATE ===
-CHILD BIRTH REGISTRATION:
-- Registration of children born in South Africa to Indian nationals.
-- Required: Birth certificate from South African Home Department and local hospital.
-- Service is gratis (free of charge).
-- Registered birth certificate used for minor passport applications.
-
-ATTESTATION OF ACADEMIC DEGREES (INDIAN NATIONALS):
-- Indian documents must first be apostilled by MEA (Ministry of External Affairs, India).
-- MEA Apostille link: http://www.mea.gov.in/apostille.htm
-
-ATTESTATION OF GENERAL POWER OF ATTORNEY (GPA/PoA):
-- Original documents and self-attested copies required. Fee as per consular schedule.
-
-ATTESTATION OF DOCUMENTS FOR FOREIGN NATIONALS:
-- Foreign nationals requiring attestation of Indian documents for use in South Africa.
-
-EMERGENCY TRAVEL DOCUMENT:
-- Issued when a valid Indian passport is not available due to loss/theft/damage.
-- Valid for single journey to India only.
-- Required: Police report, proof of identity, 2 photographs, proof of travel.
-- Fee: ZAR 780 (including ICWF).
-
-NOC FOR CHILD PASSPORT IN INDIA:
-- Required when one parent applies for a child's passport in India.
-- The other parent (in South Africa) can obtain NOC from the Consulate.
-- Required: Passport copies of both parents, child's birth certificate, application form.
-
-NON-IMPEDIMENT LETTER:
-- Issued to Indian nationals who wish to marry a foreign national.
-- Certifies applicant is not married and is free to marry.
-- Required: Indian passport, proof of address, application form.
-
-REGISTRATION OF NRIs/PIOs/OCIs:
-- Indian nationals in South Africa are encouraged to register with the Consulate.
-- Helps in emergencies, disaster situations, and for consular assistance.
-
-TRANSLATION OF INDIAN DRIVING LICENCE:
-- The Consulate provides certified translation of Indian driving licences for use in South Africa.
-
-TRACING THE ROOTS PROGRAMME:
-- Programme for persons of Indian origin to trace their ancestral roots in India.
-- MEA facilitates visits to villages/districts of origin. Contact the Consulate for details.
-
-OPEN HOUSE TO ADDRESS GRIEVANCES:
-- The Consulate periodically holds consular open house sessions.
-- Upcoming dates announced on website and social media.
-- Applicants can meet Consular Officers and get guidance on pending matters.
-
-ONE AND THE SAME CERTIFICATE:
-- Issued when a difference in name spelling exists across documents.
-- Self-attested copy of all documents showing name variations required.
-
-=== 10. FREQUENTLY ASKED QUESTIONS (FAQ) ===
-Q: How do I apply for a new/renewal/lost/damaged passport?
-A: Complete online application at https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ and submit at VFS Centre with prior appointment. See: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/
-
-Q: What is the timeframe for reissue of passport?
-A: Approximately 3-4 weeks, provided all relevant documents are in place and approved by concerned authorities in India.
-
-Q: What is the definition of a damaged passport?
-A: Spill over of ink/water mark, scribbling, thread out, torn paper, missing data page, or spine damage.
-
-Q: How can I apply for PCC (Police Clearance Certificate)?
-A: PCC service is outsourced to VFS. Apply at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/. Reference: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
-
-Q: How can I get my Indian documents attested?
-A: Indian documents must first be apostilled by MEA. See: http://www.mea.gov.in/apostille.htm
-
-Q: My spouse is a foreign national. Is my spouse entitled to an OCI card?
-A: Yes, provided the marriage has been registered and subsisted continuously for not less than two years.
-
-Q: Are foreign military personnel of Indian origin eligible for OCI?
-A: No. Foreign military personnel, whether in service or retired, are NOT entitled to an OCI card.
-
-Q: What should I do if I find a mistake in my passport?
-A: Visit the Consulate immediately and return the passport for rectification. Re-apply for reissue if the error was on your original application form.
-
-Q: What is the difference between minor and major name change?
-A: Minor change: spelling discrepancy that does not result in a total phonetic change (e.g., Rakesh vs Rakash). Major change: a complete change of name, or change that is phonetically different.
-
-Q: How do I apply for an emergency visa?
-A: Apply online at www.indianvisaonline.gov.in, submit in person at VFS Global Johannesburg with required documents. VFS accepts emergency visa applications on working days and weekends/holidays with prior appointment. Contact: Tel: 012 4253007.
-
-Q: Can a person apply for OCI on the basis of spouse's eligibility?
-A: No. Husband and wife must each claim OCI on the strength of their own parents/grandparents.
-
-Q: How do I check the status of my Indian passport or PCC application?
-A: Passport: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ | PCC: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-
-=== 11. TRADE & COMMERCE — INDIA–SOUTH AFRICA BILATERAL RELATIONS ===
-India and South Africa established diplomatic relations in 1993. Both are members of BRICS and G20.
-South Africa population: over 64 million | Area: 1.22 million sq km | Financial capital: Johannesburg.
-GDP composition: Services 62.75% | Industry 24.46%. Growth rate (2024): ~1.0%.
-Key resources: World's largest producer of platinum, vanadium, chromium, and manganese.
-Indian firms have invested approximately USD 10 billion in South Africa.
-More than 150 Indian companies operating in South Africa including TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma (Ranbaxy), TCS, WIPRO, Zensar, TechMahindra.
-Indian companies employ approximately 18,000 South Africans.
-Investment: USD 8–9 billion overall. South Africa seen as platform for broader African engagement via Johannesburg.
-Key bilateral sectors: IT, Mining, Infrastructure, Automobiles, Pharmaceuticals, Agriculture, Heavy Machinery.
-Double Taxation Avoidance Agreement (DTAA) entered into force on 28 November 1997 (Notification No. GSR 198(E), dated 21-04-1998).
-Services for Indian Companies: Trade advisory, business meeting facilitation, partner identification, export/import guidance, exhibition support.
-Services for South African Companies: Market entry advisory for India, introduction to Indian counterparts, investment/regulatory information, support for Buyer-Seller Meets (BSM).
-
-=== 12. BANKING DETAILS & TIMINGS ===
-Bank Details: Available at https://www.cgijoburg.gov.in/page/bank-details-and-timings/
-Payment Methods: EFT, Credit Card, Debit Card. Original proof of payment required.
-ICWF Fee: ZAR 30 included in all consular/passport/visa fees.
-Office Hours: Monday to Friday: 08:30 to 17:00 | Lunch Break: 13:00 to 13:30
-VFS Submission: 08:00 to 15:00 | VFS Collection: 11:00 to 16:00
-
-=== 13. LATEST NEWS & EVENTS (as of April 2026) ===
-11 Mar 2026: ACG Mr. Harish Kumar inaugurates the 11th Agritec South Africa with MEC: Agriculture Ms. Vuyiswa Ramokgopa.
-27 Jan 2026: India–South Africa A.I. Dialogue brings together 100+ participants in A.I., in preparation for India A.I. Impact Summit.
-29 Jan 2026: The Consulate hosts the 77th Republic Day evening reception.
-26 Jan 2026: The Post celebrates India's 77th Republic Day with Flag Unfurling at Chancery.
-30 Jan 2026: The Post hosts a Hindi Poetry and Costume contest on Vishwa Hindi Diwas.
-25 Dec 2025: ACG Mr. Harish Kumar celebrated the spirit of Christmas at St. Thomas Indian Orthodox Church, Midrand.
-24 Dec 2025: ACG Mr. Harish Kumar and the Consulate team visited the children of Leratong Joy for One Foundation.
-23 Oct 2025: Commercial Representative Shri Harish Kumar addresses Delegates at JCCI Annual Conference 2025.
-08 Oct 2025: CG Shri Mahesh Kumar welcomes Shri Harivansh Narayan Singh, Chairman of the Rajya Sabha.
-05 Oct 2025: Speaker of Delhi Legislative Assembly, Shri Vijender Gupta, planted a sapling under Ek Ped Maa Ke Naam.
-Recent Press Releases: India–South Africa A.I. Dialogue (Jan 2026), Launch of Study in India Portal & e-Student Visa (Sep 2025), Viksit Bharat Run (Sep 2025), All-party Indian Parliamentary delegation visit led by Hon. Ms. Supriya Sule (May 2025), Digitization of Disembarkation Card for Foreign Nationals Visiting India.
-Upcoming Notices: Tender for renovation of rooms (Apr 01, 2026), Tender for Security Services (Nov 11, 2025), Tender for Boundary Wall Reconstruction (Nov 01, 2025), Tender for IT Equipment (Sep 19, 2025), 88th Edition of Know India Programme (KIP), 61st IHGF Delhi Fair (Spring 2026), SEPC Buyer-Seller Meet in Johannesburg (09–10 Mar 2026).
-
-=== 14. IMPORTANT LINKS & CONTACTS ===
-Consulate Website: www.cgijoburg.gov.in
-Passport Application (Online): https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
-Regular Visa Application: https://indianvisaonline.gov.in/visa/index.html
-E-Visa Application: https://indianvisaonline.gov.in/evisa/tvoa.html
-OCI Services: https://ociservices.gov.in/
-PCC Application: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-VFS Global (SA): https://services.vfsglobal.com/zaf/en/ind/
-VFS Johannesburg: 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 4253007
-MEA Apostille: http://www.mea.gov.in/apostille.htm
-Consulate Email: ccom.jburg@mea.gov.in
-Consular Services Email: cons.jburg@mea.gov.in
-Pravasi Bharatiya Sahayata Kendra: Toll Free (India only): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in
-Office of Protector General of Emigrants: pge@mea.gov.in | diroe1@mea.gov.in
-Passport Status Check: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-PCC Status Check: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-Ministry of External Affairs: www.mea.gov.in
-High Commission of India, Pretoria: www.hcipretoria.gov.in
-""".strip()
-
-
-async def scrape_cgi_joburg() -> Dict:
-    """
-    Returns CGI Joburg knowledge using PDF static content as the primary base,
-    then appends any additional live content scraped from the website on top.
-    Static PDF (April 2026) is always included — live scrape only adds new info.
-    """
-    # ── Step 1: Start with the full PDF static content (always reliable) ──
-    static_content = _get_cgi_pdf_content()
-    logger.info("[SCRAPE] cgijoburg.gov.in — using PDF static content as base")
-
-    # ── Step 2: Attempt live scrape to append any updates ─────────────────
+    sources = await _load_scrape_sources(company_id)
+    primary = sources.get("primary_url") or ""
+    sub_pages = sources.get("sub_pages") or []
+    if not primary and not sub_pages:
+        return {
+            "source": "primary (unconfigured)",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "no_sources_configured",
+            "pages_crawled": 0,
+            "page_content": "",
+        }
     try:
-        all_urls = ["https://www.cgijoburg.gov.in/"] + CGI_SUB_PAGES
+        all_urls = ([primary] if primary else []) + list(sub_pages)
         results = await asyncio.gather(
             *[_fetch_page_text(url) for url in all_urls],
-            return_exceptions=True
+            return_exceptions=True,
         )
-
         combined_parts = []
         contact_html = None
         pages_ok = 0
@@ -789,91 +393,67 @@ async def scrape_cgi_joburg() -> Dict:
             pages_ok += 1
             page_name = url.rstrip("/").split("/")[-1] or "home"
             combined_parts.append(f"[Page: {page_name}]\n{result}")
-            if url == "https://www.cgijoburg.gov.in/":
+            if url == primary:
                 contact_html = result
-
-        if combined_parts:
-            # Prepend static PDF, then append live content for latest updates
-            live_content = "\n\n".join(combined_parts)
-            page_content = static_content + "\n\n=== LIVE WEBSITE UPDATE ===\n" + live_content
-            live_contact = CONTACT_FALLBACK.copy()
-            if contact_html:
-                try:
-                    soup = BeautifulSoup(contact_html, "html.parser")
-                    live_contact = _extract_contact_details(soup)
-                except Exception:
-                    pass
-            logger.info("[SCRAPE] cgijoburg.gov.in — appended %d live page(s) on top of PDF static", pages_ok)
-            return {
-                "source": "cgijoburg.gov.in (PDF static + live)",
-                "scraped_at": datetime.now(timezone.utc).isoformat(),
-                "status": "static_plus_live",
-                "pages_crawled": pages_ok,
-                "page_content": page_content,
-                **live_contact,
-            }
-
-    except Exception as e:
-        await send_exception_email("CGI Joburg Live Scraping Failed", str(e))
-        logger.warning("[SCRAPE] cgijoburg.gov.in live scrape failed: %s — serving PDF static only", e)
-
-    # Live scrape failed or returned nothing — serve static only
-    return {
-        "source": "cgijoburg.gov.in (PDF static — April 2026)",
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
-        "status": "pdf_static",
-        "pages_crawled": 0,
-        "page_content": static_content,
-        **CONTACT_FALLBACK,
-    }
+        live_contact = {}
+        if contact_html:
+            try:
+                soup = BeautifulSoup(contact_html, "html.parser")
+                live_contact = _extract_contact_details(soup) or {}
+            except Exception:
+                pass
+        return {
+            "source": primary or (sub_pages[0] if sub_pages else "primary"),
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "live_scraped" if pages_ok else "no_pages",
+            "pages_crawled": pages_ok,
+            "page_content": "\n\n".join(combined_parts),
+            **live_contact,
+        }
+    except Exception as exc:
+        await send_exception_email("Primary source scrape failed", str(exc))
+        logger.warning("[SCRAPE] primary scrape failed: %s", exc)
+        return {
+            "source": primary or "primary",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "failed",
+            "pages_crawled": 0,
+            "page_content": "",
+        }
 
 
-async def scrape_vfs_global() -> Dict:
+async def scrape_vfs_global(company_id=None):
+    """Scrape this tenant's *secondary* knowledge sources (auxiliary URLs).
+
+    URL list comes from ``bot_config.knowledge_sources.secondary_urls``. The
+    dict key (``vfs_global``) is kept for back-compat; the content is
+    tenant-driven, not VFS-specific.
     """
-    Scrape VFS Global. The main one-pager URL is JavaScript-rendered (SPA),
-    so we also try the static/alternative endpoints for actual content.
-    """
-    vfs_urls = [
-        # Static VFS pages that reliably return 200
-        "https://www.vfsglobal.com/india/southafrica/english/index.html",
-        "https://www.vfsglobal.com/india/southafrica/english/contact-us.html",
-    ]
-
+    sources = await _load_scrape_sources(company_id)
+    urls = sources.get("secondary_urls") or []
+    if not urls:
+        return {
+            "source": "secondary (unconfigured)",
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "no_sources_configured",
+            "page_content": "",
+        }
     page_content = ""
-    live_contact = CONTACT_FALLBACK.copy()
-
-    for url in vfs_urls:
+    live_contact = {}
+    for url in urls:
         try:
             html = await _fetch_with_retry(url)
             lines = _clean_html_text(html)
-
-            # Check if we got real content (JS-rendered pages return very little text)
             if len(lines) < 5:
                 continue
-
             page_content = "\n".join(lines[:150])
             soup = BeautifulSoup(html, "html.parser")
-            contact = _extract_contact_details(soup)
-            live_contact = contact
-
-            # VFS-specific hours override
-            full_text = soup.get_text(separator=" ", strip=True)
-            vfs_hours_match = re.search(
-                r"(?:Mon(?:day)?|Monday)[\s\S]{0,80}?(?:\d{1,2}[:.]\d{2}[\s\S]{0,40}?\d{1,2}[:.]\d{2})",
-                full_text, re.IGNORECASE
-            )
-            if vfs_hours_match:
-                live_contact["vfs_hours"] = re.sub(r"\s+", " ", vfs_hours_match.group()).strip()
+            live_contact = _extract_contact_details(soup) or {}
             break
         except Exception:
             continue
-
-    # If all VFS URLs failed or returned JS-shell, use structured fallback content
-    if not page_content:
-        page_content = _get_vfs_static_content()
-
     return {
-        "source": "VFS Global",
+        "source": urls[0],
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "status": "live_scraped" if page_content else "failed",
         "page_content": page_content,
@@ -881,51 +461,61 @@ async def scrape_vfs_global() -> Dict:
     }
 
 
-def _get_vfs_static_content() -> str:
-    """VFS Global information from cgijoburg.gov.in (compiled April 2026)."""
-    return """[VFS Global — India Visa & Consular Application Centre, Johannesburg]
-Source: www.cgijoburg.gov.in
-
-PASSPORT / PCC / CONSULAR SERVICES (VFS):
-Address: 2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, Johannesburg - 2198
-Telephone: 012 425 3007 / 011 484 0327
-Email: Info.inza@vfshelpline.com
-Website: https://services.vfsglobal.com/zaf/en/ind/
-Submission Hours: 08:00 to 15:00 | Collection Hours: 11:00 to 16:00
-Processing Time: Up to one month (passport)
-
-VISA APPLICATIONS (VFS):
-Address: 1st Floor Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, Johannesburg
-Telephone: 012 425 3007 / 011 484 0327
-Email: Info.inza@vfshelpline.com
-Biometrics: Mandatory for all regular visa applicants
-
-SERVICES AT VFS:
-- Passport submission (reissue on expiry/lost/stolen/damaged/name change/pages exhaustion)
-- New passport for minor child born in South Africa
-- Visa applications (all types)
-- Police Clearance Certificate (PCC)
-- Document attestation
-
-VISA FEES (Source: cgijoburg.gov.in):
-- South African nationals: GRATIS (free of charge) for all visa types
-- South African diplomatic/official passport holders: Exempt from visa up to 90 days
-- Other foreign nationals: Contact the Consulate
-
-PASSPORT FEES (Source: cgijoburg.gov.in):
-- 36-page passport re-issue: ZAR 2,280 (incl. ICWF ZAR 30)
-- 60-page passport re-issue: ZAR 2,655 (incl. ICWF ZAR 30)
-- Minor child new passport: ZAR 780
-- Emergency Travel Document: ZAR 780
-
-VFS Reference for PCC: https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/
-VFS Reference for Passport: https://www.vfsglobal.com/one-pager/India/SouthAfrica/Passport-services/"""
-
-
-_knowledge_cache: Optional[Dict] = None
-_knowledge_cache_time: Optional[datetime] = None
+# Per-tenant cache slots: ``{company_id_or_empty: scraped_dict}``. The empty-
+# string key is used by legacy callers that didn't pass a company_id.
+_knowledge_cache: Dict[str, Dict] = {}
+_knowledge_cache_time: Dict[str, datetime] = {}
 _scrape_in_progress: bool = False
-_CACHE_TTL_SECONDS = 1800  # 30 minutes
+# Knowledge-base cache + tuning are now platform_config knobs. The
+# constants below are kept as platform fallbacks; the resolvers next to
+# each consumer read the live value at request time so admin tuning
+# applies without a restart.
+def _kb_cache_ttl_seconds() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_cache_ttl_seconds", 1800))
+    except Exception:
+        return 1800
+
+
+def _kb_blocked_kw_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_blocked_kw_ttl_seconds", 60))
+    except Exception:
+        return 60
+
+
+def _kb_deep_scan_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_deep_scan_ttl_seconds", 1800))
+    except Exception:
+        return 1800
+
+
+def _kb_hit_threshold() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_hit_threshold", 3))
+    except Exception:
+        return 3
+
+
+def _kb_max_deep_urls() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_max_deep_urls", 8))
+    except Exception:
+        return 8
+
+
+def _kb_crawl_interval() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("kb_crawl_interval_seconds", 6 * 3600))
+    except Exception:
+        return 6 * 3600
 
 
 async def _probe_playwright() -> None:
@@ -978,19 +568,18 @@ def blocked_prohibition(blocked: set) -> str:
         f"or provide any information about the following topics under any circumstances, "
         f"even if the user asks directly or the information appears elsewhere in this prompt: "
         f"{topics}. If the user asks about these topics, reply: "
-        f"\"I'm sorry, I don't have information on that topic. Please contact the Consulate directly.\"\n"
+        f"\"I'm sorry, I don't have information on that topic. Please contact support for assistance.\"\n"
     )
 
 _blocked_kw_cache: Set[str] = set()
 _blocked_kw_cache_time: Optional[datetime] = None
-_BLOCKED_KW_TTL = 60  # seconds — short so unblocks propagate quickly
 
 
 async def _get_blocked_keywords() -> Set[str]:
     """Return the current set of blocked keywords from MongoDB (lowercased), with in-memory cache."""
     global _blocked_kw_cache, _blocked_kw_cache_time
     now = datetime.now(timezone.utc)
-    if _blocked_kw_cache_time is not None and (now - _blocked_kw_cache_time).total_seconds() < _BLOCKED_KW_TTL:
+    if _blocked_kw_cache_time is not None and (now - _blocked_kw_cache_time).total_seconds() < _kb_blocked_kw_ttl():
         return _blocked_kw_cache
     try:
         from database import get_database
@@ -1053,112 +642,96 @@ async def _fetch_uploaded_docs_content() -> str:
         return ""
 
 
-async def _do_scrape() -> Dict:
-    """Scrape CGI Joburg (primary source) + VFS (auxiliary) + uploaded docs and return combined knowledge."""
-    await _probe_playwright()   # set the flag once before parallel fetches
-    cgi_data, vfs_data, uploaded_content = await asyncio.gather(
-        scrape_cgi_joburg(),
-        scrape_vfs_global(),
+async def _do_scrape(company_id: Optional[str] = None) -> Dict:
+    """Scrape this tenant's primary + secondary sources + uploaded docs.
+
+    Cache key includes ``company_id`` (see ``_knowledge_cache``) so each
+    tenant gets its own scrape pipeline.
+    """
+    await _probe_playwright()
+    primary, secondary, uploaded_content = await asyncio.gather(
+        scrape_cgi_joburg(company_id),
+        scrape_vfs_global(company_id),
         _fetch_uploaded_docs_content(),
     )
     return {
         "last_updated": datetime.now(timezone.utc).isoformat(),
-        "cgi_joburg": cgi_data,
-        "vfs_global": vfs_data,
+        # Back-compat keys (no longer brand-specific): "cgi_joburg" = primary,
+        # "vfs_global" = secondary. Callers that read these keys still work;
+        # new callers should treat them as opaque source slots.
+        "cgi_joburg": primary,
+        "vfs_global": secondary,
         "uploaded_docs": {
             "source": "uploaded_documents",
             "page_content": uploaded_content,
         },
-        **CONTACT_FALLBACK,
-        "official_links": {
-            "consulate": "https://www.cgijoburg.gov.in/",
-            "passport_application": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
-            "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
-            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
-            "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
-        },
     }
 
 
-async def _refresh_cache_background():
-    """Scrape in the background and update cache without blocking requests."""
-    global _knowledge_cache, _knowledge_cache_time, _scrape_in_progress
+async def _refresh_cache_background(company_id: Optional[str] = None):
+    """Scrape in the background and update the per-tenant cache slot."""
+    global _scrape_in_progress
     if _scrape_in_progress:
         return
     _scrape_in_progress = True
     try:
-        data = await _do_scrape()
+        data = await _do_scrape(company_id)
         await log_knowledge_changes(data)
-        _knowledge_cache = data
-        _knowledge_cache_time = datetime.now(timezone.utc)
+        _knowledge_cache[company_id or ""] = data
+        _knowledge_cache_time[company_id or ""] = datetime.now(timezone.utc)
     except Exception as e:
         await send_exception_email("Real-time Knowledge Fetch Failed", str(e))
     finally:
         _scrape_in_progress = False
 
 
-async def get_realtime_knowledge() -> Dict:
-    """
-    Always returns immediately — never blocks a chat request.
-    Fires a background scrape when cache is empty or stale.
-    """
-    global _knowledge_cache, _knowledge_cache_time
+async def get_realtime_knowledge(company_id: Optional[str] = None) -> Dict:
+    """Always returns immediately — never blocks a chat request.
 
+    ``company_id`` selects the tenant whose scrape sources are used (and
+    whose cache slot is read). When omitted, falls back to an unscoped
+    cache slot (legacy callers).
+    """
+    key = company_id or ""
     now = datetime.now(timezone.utc)
     cache_stale = (
-        _knowledge_cache is None
-        or _knowledge_cache_time is None
-        or (now - _knowledge_cache_time).total_seconds() >= _CACHE_TTL_SECONDS
+        key not in _knowledge_cache
+        or _knowledge_cache_time.get(key) is None
+        or (now - _knowledge_cache_time[key]).total_seconds() >= _kb_cache_ttl_seconds()
     )
 
     if cache_stale and not _scrape_in_progress:
-        # Fire-and-forget — never await this
-        asyncio.create_task(_refresh_cache_background())
+        asyncio.create_task(_refresh_cache_background(company_id))
 
-    # Return whatever we have right now; use PDF static content if cache is still empty
-    if _knowledge_cache is not None:
-        return _knowledge_cache
-    # Cold start — return PDF static so hybrid_search has page_content immediately
+    if key in _knowledge_cache:
+        return _knowledge_cache[key]
+
+    # Cold start — return a minimal envelope so hybrid_search has something
+    # to operate on. No CGI-specific static content is shipped any more.
     return {
         "last_updated": datetime.now(timezone.utc).isoformat(),
-        "source": "cgijoburg.gov.in (PDF static — April 2026)",
-        "status": "pdf_static",
-        "cgi_joburg": {
-            "source": "cgijoburg.gov.in (PDF static — April 2026)",
-            "status": "pdf_static",
-            "page_content": _get_cgi_pdf_content(),
-            **CONTACT_FALLBACK,
-        },
-        "vfs_global": {
-            "source": "vfsglobal.com (fallback)",
-            "status": "fallback",
-            "page_content": "",
-        },
-        "uploaded_docs": {
-            "source": "uploaded_documents",
-            "page_content": "",
-        },
-        **CONTACT_FALLBACK,
-        "official_links": {
-            "consulate": "https://www.cgijoburg.gov.in/",
-            "passport": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
-            "visa": "https://indianvisaonline.gov.in/visa/index.html",
-            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
-            "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
-        },
+        "source": "primary (unconfigured)",
+        "status": "no_sources_configured",
+        "cgi_joburg":   {"source": "", "status": "cold_start", "page_content": ""},
+        "vfs_global":   {"source": "", "status": "cold_start", "page_content": ""},
+        "uploaded_docs": {"source": "uploaded_documents", "page_content": ""},
     }
 
 
-def invalidate_knowledge_cache():
-    """Force the next call to get_realtime_knowledge() to trigger a fresh scrape."""
-    global _knowledge_cache_time, _blocked_kw_cache_time
-    _knowledge_cache_time = None
+def invalidate_knowledge_cache(company_id: Optional[str] = None):
+    """Force the next call to ``get_realtime_knowledge`` to refresh.
+
+    Pass ``company_id`` to invalidate just one tenant; omit to clear all.
+    """
+    global _blocked_kw_cache_time
+    if company_id is None:
+        _knowledge_cache.clear()
+        _knowledge_cache_time.clear()
+    else:
+        _knowledge_cache.pop(company_id, None)
+        _knowledge_cache_time.pop(company_id, None)
     _blocked_kw_cache_time = None  # also clear blocked-keywords cache
-    logger.info("[SCRAPE] Knowledge cache invalidated — will refresh on next request")
+    logger.info("[SCRAPE] Knowledge cache invalidated (company_id=%s)", company_id or "ALL")
 
 
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
@@ -1190,7 +763,7 @@ async def log_knowledge_changes(new_data: Dict):
             with open(hash_file, "w") as f:
                 f.write(new_hash)
     except Exception as e:
-        print(f"Error logging changes: {e}")
+        logger.warning("Error logging knowledge changes: %s", e)
 
 
 async def send_exception_email(subject: str, error_details: str):
@@ -1203,312 +776,113 @@ async def send_exception_email(subject: str, error_details: str):
             f.write(f"TIMESTAMP: {datetime.now(timezone.utc).isoformat()}\n")
             f.write(f"SUBJECT: {subject}\n")
             f.write(f"DETAILS: {error_details}\n")
-        print(f"Exception logged: {subject}")
+        logger.info("Exception logged: %s", subject)
     except Exception as e:
-        print(f"Failed to log exception: {e}")
+        logger.warning("Failed to log exception: %s", e)
 
 
 def get_fallback_knowledge() -> Dict:
-    """Comprehensive fallback knowledge base when scraping fails.
-    Source: www.cgijoburg.gov.in (compiled April 2026)
+    """Minimal fallback envelope returned when live scraping fails.
+
+    Previously contained a 250-line CGI Johannesburg-specific dict of
+    services, fees, addresses, and contact info — that's all been moved
+    to per-tenant configuration (bot_config + tenant_services + the
+    Knowledge Base tab). Returns a generic shape so callers that read
+    ``services`` / ``official_links`` keys don't crash.
     """
     return {
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-        "source": "Fallback - Official Information (www.cgijoburg.gov.in)",
-        "emergency_contact": "+27 11 581 9800",
-        "email": "ccom.jburg@mea.gov.in",
-        "email_consular": "cons.jburg@mea.gov.in",
-        "services": {
-            "passport": {
-                "description": "All passport services processed through VFS Global — not directly at Consulate",
-                "apply_online": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
-                "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
-                "vfs_phone": "012 425 3007 / 011 484 0327",
-                "submission_hours": "08:00–15:00 | Collection: 11:00–16:00",
-                "processing_time": "Up to one month (if all documents are in order)",
-                "documents_required": [
-                    "Completed online application (cgijoburg.gov.in passport services)",
-                    "3 passport-sized photos (5cm x 5cm, coloured, white background)",
-                    "Original current passport",
-                    "Proof of residential address in South Africa",
-                    "Original proof of payment (no photocopies)"
-                ],
-                "fees_zar": "36-page: ZAR 2,280 | 60-page: ZAR 2,655 | Minor child/Emergency: ZAR 780 (all include ICWF ZAR 30)",
-                "lost_stolen_extra": "Original FIR/Police Report required for lost/stolen passport"
-            },
-            "visa": {
-                "south_african_nationals": "South African nationals receive Indian visa GRATIS (free of charge)",
-                "apply_online": "https://indianvisaonline.gov.in/visa/index.html",
-                "vfs_address": "1st Floor, Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, JHB",
-                "biometrics": "Mandatory for all regular visa applicants",
-                "important": "No visa applications accepted directly at the Consulate — all through VFS only",
-                "passport_validity": "Must be valid for minimum 6 months from date of departure from India",
-                "blank_pages": "Passport must have at least 2 blank pages",
-                "visa_types": "Tourist, Business, Employment, Student, Medical, Research, Journalist, Conference, Transit, Entry (X), Medical Attendant, Missionary/Religious Worker",
-                "e_visa_apply": "https://indianvisaonline.gov.in/evisa/tvoa.html",
-                "e_visa_note": "Apply minimum 5 working days before departure; available at 30+ airports and 5 seaports"
-            },
-            "oci": {
-                "description": "Multi-purpose, multi-entry, life-long visa for persons of Indian origin",
-                "apply_online": "https://ociservices.gov.in/",
-                "submit_to": "Consulate General of India, Johannesburg (appointment required)",
-                "appointment": "Email cons.jburg@mea.gov.in for OCI appointment",
-                "eligibility": "Indian citizen since 26 Jan 1950, or parent/grandparent/great-grandparent was Indian citizen, or spouse of Indian citizen/OCI holder (married ≥2 years)",
-                "not_eligible": "Pakistan/Bangladesh nationals; foreign military personnel (serving or retired)",
-                "fees_zar": "As per MEA notification — contact Consulate for current rates",
-                "documents_required": [
-                    "Proof of present citizenship (current foreign passport)",
-                    "Proof of renunciation of Indian citizenship / surrender certificate",
-                    "Proof of Indian origin (old Indian passport, birth certificate, school certificate)",
-                    "Proof of residential address in SA",
-                    "2 photos (51mm x 51mm)"
-                ]
-            },
-            "pcc": {
-                "description": "Police Clearance Certificate — required for immigration, change of nationality, employment abroad",
-                "apply_online": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-                "submit_to": "VFS Global Johannesburg (select CGI Johannesburg)",
-                "vfs_address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
-                "jurisdiction": "Gauteng, North West, Limpopo and Mpumalanga must apply through CGI Johannesburg"
-            },
-            "attestation": {
-                "description": "Attestation of academic degrees, GPA/PoA, and documents for Indian and foreign nationals",
-                "indian_documents": "Indian documents must first be apostilled by MEA India — http://www.mea.gov.in/apostille.htm",
-                "gpa_poa": "Original documents and self-attested copies required",
-                "fees_zar": "As per consular schedule"
-            },
-            "birth_registration": {
-                "description": "Registration of births of children born in South Africa to Indian nationals",
-                "fee": "Gratis (free of charge)",
-                "documents_required": [
-                    "Birth certificate from South African Home Department",
-                    "Birth certificate from local hospital",
-                    "Indian passport(s) of parent(s)"
-                ]
-            },
-            "emergency_travel": {
-                "description": "Emergency Travel Document for single journey to India when passport is lost/stolen/damaged",
-                "fees_zar": "ZAR 780 (includes ICWF)",
-                "documents_required": [
-                    "Police report (FIR) if lost or stolen",
-                    "Proof of identity",
-                    "2 photographs",
-                    "Proof of travel booking"
-                ]
-            },
-            "noc_sa_citizenship": {
-                "description": "NOC (No Objection Certificate) for Indian nationals who wish to acquire South African citizenship",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "documents_required": [
-                    "Indian passport (original + copies of all pages)",
-                    "Application form",
-                    "Proof of residential address in South Africa",
-                    "Any supporting document required by the Consulate"
-                ],
-                "fees_zar": "As per consular schedule"
-            },
-            "noc_child_passport": {
-                "description": "NOC for child passport in India — required when one parent (in South Africa) is not present at the passport office in India",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "documents_required": [
-                    "Passport copies of both parents",
-                    "Child's birth certificate",
-                    "Application form"
-                ],
-                "fees_zar": "As per consular schedule"
-            },
-            "non_impediment_letter": {
-                "description": "Non-Impediment Letter issued to Indian nationals who wish to marry a foreign national. Certifies that the applicant is not married and is free to marry.",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "documents_required": [
-                    "Indian passport (original + photocopy)",
-                    "Proof of residential address in South Africa",
-                    "Application form"
-                ],
-                "fees_zar": "As per consular schedule"
-            },
-            "one_and_same_certificate": {
-                "description": "One and the Same Certificate issued when a difference in name spelling exists across documents",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "documents_required": [
-                    "Self-attested copies of all documents showing name variations"
-                ],
-                "fees_zar": "As per consular schedule"
-            },
-            "driving_licence_translation": {
-                "description": "Certified translation of Indian driving licence for use in South Africa",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "documents_required": [
-                    "Original Indian driving licence",
-                    "Photocopy of driving licence",
-                    "Indian passport (original + copy)"
-                ],
-                "fees_zar": "As per consular schedule"
-            },
-            "nri_registration": {
-                "description": "Registration of NRIs/PIOs/OCIs residing in South Africa with the Consulate. Helps in emergencies, disaster situations, and for consular assistance.",
-                "how_to": "Contact the Consulate at ccom.jburg@mea.gov.in or visit in person",
-                "fee": "No fee mentioned — contact Consulate for current procedure"
-            },
-            "tracing_roots": {
-                "description": "Programme for persons of Indian origin to trace their ancestral roots in India. MEA facilitates visits to villages/districts of origin.",
-                "contact": "Consulate General of India, Johannesburg — ccom.jburg@mea.gov.in"
-            },
-            # Keys matching _SERVICE_KEYWORDS for direct fallback lookup
-            "noc": {
-                "description": "NOC (No Objection Certificate) services — for South African citizenship acquisition OR for child passport application in India",
-                "noc_sa_citizenship": "NOC for Indian nationals acquiring South African citizenship. Submit application with Indian passport copies and proof of address.",
-                "noc_child_passport": "NOC for child passport in India when one parent is in South Africa. Required: both parents' passport copies, child's birth certificate.",
-                "submit_to": "Consulate General of India, Johannesburg",
-                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in",
-                "fees_zar": "As per consular schedule"
-            },
-            "non_impediment": {
-                "description": "Non-Impediment Letter issued to Indian nationals who wish to marry a foreign national. Certifies applicant is not currently married and is free to marry.",
-                "documents_required": [
-                    "Indian passport (original + photocopy of all pages)",
-                    "Proof of residential address in South Africa",
-                    "Application form"
-                ],
-                "submit_to": "Consulate General of India, Johannesburg",
-                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in",
-                "fees_zar": "As per consular schedule"
-            },
-            "one_same": {
-                "description": "One and the Same Certificate issued when a difference in name spelling exists across documents (e.g. passport vs degree certificate).",
-                "documents_required": [
-                    "Self-attested copies of all documents showing name variations"
-                ],
-                "submit_to": "Consulate General of India, Johannesburg",
-                "fees_zar": "As per consular schedule"
-            },
-            "driving": {
-                "description": "Certified translation of Indian driving licence for use in South Africa. Provided by the Consulate General.",
-                "documents_required": [
-                    "Original Indian driving licence",
-                    "Photocopy of driving licence",
-                    "Indian passport (original + photocopy)"
-                ],
-                "submit_to": "Consulate General of India, Johannesburg",
-                "fees_zar": "As per consular schedule"
-            },
-            "nri": {
-                "description": "Registration of NRIs/PIOs/OCIs residing in South Africa. Helps in emergencies and for consular assistance.",
-                "how_to": "Contact the Consulate at ccom.jburg@mea.gov.in or visit in person during office hours.",
-                "office_hours": "Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)",
-                "contact": "+27 11-4828484 | ccom.jburg@mea.gov.in"
-            },
-            "tracing": {
-                "description": "Tracing the Roots Programme for persons of Indian origin to trace their ancestral roots in India. MEA facilitates visits to villages/districts of origin.",
-                "contact": "Consulate General of India, Johannesburg — ccom.jburg@mea.gov.in | +27 11-4828484"
-            },
-            "trade": {
-                "description": "India–South Africa bilateral trade and commerce. Diplomatic relations established in 1993. Both members of BRICS and G20.",
-                "stats": "150+ Indian companies in SA | USD 10 billion investment | ~18,000 South Africans employed | Key sectors: IT, Mining, Autos, Pharma, Agriculture",
-                "major_companies": "TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma, TCS, WIPRO, Zensar, TechMahindra",
-                "dtaa": "Double Taxation Avoidance Agreement in force since 28 November 1997",
-                "services_for_indian_cos": "Trade advisory, business meetings, partner identification, export/import guidance, exhibition support",
-                "services_for_sa_cos": "Market entry advisory for India, introduction to Indian counterparts, BSM support",
-                "contact": "Commercial Wing, CGI Johannesburg — ccom.jburg@mea.gov.in | +27 11-4828484"
-            },
-            "emergency_contact": {
-                "description": "Emergency consular assistance for Indian nationals in distress in South Africa (Gauteng, North West, Limpopo, Mpumalanga).",
-                "emergency_phone": "+27 11 581 9800 (24/7 emergency)",
-                "main_phone": "+27 11-4828484 / +27 11-4828485 / +27 11-4828486",
-                "email": "ccom.jburg@mea.gov.in",
-                "consular_email": "cons.jburg@mea.gov.in",
-                "pravasi_helpline": "Toll Free (India only): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in",
-                "address": "No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg"
-            }
-        },
-        "trade_commerce": {
-            "overview": "India–South Africa diplomatic relations established in 1993. Both members of BRICS and G20.",
-            "south_africa_stats": "Population: 64 million+ | Area: 1.22 million sq km | Financial capital: Johannesburg",
-            "gdp": "Services: 62.75% | Industry: 24.46% | Growth rate (2024): ~1.0%",
-            "key_resources": "World's largest producer of platinum, vanadium, chromium, and manganese",
-            "indian_investment": "USD 10 billion invested in South Africa | 150+ Indian companies | ~18,000 South Africans employed",
-            "major_indian_companies": "TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma (Ranbaxy), TCS, WIPRO, Zensar, TechMahindra",
-            "bilateral_sectors": "IT, Mining, Infrastructure, Automobiles, Pharmaceuticals, Agriculture, Heavy Machinery",
-            "dtaa": "Double Taxation Avoidance Agreement in force since 28 November 1997 (Notification No. GSR 198(E), dated 21-04-1998)",
-            "services_for_indian_companies": "Trade advisory, business meeting facilitation, partner identification, import/export guidance, exhibition support",
-            "services_for_sa_companies": "Market entry advisory for India, introduction to Indian counterparts, investment/regulatory information, BSM support"
-        },
-        "vfs_locations": {
-            "johannesburg_passport": {
-                "address": "2nd Floor, Harrow Court 1, Isle of Houghton Office Park, Boundary Road, Park Town, JHB-2198",
-                "timings": "Submission: 08:00–15:00 | Collection: 11:00–16:00",
-                "phone": "012 425 3007 / 011 484 0327",
-                "email": "Info.inza@vfshelpline.com"
-            },
-            "johannesburg_visa": {
-                "address": "1st Floor, Rivonia Village Office Block, cnr Rivonia Boulevard and Mutual Road, Rivonia, JHB",
-                "phone": "012 425 3007 / 011 484 0327"
-            }
-        },
-        "official_links": {
-            "consulate": "https://www.cgijoburg.gov.in/",
-            "passport_application": "https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/",
-            "regular_visa": "https://indianvisaonline.gov.in/visa/index.html",
-            "e_visa": "https://indianvisaonline.gov.in/evisa/tvoa.html",
-            "oci_services": "https://ociservices.gov.in/",
-            "pcc_application": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-            "vfs_global": "https://services.vfsglobal.com/zaf/en/ind/",
-            "mea_apostille": "http://www.mea.gov.in/apostille.htm",
-            "passport_status": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/"
-        }
+        "last_updated":    datetime.now(timezone.utc).isoformat(),
+        "source":          "fallback (no scrape sources configured)",
+        "services":        {},
+        "official_links":  {},
     }
 
-
-_SERVICE_KEYWORDS = {
-    "visa":        ["visa", "vfs", "e-visa", "tourist", "business visa", "application fee", "indianvisaonline",
-                    "e_visa", "evisa", "visa fee", "visa fees", "visa cost", "visa price", "visa charges",
-                    "visa application", "how much visa", "tourist fee", "business fee",
-                    "visa process", "visa steps", "apply visa", "visa procedure", "visa guide"],
-    "passport":    ["passport", "renewal", "tatkal", "passportindia", "fresh passport", "travel document",
-                    "passport seva", "passport fee", "passport fees", "passport cost", "passport charges",
-                    "how much passport", "lost passport", "stolen passport", "damaged passport",
-                    "lost", "stolen", "damaged", "reissue", "re-issue", "fir", "police report",
+# Platform-default keyword sets used by KB content extraction + fallback
+# search routing. The four generic buckets (``fees``, ``emergency_contact``,
+# ``process_guide``, plus a passthrough for any tenant service) are used
+# by ``extract_service_content`` and ``_fallback_for_keywords``. Tenant
+# services contribute their own keywords automatically — see
+# ``_tenant_kb_keywords`` below.
+#
+# The India-specific buckets (``noc``, ``nri``, ``tracing``, ``trade``,
+# ``one_same``, ``non_impediment``, ``driving``) have been removed; they
+# only made sense for the CGI Joburg use case. The CGI-specific brand
+# tokens (``passportindia``, ``ociservices``, ``vfs``, ``tatkal``,
+# ``brics``, ``dtaa``, ``kip programme``, ``fir``) have been stripped from
+# the remaining buckets.
+_DEFAULT_KB_SERVICE_KEYWORDS = {
+    "visa":        ["visa", "e-visa", "evisa", "tourist visa", "business visa",
+                    "visa fee", "visa fees", "visa cost", "visa application",
+                    "visa process", "visa procedure", "apply visa"],
+    "passport":    ["passport", "renewal", "fresh passport", "travel document",
+                    "passport fee", "passport fees", "passport cost",
+                    "lost passport", "stolen passport", "damaged passport",
+                    "reissue", "re-issue", "police report",
                     "emergency travel", "emergency document",
-                    "passport process", "passport steps", "apply passport", "passport procedure",
-                    "passport guide", "passport pricing", "renew passport steps"],
-    "oci":         ["oci", "overseas citizen", "lifelong visa", "oci card", "person of indian origin",
-                    "ociservices", "oci fee", "oci fees", "oci cost",
-                    "oci process", "oci steps", "apply oci", "oci procedure"],
-    "pcc":         ["pcc", "police clearance", "clearance certificate", "criminal record", "character certificate",
-                    "pcc fee", "pcc fees", "pcc process", "pcc steps", "pcc procedure"],
-    "marriage":    ["marriage", "matrimonial", "spouse", "wedding", "nikah", "marry", "marriage certificate",
-                    "marriage fee", "marriage process", "marriage steps"],
+                    "passport process", "apply passport"],
+    "oci":         ["oci", "overseas citizen", "lifelong visa", "oci card",
+                    "person of indian origin", "oci fee", "oci process"],
+    "pcc":         ["pcc", "police clearance", "clearance certificate",
+                    "criminal record", "character certificate", "pcc fee"],
+    "marriage":    ["marriage", "matrimonial", "spouse", "wedding",
+                    "marry", "marriage certificate", "marriage fee"],
     "birth":       ["birth", "born", "newborn", "child registration", "birth certificate"],
-    "attestation": ["attestation", "apostille", "notary", "affidavit", "power of attorney", "legalization",
-                    "legalisation", "attestation fee", "apostille fee"],
-    "renunciation":["renunciation", "renounce", "surrender passport", "citizenship", "give up citizenship"],
-    "fees":        ["fees", "fee", "cost", "price", "charges", "how much", "payment", "zar", "rand",
-                    "rate", "amount", "tariff", "pricing", "pricing plan", "plans", "price list",
-                    "service charges", "cost overview", "all fees", "complete fees", "fee schedule",
+    "attestation": ["attestation", "apostille", "notary", "affidavit",
+                    "power of attorney", "legalization", "legalisation"],
+    "renunciation":["renunciation", "renounce", "surrender passport",
+                    "citizenship", "give up citizenship"],
+    # Generic topic-routers (currency-neutral, tenant-neutral)
+    "fees":        ["fees", "fee", "cost", "price", "charges", "how much",
+                    "payment", "rate", "amount", "tariff", "pricing",
+                    "price list", "service charges", "fee schedule",
                     "fee structure", "what does it cost"],
-    "noc":         ["noc", "no objection", "no objection certificate", "south african citizenship",
-                    "child passport india", "noc child", "noc citizenship"],
-    "non_impediment": ["non-impediment", "non impediment", "impediment", "free to marry", "marriage letter",
-                       "marry abroad", "marriage abroad"],
-    "one_same":    ["one and the same", "same certificate", "name spelling", "name difference",
-                    "name variation", "name discrepancy"],
-    "driving":     ["driving licence", "driving license", "drive", "licence translation",
-                    "indian driving", "translate licence"],
-    "nri":         ["nri", "nri registration", "register nri", "registration", "register with consulate",
-                    "indian national registration", "pio registration", "oci registration"],
-    "tracing":     ["tracing roots", "trace roots", "ancestral", "roots in india", "indian origin village",
-                    "know india", "kip programme"],
-    "trade":       ["trade", "commerce", "investment", "business india", "india south africa trade",
-                    "brics", "dtaa", "double taxation", "bilateral", "indian companies",
-                    "business meeting", "buyer seller", "bsm"],
-    "emergency_contact": ["emergency", "distress", "stranded", "arrested", "hospital", "accident",
-                          "urgent help", "crisis", "indians in distress", "helpline"],
-    "process_guide": ["step by step", "walk me through", "entire process", "from start to finish",
-                      "how do i start", "get started", "guide me", "beginning to end", "full process",
-                      "complete process", "walkthrough", "procedure", "how to apply", "how to begin",
-                      "first step", "next step", "sign up", "signup", "onboard", "use your service",
-                      "use this bot", "how does this work", "explain the process", "what are the steps"],
+    "emergency_contact": ["emergency", "distress", "stranded", "arrested",
+                          "hospital", "accident", "urgent help", "crisis",
+                          "helpline"],
+    "process_guide": ["step by step", "walk me through", "entire process",
+                      "from start to finish", "how do i start", "get started",
+                      "guide me", "beginning to end", "full process",
+                      "complete process", "walkthrough", "procedure",
+                      "how to apply", "how to begin", "first step",
+                      "next step", "use this bot", "how does this work",
+                      "explain the process", "what are the steps"],
 }
+
+# Back-compat alias — existing call sites in this module + hybrid_retrieval
+# + application_flow import ``_SERVICE_KEYWORDS``. Keep as alias so we
+# don't have to chase every read site. Tenant-aware enrichment happens
+# via ``_resolve_kb_service_keywords()`` (see below).
+_SERVICE_KEYWORDS = _DEFAULT_KB_SERVICE_KEYWORDS
+
+
+async def _resolve_kb_service_keywords(company_id: Optional[str]) -> Dict[str, list]:
+    """Return service→keyword map enriched with this tenant's
+    ``tenant_services[].keywords`` so KB extraction recognises the
+    tenant's own services + still understands generic topics like
+    ``fees`` and ``process_guide``.
+    """
+    out: Dict[str, list] = {k: list(v) for k, v in _DEFAULT_KB_SERVICE_KEYWORDS.items()}
+    if not company_id:
+        return out
+    try:
+        from services.service_registry import list_services
+        services = await list_services(company_id)
+        for s in services:
+            if not s.enabled:
+                continue
+            kws = [str(k).lower() for k in (s.raw.get("keywords") or []) if k]
+            if s.service_key:
+                kws.append(s.service_key.lower())
+            if s.name:
+                kws.append(s.name.lower())
+            # Merge with the existing bucket if the tenant's key matches a
+            # built-in topic (e.g. tenant has a "visa" service → enrich
+            # the platform "visa" bucket); otherwise add a new bucket.
+            existing = out.get(s.service_key, [])
+            out[s.service_key] = sorted(set(existing + kws), key=len, reverse=True)
+    except Exception as exc:
+        logger.debug("[_resolve_kb_service_keywords] %s: %s", company_id, exc)
+    return out
 
 # ─────────────────────────────────────────────────────────────────────────────
 # KEYWORD-DRIVEN SELECTIVE SCANNING
@@ -1539,9 +913,6 @@ _NO_CRAWL_WORDS = {
     "hello", "hi", "hey", "thanks", "thank", "bye", "goodbye",
 }
 
-_HIT_THRESHOLD = 3       # min matching lines to consider Level 1 "found"
-_MAX_DEEP_URLS = 8       # max pages to crawl per deep scan
-_DEEP_SCAN_TTL = 1800    # 30 minutes per-keyword deep-scan cache
 
 # Per-keyword deep-scan cache: {cache_key → {"content": str, "scanned_at": str}}
 _deep_scan_cache: Dict[str, Dict] = {}
@@ -1588,7 +959,8 @@ def _extract_matching_lines(keywords: List[str], content: str, max_lines: int = 
 def _discover_relevant_links(homepage_html: str, base_url: str, keywords: List[str]) -> List[str]:
     """
     Parse homepage HTML for same-domain <a href> links whose URL path or
-    anchor text contains at least one keyword. Returns up to _MAX_DEEP_URLS URLs.
+    anchor text contains at least one keyword. Returns up to
+    ``platform_config.kb_max_deep_urls`` (default 8) URLs.
     """
     soup = BeautifulSoup(homepage_html, "html.parser")
     base_domain = urlparse(base_url).netloc
@@ -1615,7 +987,7 @@ def _discover_relevant_links(homepage_html: str, base_url: str, keywords: List[s
         if any(k in url_path or k in anchor_text for k in keywords):
             seen.add(full_url)
             found.append(full_url)
-            if len(found) >= _MAX_DEEP_URLS:
+            if len(found) >= _kb_max_deep_urls():
                 break
 
     return found
@@ -1629,7 +1001,15 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
     logger.info(f"[SCAN L2 BG] Starting background deep crawl for '{cache_key}'")
     deep_content = ""
     try:
-        homepage_url  = "https://www.cgijoburg.gov.in/"
+        # Source URLs are tenant-scoped via bot_config — caller passes
+        # company_id through the cache_key by convention "<company_id>:<query>".
+        _co_id = cache_key.split(":", 1)[0] if ":" in cache_key else ""
+        sources = await _load_scrape_sources(_co_id)
+        homepage_url = sources.get("primary_url") or ""
+        sub_pages    = sources.get("sub_pages") or []
+        if not homepage_url:
+            logger.info("[SCAN L2 BG] No primary_url configured for company_id=%s — skipping deep crawl", _co_id)
+            return
         homepage_html = await _fetch_with_retry(homepage_url)
 
         # Extract content from the homepage itself (not just use it for link discovery)
@@ -1638,7 +1018,7 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
 
         relevant_urls = _discover_relevant_links(homepage_html, homepage_url, keywords)
         # Add known sub-pages whose path matches a keyword
-        for sub in CGI_SUB_PAGES:
+        for sub in sub_pages:
             path = urlparse(sub).path.lower()
             if any(k in path for k in keywords) and sub not in relevant_urls:
                 relevant_urls.append(sub)
@@ -1649,7 +1029,7 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
         # Include homepage content first if it has keyword matches
         homepage_matched = _extract_matching_lines(keywords, homepage_text, max_lines=20)
         if homepage_matched:
-            page_parts.append("[cgijoburg.gov.in — homepage]\n" + "\n".join(homepage_matched))
+            page_parts.append(f"[{urlparse(homepage_url).netloc or 'primary'} — homepage]\n" + "\n".join(homepage_matched))
 
         if relevant_urls:
             logger.info(f"[SCAN L2 BG] Crawling {len(relevant_urls)} sub-pages for '{cache_key}'")
@@ -1685,7 +1065,6 @@ async def _run_deep_crawl(cache_key: str, keywords: List[str], query: str):
 # PERIODIC BACKGROUND CRAWL — stores full CGI site into MongoDB
 # ─────────────────────────────────────────────────────────────────────────────
 
-_CGI_CRAWL_INTERVAL_SECONDS = 6 * 3600   # re-crawl every 6 hours
 _cgi_crawl_running = False
 
 
@@ -1736,20 +1115,28 @@ _CGI_URL_CATEGORY = {
 }
 
 
-async def _do_cgi_full_crawl():
-    """
-    Crawl https://www.cgijoburg.gov.in/ and all known sub-pages.
-    Store full page text into MongoDB so hybrid_search Layer 1 benefits
-    from up-to-date live content on the next query.
+async def _do_cgi_full_crawl(company_id: Optional[str] = None):
+    """Crawl this tenant's primary site + sub-pages and store full page text
+    into MongoDB so hybrid_search Layer 1 benefits from up-to-date live
+    content on the next query.
+
+    Note: function name kept (``_do_cgi_full_crawl``) for back-compat with
+    any caller; URLs are tenant-driven, not CGI-specific.
     """
     global _cgi_crawl_running
     if _cgi_crawl_running:
-        logger.debug("[BGCrawl] Full CGI crawl already in progress — skipping")
+        logger.debug("[BGCrawl] Full crawl already in progress — skipping")
         return
     _cgi_crawl_running = True
     try:
-        all_urls = ["https://www.cgijoburg.gov.in/"] + list(CGI_SUB_PAGES)
-        logger.info(f"[BGCrawl] Starting full CGI crawl ({len(all_urls)} URLs)")
+        sources = await _load_scrape_sources(company_id)
+        primary = sources.get("primary_url") or ""
+        sub_pages = sources.get("sub_pages") or []
+        all_urls = ([primary] if primary else []) + list(sub_pages)
+        if not all_urls:
+            logger.info("[BGCrawl] No scrape sources configured for company_id=%s — skipping", company_id)
+            return
+        logger.info(f"[BGCrawl] Starting full crawl ({len(all_urls)} URLs)")
 
         # Use _fetch_with_retry directly so the 5-min rate limiter doesn't block
         # an intentional periodic crawl (rate limiter is for the hot query path only)
@@ -1782,17 +1169,20 @@ async def _do_cgi_full_crawl():
         _cgi_crawl_running = False
 
 
-async def start_periodic_cgi_crawl():
+async def start_periodic_cgi_crawl(company_id: Optional[str] = None):
+    """Periodic loop: crawl this tenant's pages and store to MongoDB every
+    ``platform_config.kb_crawl_interval_seconds`` (default 6 hours).
+
+    Pass ``company_id`` to scope the crawl to one tenant. Call once at
+    server startup via ``asyncio.create_task()``.
     """
-    Periodic loop: crawl all CGI pages and store to MongoDB every
-    _CGI_CRAWL_INTERVAL_SECONDS (default 6 hours).
-    Runs one immediate crawl at startup, then loops.
-    Call once at server startup via asyncio.create_task().
-    """
-    logger.info(f"[BGCrawl] Periodic CGI crawl started (interval: {_CGI_CRAWL_INTERVAL_SECONDS // 3600}h)")
+    _interval = _kb_crawl_interval()
+    logger.info(f"[BGCrawl] Periodic crawl started (interval: {_interval // 3600}h, company_id={company_id})")
     while True:
-        await _do_cgi_full_crawl()
-        await asyncio.sleep(_CGI_CRAWL_INTERVAL_SECONDS)
+        await _do_cgi_full_crawl(company_id)
+        # Resolve fresh each iteration so a super-admin tuning change
+        # applies on the next cycle without restarting the task.
+        await asyncio.sleep(_kb_crawl_interval())
 
 
 # Tracks which cache keys have a background crawl already in flight
@@ -1831,7 +1221,7 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
     combined    = cgi_content + "\n" + vfs_content
 
     hits = _count_hits(keywords, combined)
-    if hits >= _HIT_THRESHOLD:
+    if hits >= _kb_hit_threshold():
         logger.debug(f"[SCAN L1] '{cache_key}' — {hits} hits, returning from cache")
         # Include the original query phrase as an extra keyword so compound terms
         # like "lost passport" score higher than single-keyword lines
@@ -1840,9 +1230,9 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
         vfs_lines = _extract_matching_lines(phrase_kws, vfs_content)
         parts = []
         if cgi_lines:
-            parts.append("[CGI Johannesburg]\n" + "\n".join(cgi_lines))
+            parts.append("[Primary source]\n" + "\n".join(cgi_lines))
         if vfs_lines:
-            parts.append("[VFS Global]\n" + "\n".join(vfs_lines))
+            parts.append("[Secondary source]\n" + "\n".join(vfs_lines))
         return "\n\n".join(parts) if parts else _search_knowledge_sync(query, knowledge_base)
 
     # ── Level 2a: check per-keyword deep-scan cache ──────────────────
@@ -1852,7 +1242,7 @@ async def deep_scan_for_keyword(query: str, knowledge_base: Dict) -> str:
             datetime.now(timezone.utc)
             - datetime.fromisoformat(cached_deep["scanned_at"])
         ).total_seconds()
-        if age < _DEEP_SCAN_TTL and cached_deep.get("content"):
+        if age < _kb_deep_scan_ttl() and cached_deep.get("content"):
             logger.debug(f"[SCAN L2] '{cache_key}' — deep-scan cache hit (age {int(age)}s)")
             return cached_deep["content"]
 
@@ -1972,23 +1362,31 @@ def _search_knowledge_sync(query: str, knowledge_base: Dict) -> str:
     cgi_status  = cgi.get("status", "unknown")
     vfs_status  = vfs.get("status", "unknown")
 
+    # Contact block: built from the contact fields extracted off the
+    # scraped homepage (cgi.get(...)). Tenants supply richer contact info
+    # via bot_config.contact, which is rendered into the system prompt
+    # separately; this block is just what the scraper found.
+    contact_lines: list[str] = []
+    contact_src: dict = cgi or {}
+    for label, key in (
+        ("Phone",   "phone_main"), ("Consular", "phone_consular"),
+        ("Email",   "email"),       ("Consular email", "email_consular"),
+        ("Address", "address"),     ("Office Hours",   "office_hours"),
+        ("Website", "website"),
+    ):
+        val = contact_src.get(key) or ""
+        if val:
+            contact_lines.append(f"- {label}: {val}")
     contact_block = (
-        f"CONTACT & LOCATION (Source: www.cgijoburg.gov.in):\n"
-        f"- Phone: {CONTACT_FALLBACK['phone_main']} / {CONTACT_FALLBACK['phone_consular']}\n"
-        f"- Email: {CONTACT_FALLBACK['email']} | Consular: {CONTACT_FALLBACK['email_consular']}\n"
-        f"- Address: {CONTACT_FALLBACK['address']}\n"
-        f"- Office Hours: {CONTACT_FALLBACK['office_hours']}\n"
-        f"- VFS (Passport/PCC): {CONTACT_FALLBACK['vfs_address']}\n"
-        f"- VFS Phone: {CONTACT_FALLBACK['vfs_phone']} | Email: {CONTACT_FALLBACK['vfs_email']}\n"
-        f"- VFS Hours: {CONTACT_FALLBACK['vfs_hours']}\n"
-        f"- Consulate Website: {CONTACT_FALLBACK['website']}"
+        "CONTACT & LOCATION:\n" + "\n".join(contact_lines)
+        if contact_lines else ""
     )
 
     keywords = _extract_keywords(query)
     # Include the original query phrase so compound terms rank above single-keyword lines
     phrase_kws = keywords + ([query.lower().strip()] if len(keywords) > 1 else [])
     scraped_at = cgi.get("scraped_at") or knowledge_base.get("last_updated", "")
-    sections = [contact_block]
+    sections = [contact_block] if contact_block else []
     if scraped_at:
         sections.append(f"[Data last scraped: {scraped_at}]")
 

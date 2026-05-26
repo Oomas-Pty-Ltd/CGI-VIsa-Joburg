@@ -66,13 +66,45 @@ from services.application_flow import (
     detect_service,
     detect_website_service,
     is_apply_intent,
+    preload_flow_keywords,
+    preload_service_patterns,
 )
 from services.service_registry import get_service, list_services
-from services.intent_classifier import (
-    classify_intent,
-    get_deterministic_response,
-    IntentCategory,
-)
+from services.bot_config import get_bot_config
+# intent_classifier no longer drives chat — escalation + language-switch live
+# in escalation_service / detect_target_language; deterministic FAQ replies
+# come from the tenant's knowledge_base entries via the LLM context.
+
+
+async def _wa_type_a_services(company_id: Optional[str]) -> dict:
+    """Return the tenant's TYPE_A services keyed by service_key.
+
+    Replaces the old hardcoded ``_WA_TYPE_A`` constant. Each value is a
+    plain dict with ``name``, ``documents``, ``gov_url``, ``vfs_note``
+    so call sites that did ``_WA_TYPE_A[key]["name"]`` keep working.
+    """
+    if not company_id:
+        return {}
+    services = await list_services(company_id)
+    # Allowed categories are platform-config driven so super-admins can
+    # opt TYPE_B services into the WhatsApp menu without code changes.
+    try:
+        from services import platform_config
+        _allowed = {c.upper() for c in (platform_config.get(
+            "whatsapp_visible_service_categories", ["TYPE_A"]) or [])}
+    except Exception:
+        _allowed = {"TYPE_A"}
+    out: dict = {}
+    for s in services:
+        if (getattr(s, "category", "") or "").upper() not in _allowed:
+            continue
+        out[s.service_key] = {
+            "name":      getattr(s, "name", "") or s.service_key.title(),
+            "documents": list(getattr(s, "documents", []) or []),
+            "gov_url":   getattr(s, "external_url", "") or "",
+            "vfs_note":  getattr(s, "vfs_note", "") or "",
+        }
+    return out
 
 # LLM for open-ended Q&A
 try:
@@ -87,9 +119,15 @@ logger = logging.getLogger(__name__)
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 # =====================================================================
-# LANGUAGE SUPPORT  (mirrors consular_routes.py — keep in sync)
+# LANGUAGE SUPPORT
+# The dicts below are *platform vocabulary* — display names + script
+# hints for any language code we know about. Per-tenant filtering and
+# overrides come from bot_config.supported_languages (see
+# ``_tenant_language_vocab`` below). A tenant that lists, say, only
+# English + Hindi gets a 2-row WhatsApp menu and "switch to Tamil" is
+# silently ignored.
 # =====================================================================
-_LANG_NAMES: dict[str, str] = {
+_DEFAULT_LANG_NAMES: dict[str, str] = {
     "en":  "English",
     # Indian
     "hi":  "Hindi",      "bn":  "Bengali",    "mr":  "Marathi",
@@ -111,7 +149,7 @@ _LANG_NAMES: dict[str, str] = {
     "am":  "Amharic",    "om":  "Oromo",
 }
 
-_LANG_SCRIPT_HINT: dict[str, str] = {
+_DEFAULT_LANG_SCRIPT_HINT: dict[str, str] = {
     "hi":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script.",
     "mr":  "You MUST write in Devanagari script (देवनागरी). Do NOT use Urdu/Perso-Arabic script.",
     "ne":  "You MUST write in Devanagari script (देवनागरी).",
@@ -129,9 +167,10 @@ _LANG_SCRIPT_HINT: dict[str, str] = {
     "as":  "You MUST write in Bengali-Assamese script (অসমীয়া লিপি).",
 }
 
-# Ordered list used to build the numbered WhatsApp menu
-# (english_name, lang_code, native_script_display)
-_LANGUAGE_LIST = [
+# Platform default ordered vocabulary used as a fallback when a tenant
+# hasn't configured any ``supported_languages``. Each row is
+# ``(english_name, lang_code, native_script_display)``.
+_DEFAULT_LANGUAGE_LIST = [
     # Indian Languages
     ("English",    "en",  "English"),
     ("Hindi",      "hi",  "हिंदी"),
@@ -179,40 +218,113 @@ _LANGUAGE_LIST = [
     ("Oromo",      "om",  "Oromoo"),
 ]
 
-# number string → (english_name, lang_code)
-_LANGUAGES: dict[str, tuple] = {
-    str(i + 1): (eng, code) for i, (eng, code, _n) in enumerate(_LANGUAGE_LIST)
-}
-
-# name → (english_name, lang_code) for both English and native script input
-_LANG_BY_NAME: dict = {}
-for _li, (_le, _lc, _ln) in enumerate(_LANGUAGE_LIST):
-    _LANG_BY_NAME[_le.lower()] = (_le, _lc)
-    _LANG_BY_NAME[_ln]         = (_le, _lc)
-    if _ln.lower() != _le.lower():
-        _LANG_BY_NAME[_ln.lower()] = (_le, _lc)
-del _li, _le, _lc, _ln
-
-
-def _detect_language_input(text: str):
+async def _tenant_language_list(company_id: Optional[str]) -> list:
+    """Resolve the ordered ``(english_name, lang_code, native_label)`` list
+    for this tenant. Reads ``bot_config.supported_languages``; falls back to
+    the platform default vocabulary when the tenant has nothing configured.
     """
-    Returns (english_name, lang_code) if text is a number 1-42 or a language name
-    (English or native script).  Returns None if no match.
+    if company_id:
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            rows = []
+            for entry in (cfg.supported_languages or []):
+                if not isinstance(entry, dict):
+                    continue
+                code = (entry.get("code") or "").strip().lower()
+                if not code:
+                    continue
+                eng_name    = (entry.get("name") or "").strip() or _DEFAULT_LANG_NAMES.get(code, code.title())
+                native_name = (entry.get("native_name") or "").strip() or eng_name
+                rows.append((eng_name, code, native_name))
+            if rows:
+                return rows
+        except Exception:
+            pass
+    return list(_DEFAULT_LANGUAGE_LIST)
+
+
+async def _tenant_script_hint(code: str, company_id: Optional[str]) -> str:
+    """Return the script-direction instruction for the given language code.
+
+    Tenant-supplied ``supported_languages[].script_hint`` wins; platform
+    defaults underneath cover the well-known Indic / Arabic scripts.
     """
-    t = text.strip()
-    if t in _LANGUAGES:
-        eng, code = _LANGUAGES[t]
-        return eng, code
-    return _LANG_BY_NAME.get(t.lower()) or _LANG_BY_NAME.get(t)
+    code = (code or "").lower()
+    if company_id:
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            for entry in (cfg.supported_languages or []):
+                if isinstance(entry, dict) and entry.get("code") == code:
+                    h = (entry.get("script_hint") or "").strip()
+                    if h:
+                        return h
+        except Exception:
+            pass
+    return _DEFAULT_LANG_SCRIPT_HINT.get(code, "")
 
 
-def _wa_lang_instruction(code: str) -> str:
+async def _tenant_lang_name(code: str, company_id: Optional[str]) -> str:
+    """Return the display label for ``code``. Tenant override → platform default."""
+    code = (code or "").lower()
+    rows = await _tenant_language_list(company_id)
+    for eng, c, _native in rows:
+        if c == code:
+            return eng
+    return _DEFAULT_LANG_NAMES.get(code, "English")
+
+
+async def _detect_language_input(text: str, company_id: Optional[str] = None):
+    """
+    Returns ``(english_name, lang_code)`` if ``text`` is a number in the
+    tenant's menu range OR a language name (English / native / alias).
+    Returns None on no match.
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    rows = await _tenant_language_list(company_id)
+    # Number index → tenant menu (1-based).
+    if t.isdigit():
+        idx = int(t) - 1
+        if 0 <= idx < len(rows):
+            return rows[idx][0], rows[idx][1]
+    # Name lookup — English label, native script, and operator-supplied aliases.
+    tl = t.lower()
+    for eng, code, native in rows:
+        if tl == eng.lower():           return eng, code
+        if t == native:                 return eng, code
+        if tl == native.lower():        return eng, code
+    # Aliases from bot_config (only consulted when we have a tenant).
+    if company_id:
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            for entry in (cfg.supported_languages or []):
+                if not isinstance(entry, dict):
+                    continue
+                code = (entry.get("code") or "").lower()
+                if not code:
+                    continue
+                for alias in (entry.get("aliases") or []):
+                    if tl == str(alias).strip().lower():
+                        # Resolve English label from the row we built earlier.
+                        for eng, c, _n in rows:
+                            if c == code:
+                                return eng, code
+        except Exception:
+            pass
+    return None
+
+
+async def _wa_lang_instruction(code: str, company_id: Optional[str] = None) -> str:
     """Return the LANGUAGE system-prompt line for the given language code."""
     code = (code or "en").lower()
-    name = _LANG_NAMES.get(code, "English")
+    name = await _tenant_lang_name(code, company_id)
     if code == "en":
         return "LANGUAGE: Respond in English."
-    script_hint = _LANG_SCRIPT_HINT.get(code, "")
+    script_hint = await _tenant_script_hint(code, company_id)
     script_line = f" {script_hint}" if script_hint else ""
     return (
         f"LANGUAGE: The user has selected {name} as their preferred language. "
@@ -223,19 +335,18 @@ def _wa_lang_instruction(code: str) -> str:
     )
 
 
-def _build_language_menu() -> str:
+async def _build_language_menu(company_id: Optional[str] = None) -> str:
+    """Build the numbered WhatsApp language menu from the tenant's
+    ``supported_languages``. Falls back to the platform default list when
+    the tenant hasn't configured any."""
+    rows = await _tenant_language_list(company_id)
     lines = [
         "🌐 *Choose your preferred language:*",
         "Reply with the number or type the language name.\n",
-        "🇮🇳 *Indian Languages*",
     ]
-    for i, (eng, _code, native) in enumerate(_LANGUAGE_LIST):
+    for i, (eng, _code, native) in enumerate(rows):
         num = i + 1
-        if num == 25:
-            lines.append("\n🇿🇦 *South African Languages*")
-        elif num == 35:
-            lines.append("\n🌍 *International Languages*")
-        display = f"{native} ({eng})" if native != eng else eng
+        display = f"{native} ({eng})" if native and native != eng else eng
         lines.append(f"{num}. {display}")
     lines.append(
         "\n👉 You can also type your language name (e.g., \"Hindi\", \"Tamil\", \"Zulu\").\n"
@@ -245,34 +356,37 @@ def _build_language_menu() -> str:
     )
     return "\n".join(lines)
 
-
-_LANGUAGE_MENU = _build_language_menu()
-
-_WA_GREETING_TEXT = (
-    "🙏 नमस्ते भाईयो और बहनो!\n\n"
-    "मैं हूं \"सेवा सेतु स्वचालित सहायक (बॉट)\", आपकी सेवा में सदैव तत्पर।\n\n"
-    "🗣 भारतीय काउंसलर सर्विसेज के साथ हाज़िर हूं। बताएं, मैं आपकी किस प्रकार सहायता कर सकता हूं? "
-    "आज मैं आपकी मदद करने में सक्षम हूं।\n\n"
-    "Namaste, brothers and sisters!\n\n"
-    "I am \"Seva Setu Automated Assistant (Bot)\", always ready to serve you.\n\n"
-    "🗣 Here to assist with your Indian consular service queries. "
-    "Please let me know how I can help you today. I am fully equipped to assist you.\n\n"
-    "⚠️ *Important Advisory from the Consulate General of India, Johannesburg*\n"
-    "The Consulate does not make phone calls demanding money for fines, penalties, or any other reason. "
-    "It is not within our mandate to conduct criminal investigations.\n\n"
-    "Do not engage with such callers under any circumstance.\n\n"
-    "• Do not share any personal or financial information.\n"
-    "• If you receive a suspicious call, note the caller's number and any details.\n"
-    "• Report it immediately to your local police station.\n\n"
-    "Be vigilant. Stay safe.\n\n"
-    "🗣 *Fraud Alert: Extortion Calls Using Spoofed Numbers*\n"
-    "It has come to our attention that certain individuals are fraudulently spoofing the Consulate General's "
-    "phone numbers to contact persons of Indian origin. These calls attempt to intimidate recipients with "
-    "false legal threats and demand payments, claiming affiliation with the Consulate General or Government of India agencies.\n\n"
-    "Please be advised:\n\n"
-    "• No representative of the Consulate General will call to request payments for any governmental purpose.\n"
-    "• If you receive such a call, note the caller's details and report the incident to your local police immediately."
+# Fallback greeting used only when a tenant hasn't configured one. Kept
+# generic — every tenant should set ``fallback_responses.greeting`` on its
+# bot_config (via the super-admin UI) to override.
+_WA_GREETING_FALLBACK = (
+    "Hello! 👋\n\n"
+    "I'm here to help with your queries. "
+    "Please type your question, or send *menu* to see what I can do."
 )
+
+
+async def _resolve_greeting(company_id: Optional[str]) -> str:
+    """Resolve the WhatsApp greeting for this tenant.
+
+    Reads ``fallback_responses.greeting`` from bot_config, rendering any
+    ``{{var}}`` placeholders. Falls back to a neutral built-in if the tenant
+    has not configured one. Active advisories are appended below the
+    greeting (so admins can publish fraud alerts etc. without code changes).
+    """
+    if not company_id:
+        return _WA_GREETING_FALLBACK
+    cfg = await get_bot_config(company_id)
+    greeting = cfg.fallback("greeting") or _WA_GREETING_FALLBACK
+    parts = [greeting]
+    for adv in (cfg.advisories or []):
+        if not isinstance(adv, dict) or not adv.get("active", True):
+            continue
+        title = cfg.render(adv.get("title") or "")
+        body  = cfg.render(adv.get("content") or "")
+        if title or body:
+            parts.append(f"\n*{title}*\n{body}".strip())
+    return "\n\n".join(p for p in parts if p)
 
 
 # =====================================================================
@@ -298,8 +412,38 @@ class SimulateRequest(BaseModel):
 # MARKDOWN → WHATSAPP TEXT CONVERTER
 # =====================================================================
 # WhatsApp character limits (interactive messages)
-_WA_BODY_LIMIT   = 1024   # interactive button/list body
-_WA_MSG_LIMIT    = 4000   # plain text message
+# WhatsApp char limits — platform-config knobs. The constants below are
+# platform fallbacks; helpers resolve the live value at call time.
+_WA_BODY_LIMIT   = 1024
+_WA_MSG_LIMIT    = 4000
+
+
+def _wa_body_limit() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("whatsapp_body_char_limit", 1024))
+    except Exception:
+        return 1024
+
+
+def _wa_msg_limit() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("whatsapp_text_char_limit", 4000))
+    except Exception:
+        return 4000
+
+
+def _wa_phrase_mappings() -> list:
+    """Per-platform WhatsApp UI-phrase rewrite rules. Each rule is
+    ``{"pattern": str, "replacement": str, "flags": "i"|""}`` — applied
+    in order via :py:func:`re.sub`."""
+    try:
+        from services import platform_config
+        rules = platform_config.get("whatsapp_ui_phrase_mappings", []) or []
+        return rules if isinstance(rules, list) else []
+    except Exception:
+        return []
 
 # Web-UI phrases that make no sense on WhatsApp → WhatsApp equivalents
 _WA_REPLACEMENTS = [
@@ -363,8 +507,21 @@ def _md_to_wa(text: str) -> str:
     text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
 
     # ── Apply WhatsApp-specific phrase replacements ───────────────────
+    # First the platform-default bundled rewrites, then any extra rules
+    # admins supplied via platform_config.whatsapp_ui_phrase_mappings.
     for pattern, replacement in _WA_REPLACEMENTS:
         text = re.sub(pattern, replacement, text)
+    for rule in _wa_phrase_mappings():
+        try:
+            pat   = rule.get("pattern", "")
+            repl  = rule.get("replacement", "")
+            flags = re.IGNORECASE if "i" in (rule.get("flags") or "").lower() else 0
+            if pat:
+                text = re.sub(pat, repl, text, flags=flags)
+        except Exception:
+            # A bad admin-supplied regex shouldn't break the chat path;
+            # skip and continue.
+            continue
 
     # ── Collapse 3+ blank lines → max 2 ──────────────────────────────
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -372,12 +529,18 @@ def _md_to_wa(text: str) -> str:
     return text.strip()
 
 
-def _split_wa(text: str, max_len: int = _WA_MSG_LIMIT) -> list:
+def _split_wa(text: str, max_len: Optional[int] = None) -> list:
     """
     Split text into chunks ≤ max_len characters.
     Splits prefer paragraph (double-newline) boundaries, then single-newline,
     then hard-splits at max_len as a last resort.
+
+    ``max_len`` falls back to the platform-config ``whatsapp_text_char_limit``
+    (default 4000) when omitted, so super-admin tuning applies without
+    chasing every call site.
     """
+    if max_len is None:
+        max_len = _wa_msg_limit()
     if len(text) <= max_len:
         return [text]
 
@@ -449,12 +612,14 @@ async def _wa_send(phone: str, text: str, db, step: str = "", waba_number: str =
 
 def _truncate_body(text: str) -> str:
     """
-    Truncate text to WhatsApp interactive body limit (1024 chars).
+    Truncate text to the WhatsApp interactive body limit (default 1024
+    chars; tunable via platform_config.whatsapp_body_char_limit).
     Appends '…' if truncated.
     """
-    if len(text) <= _WA_BODY_LIMIT:
+    limit = _wa_body_limit()
+    if len(text) <= limit:
         return text
-    return text[:_WA_BODY_LIMIT - 1].rsplit(' ', 1)[0] + '…'
+    return text[:limit - 1].rsplit(' ', 1)[0] + '…'
 
 
 # =====================================================================
@@ -463,8 +628,8 @@ def _truncate_body(text: str) -> str:
 async def _llm_response(user_message: str, session_id: str, context: str = "", lang_code: str = "en", company_id: Optional[str] = None) -> str:
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
         return (
-            "Thank you for your message. For detailed assistance please visit "
-            "https://www.cgijoburg.gov.in or call +27 11 581 9800."
+            "Thank you for your message. For detailed assistance please contact us directly "
+            "using the contact details on our website."
         )
 
     _blocked_kws = await _get_blocked_keywords()
@@ -481,30 +646,23 @@ async def _llm_response(user_message: str, session_id: str, context: str = "", l
     _clean_ctx      = filter_blocked_lines(context, _blocked_kws)
     _clean_hint     = filter_blocked_lines(svc_docs_hint, _blocked_kws)
     _prohibition    = blocked_prohibition(_blocked_kws)
-    _consulate_facts = filter_blocked_lines(
-        "- Acting Consul General: Mr. Harish Kumar\n"
-        "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-        "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
-        "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
-        "- Website: www.cgijoburg.gov.in\n"
-        "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-        "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces of South Africa\n"
-        "- Social Media: Twitter/X @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg | Instagram: @indiainjohannesburg\n"
-        "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
-        "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
-        "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
-        _blocked_kws,
-    )
 
-    system_prompt = f"""You are Seva Setu Bot, the official consular assistant for the Consulate General of India, Johannesburg. You are replying via WhatsApp.
+    # Pull tenant bot identity from bot_config; do NOT hardcode a brand here.
+    _cfg = await get_bot_config(tenant) if tenant else None
+    _bot_name = (_cfg.bot_name if _cfg else "") or "Assistant"
+    _tenant_prompt = _cfg.system_prompt() if _cfg else ""
+    _lang_line = await _wa_lang_instruction(lang_code, company_id=tenant)
+
+    system_prompt = f"""You are {_bot_name}, an automated assistant replying via WhatsApp.
+{_tenant_prompt}
 {_prohibition}
 CRITICAL — DATA SOURCE RULE:
 Answer ONLY using the OFFICIAL DATA provided below.
-The data comes from: www.cgijoburg.gov.in, vfsglobal.com, and admin-uploaded documents (FAQs, events, notices).
+The data comes from admin-uploaded documents (FAQs, events, notices) and official sources.
 Do NOT use general training knowledge. Do NOT invent or add information not in the data below.
-If the answer is not in the data, say so and direct the user to contact the Consulate directly.
+If the answer is not in the data, say so and direct the user to contact us directly.
 
-{_wa_lang_instruction(lang_code)}
+{_lang_line}
 
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
@@ -513,31 +671,33 @@ RESPONSE STYLE:
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
 - Use *bold* for emphasis (WhatsApp format). Do NOT use markdown ** double-asterisks.
-- Never ask for money or claim the consulate calls asking for payments.
-
-KEY CONSULATE FACTS (always use these for contact/location questions):
-{_consulate_facts}
+- Never ask for money or claim the organisation calls asking for payments.
 {_clean_hint}
-OFFICIAL DATA (cgijoburg.gov.in | vfsglobal.com | uploaded documents):
+OFFICIAL DATA:
 {_clean_ctx}
 
-IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact the Consulate directly:"
-  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in
-  🏢 No. 1, Eton Road, Park Town 2193, Johannesburg
-  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)"""
+IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact us directly using the contact details provided." """
+
+    # Resolve LLM model: env default → tenant company.llm_model override.
+    _llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    if tenant:
+        _co = await (await get_database()).companies.find_one(
+            {"id": tenant}, {"_id": 0, "llm_model": 1}
+        )
+        if _co and _co.get("llm_model"):
+            _llm_model = _co["llm_model"]
 
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
             system_message=system_prompt,
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", _llm_model)
         return await chat.send_message(UserMessage(text=user_message))
     except Exception as exc:
         logger.error("LLM error: %s", exc)
         return (
-            "I'm having trouble right now. Please try again shortly or call "
-            "+27 11 581 9800."
+            "I'm having trouble right now. Please try again shortly or contact us directly."
         )
 
 
@@ -590,56 +750,59 @@ async def _get_flow_safe(phone: str) -> dict:
 # =====================================================================
 # PHONE NORMALISATION
 # =====================================================================
-def _normalize_phone(raw: str, waba_number: str = "") -> str:
+def _normalize_phone(raw: str, waba_number: str = "", country_code: str = "") -> str:
     """
-    Normalise an incoming customernumber to digits-only E.164 (no leading +).
+    Normalise an incoming customer number to digits-only E.164 (no leading +).
+
+    Tenant-configurable: ``country_code`` is the tenant's ISD code (e.g.
+    ``"27"`` for South Africa, ``"91"`` for India). When unset, it's derived
+    from ``waba_number``'s leading 1–3 digits.
 
     Safe transforms:
-      1. Leading '+'          : +27726413058    → 27726413058
-      2. Punctuation/spaces   : +27 72-641 3058 → 27726413058
-      3. SA local with 0      : 0726413058      → 27726413058  (ONLY SA uses 0xx 10-digit)
-      4. SA local without 0   : 726413058       → 27726413058  (9-digit SA mobile)
-      5. Duplicate India CC   : 9191XXXXXXXXXX  → 91XXXXXXXXXX (known ICS India bug)
+      1. Strip leading '+' and punctuation/spaces.
+      2. Local with leading 0     : ``0XXXXXXXXX`` → ``<cc>XXXXXXXXX``.
+      3. Bare local (no '0', no cc): when total length ≤ 10 and ``cc`` set.
+      4. Duplicate country code   : ``<cc><cc>XXXXXXXXXX`` → ``<cc>XXXXXXXXXX``.
 
-    ICS SA-mangling fix (requires waba_number context):
-      ICS bug: strips leading '2' from SA E.164, prepends '91'
-        27726413058 → 917726413058
-      Reversal: strip '91', prepend '2'; accept only if result starts with '27'.
-      Only applied when waba_number is a South African number (starts with '27').
+    Known carrier quirk: some inbound gateways strip the first digit of an
+    international number and re-prepend a *different* country code (we've
+    seen ``91`` substituted for ``27``). If ``country_code`` is set and the
+    incoming number starts with a *different* prefix that would yield a
+    valid local number when swapped, swap it. Logged at INFO level.
     """
-    # Strip whitespace and leading +
-    phone = raw.strip().lstrip("+")
-    # Remove formatting characters
-    phone = re.sub(r"[\s\-\(\)\.]+", "", phone)
+    phone = re.sub(r"[\s\-\(\)\.]+", "", (raw or "").strip().lstrip("+"))
+    if not phone:
+        return phone
 
-    # ICS SA-mangling fix: 91XXXXXXXXXX → 27XXXXXXXXX
-    # ICS strips the leading '2' from SA numbers (27...) and prepends '91',
-    # producing a 12-digit number like 917726413058 instead of 27726413058.
-    # Only correct this when the WABA itself is South African (starts with '27'),
-    # to avoid mis-converting genuine Indian customer numbers.
-    waba = re.sub(r"[\s\-\(\)\.]+", "", waba_number.strip().lstrip("+"))
-    if (
-        waba.startswith("27")
-        and re.match(r"^91\d{10}$", phone)
-    ):
-        candidate = "2" + phone[2:]   # strip "91", prepend "2"
-        if candidate.startswith("27"):
-            logger.info(
-                "[PHONE NORM] ICS SA-mangle corrected: %s → %s",
-                phone, candidate,
-            )
-            phone = candidate
-            return phone
+    cc = re.sub(r"\D", "", (country_code or "").lstrip("+"))
+    waba = re.sub(r"[\s\-\(\)\.]+", "", (waba_number or "").strip().lstrip("+"))
+    # Derive country code from WABA number when not explicitly configured.
+    if not cc and waba:
+        # Most ISD codes are 1–3 digits; the safest cheap guess is the first 2.
+        cc = waba[:2]
 
-    # SA local with leading 0: 0XXXXXXXXX (10 digits) → 27XXXXXXXXX
-    if re.match(r"^0[6-8]\d{8}$", phone):
-        phone = "27" + phone[1:]
-    # SA local without 0: 9-digit number starting with SA mobile prefix (6x/7x/8x)
-    elif re.match(r"^[6-8]\d{8}$", phone):
-        phone = "27" + phone
-    # Fix duplicate India country code: 9191<10 digits> → 91<10 digits>
-    elif re.match(r"^9191\d{10}$", phone):
-        phone = phone[2:]
+    # Carrier mangle: if a non-cc prefix yields a same-length number that
+    # starts with our tenant cc, prefer the swapped form. (Defensive — only
+    # applies when waba's cc matches the tenant's cc and the result is valid.)
+    if cc and waba.startswith(cc) and not phone.startswith(cc):
+        m = re.match(r"^(\d{2})(\d{10})$", phone)
+        if m and cc != m.group(1):
+            candidate = cc[-1:] + m.group(2) if len(cc) == 2 else cc + m.group(2)
+            if candidate.startswith(cc):
+                logger.info("[PHONE NORM] CC-mangle corrected: %s → %s", phone, candidate)
+                phone = candidate
+                return phone
+
+    # Duplicate country-code prefix.
+    if cc and phone.startswith(cc * 2) and len(phone) > len(cc) + 9:
+        phone = phone[len(cc):]
+
+    # Local with leading 0 (10 digits total).
+    if cc and re.match(r"^0\d{8,10}$", phone):
+        phone = cc + phone[1:]
+    # Bare local without leading 0 (8–10 digits, no cc yet).
+    elif cc and len(phone) <= 10 and not phone.startswith(cc):
+        phone = cc + phone
     return phone
 
 
@@ -653,59 +816,9 @@ _SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 _SMTP_USER = os.environ.get("SMTP_USER", "")
 _SMTP_PASS = os.environ.get("SMTP_PASSWORD", "")
 
-# ── Type A services — Gov portal + reference number collection ────────
-_WA_TYPE_A = {
-    "passport": {
-        "name": "Passport Services",
-        "gov_url": "https://passportindia.gov.in",
-        "vfs_note": (
-            "Submit your completed application at *VFS Global* "
-            "(2nd Floor, Harrow Court, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007)\n"
-            "🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00"
-        ),
-        "documents": [
-            "Valid/Expired Indian Passport — original + photocopy of all pages",
-            "Completed application from passportindia.gov.in",
-            "3 recent passport-size photos (51×51 mm, white background)",
-            "Proof of South African address (utility bill/lease)",
-            "South African ID / valid visa / work permit",
-        ],
-    },
-    "visa": {
-        "name": "Indian Visa",
-        "gov_url": "https://indianvisaonline.gov.in",
-        "vfs_note": (
-            "Submit at *VFS Global Visa Centre* "
-            "(1st Floor, Rivonia Village Office Block, cnr Rivonia Blvd & Mutual Rd, JHB)\n"
-            "🕐 Mon–Fri 08:00–15:00"
-        ),
-        "documents": [
-            "Valid foreign passport (min. 6 months validity remaining)",
-            "Completed Visa Application Form from indianvisaonline.gov.in",
-            "2 recent passport-size photographs",
-            "Travel itinerary / confirmed tickets",
-            "Hotel bookings / invitation letter",
-            "Bank statement (last 3 months)",
-        ],
-    },
-    "pcc": {
-        "name": "Police Clearance Certificate (PCC)",
-        "gov_url": "https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/",
-        "vfs_note": (
-            "Submit at *VFS Global* "
-            "(2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007)\n"
-            "🕐 Submission: Mon–Fri 08:00–15:00"
-        ),
-        "documents": [
-            "Valid Indian Passport — original + photocopy",
-            "Completed PCC Application Form (cgijoburg.gov.in passport/PCC status)",
-            "Proof of current South African residential address",
-            "Copy of SA Permanent Residence / Visa",
-            "2 passport-size photographs",
-            "Fee payment receipt",
-        ],
-    },
-}
+# Type A services come from ``tenant_services`` (category == "TYPE_A") via
+# ``_wa_type_a_services(company_id)``. No hardcoded catalogue lives here —
+# every tenant supplies its own service rows through the super-admin UI.
 
 # Type A state fields — collected after gov reference
 _WA_TYPE_A_FIELDS = [
@@ -733,16 +846,34 @@ _FORM_ACTIVE_STATES = {"consent_pending", "collecting", "docs_uploading", "docs_
 # Ordered service key list that matches _wa_services_menu() display order:
 # Type A first (passport, visa, pcc), then Type B (oci, marriage, …)
 # Used by the numbered-reply fallback so "4" = OCI, not pcc.
-_WA_MENU_SVCKEYS: list = []   # populated lazily on first request from tenant_services
+# Per-tenant cache of menu ordering: ``{company_id: [service_key, ...]}``.
+# Order matches what ``_wa_services_menu()`` shows the user — Type A first.
+_WA_MENU_SVCKEYS: dict[str, list] = {}
 
 
-async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
-    """Generate PDF bytes for a submitted application."""
+async def _wa_generate_pdf(
+    tracking_id: str,
+    db,
+    company_id: Optional[str] = None,
+) -> Optional[bytes]:
+    """Generate PDF bytes for a submitted application.
+
+    ``company_id`` scopes the lookup so tracking IDs from one tenant cannot
+    be downloaded by another. Legacy callers (``None``) get the old global
+    behaviour but log a warning — every new caller should thread the tenant.
+    """
     try:
         from services.pdf_service import generate_application_pdf
-        app = await db.applications.find_one(
-            {"tracking_id": tracking_id.upper()}, {"_id": 0}
-        )
+        query: Dict[str, Any] = {"tracking_id": tracking_id.upper()}
+        if company_id:
+            query["company_id"] = company_id
+        else:
+            logger.warning(
+                "[_wa_generate_pdf] called without company_id (tracking_id=%s) — "
+                "falling back to global lookup; caller should pass tenant",
+                tracking_id,
+            )
+        app = await db.applications.find_one(query, {"_id": 0})
         if not app:
             return None
         # service_name is denormalised onto the application at creation time
@@ -753,6 +884,10 @@ async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
             {"name": d.get("name", "Document"), "status": d.get("status", "uploaded")}
             for d in app.get("documents", [])
         ]
+        _co_id = app.get("company_id") or ""
+        _cfg = await get_bot_config(_co_id) if _co_id else None
+        _org_name = (_cfg.org_name or _cfg.bot_name) if _cfg else ""
+        _branding = dict(_cfg.pdf_branding or {}) if _cfg else {}
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -761,6 +896,8 @@ async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
                 form_data=app.get("form_data", {}),
                 tracking_id=tracking_id.upper(),
                 uploaded_docs=uploaded_docs,
+                org_name=_org_name,
+                branding=_branding,
             ),
         )
     except Exception as exc:
@@ -768,8 +905,9 @@ async def _wa_generate_pdf(tracking_id: str, db) -> Optional[bytes]:
         return None
 
 
-def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: bytes):
-    """Synchronous SMTP helper — run in executor."""
+def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: bytes, brand: str = ""):
+    """Synchronous SMTP helper — run in executor. ``brand`` is the tenant's
+    bot/org name; pass an empty string for an unbranded outbound message."""
     if not _SMTP_USER or not _SMTP_PASS:
         logger.warning("[WA EMAIL] SMTP not configured — skipping email for %s", tracking_id)
         return
@@ -778,10 +916,11 @@ def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: by
     msg    = MIMEMultipart()
     msg["From"]    = _SMTP_USER
     msg["To"]      = to_email
-    msg["Subject"] = f"Seva Setu — {service_name} Application ({tracking_id})"
+    label = (brand or "Application").strip()
+    msg["Subject"] = f"{label} — {service_name} ({tracking_id})"
     body = (
         f"<html><body style='font-family:Arial,sans-serif'>"
-        f"<h2 style='color:#000080'>🇮🇳 Seva Setu — Application Submitted</h2>"
+        f"<h2 style='color:#000080'>{label} — Application Submitted</h2>"
         f"<p>Your <strong>{service_name}</strong> application has been received.</p>"
         f"<table style='border-collapse:collapse'>"
         f"<tr><td style='padding:6px 12px;border:1px solid #ddd'><strong>Tracking ID</strong></td>"
@@ -790,8 +929,7 @@ def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: by
         f"<td style='padding:6px 12px;border:1px solid #ddd'>{service_name}</td></tr>"
         f"</table>"
         f"<p>Your application PDF is attached. Keep it for your records.</p>"
-        f"<p style='color:#666;font-size:12px'>Consulate General of India, Johannesburg<br>"
-        f"📞 +27 11-4828484 | ✉️ ccom.jburg@mea.gov.in</p>"
+        f"<p style='color:#666;font-size:12px'>{label}</p>"
         f"</body></html>"
     )
     msg.attach(MIMEText(body, "html"))
@@ -818,21 +956,34 @@ def _smtp_send(to_email: str, service_name: str, tracking_id: str, pdf_bytes: by
         logger.error("[WA EMAIL] Failed → %s: %s", to_email, exc)
 
 
-async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
+async def _wa_after_submit(
+    phone: str,
+    session_id: str,
+    waba_number: str,
+    db,
+    company_id: Optional[str] = None,
+):
     """
     Called right after process_flow() returns step='submitted'.
     Finds the application, generates PDF, sends it via WhatsApp document
-    and emails it to the applicant.
+    and emails it to the applicant. ``company_id`` scopes the lookup so a
+    user on one tenant cannot pull another tenant's most-recent submission.
     """
     try:
+        base_q: Dict[str, Any] = {"user_id": phone, "status": "submitted"}
+        if company_id:
+            base_q["company_id"] = company_id
         app = await db.applications.find_one(
-            {"user_id": phone, "status": "submitted"},
+            base_q,
             {"_id": 0},
             sort=[("submitted_at", -1)],
         )
         if not app:
+            fallback_q: Dict[str, Any] = {"session_id": session_id, "status": "submitted"}
+            if company_id:
+                fallback_q["company_id"] = company_id
             app = await db.applications.find_one(
-                {"session_id": session_id, "status": "submitted"},
+                fallback_q,
                 {"_id": 0},
                 sort=[("submitted_at", -1)],
             )
@@ -843,7 +994,7 @@ async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
         service_name = app.get("service_name") or app.get("service", "").title()
         to_email     = app.get("form_data", {}).get("email", "")
 
-        pdf_bytes = await _wa_generate_pdf(tracking_id, db)
+        pdf_bytes = await _wa_generate_pdf(tracking_id, db, company_id=company_id or app.get("company_id"))
         if not pdf_bytes:
             return
 
@@ -851,7 +1002,11 @@ async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
         if APP_BASE_URL:
             safe  = (service_name or "application").lower().replace(" ", "_")
             fname = f"application_{safe}_{tracking_id}.pdf"
+            # Include tenant in the URL so /pdf/{tracking_id} can validate.
+            _co = company_id or app.get("company_id") or ""
             pdf_url = f"{APP_BASE_URL}/api/ics-whatsapp/pdf/{tracking_id}"
+            if _co:
+                pdf_url += f"?company_id={_co}"
             result = await ics_waba.send_media(
                 to=phone,
                 media_type="document",
@@ -868,9 +1023,14 @@ async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
 
         # Email PDF to applicant
         if to_email and pdf_bytes:
+            _co_id = app.get("company_id") or ""
+            _brand = ""
+            if _co_id:
+                _bc = await get_bot_config(_co_id)
+                _brand = _bc.bot_name or _bc.org_name or ""
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
-                None, _smtp_send, to_email, service_name, tracking_id, pdf_bytes,
+                None, _smtp_send, to_email, service_name, tracking_id, pdf_bytes, _brand,
             )
             await ics_waba.send_text(
                 phone,
@@ -881,10 +1041,15 @@ async def _wa_after_submit(phone: str, session_id: str, waba_number: str, db):
         logger.error("[WA AFTER SUBMIT] phone=%s: %s", phone, exc)
 
 
-async def _wa_my_applications(phone: str, db) -> str:
-    """Return a formatted summary of the user's recent applications."""
+async def _wa_my_applications(phone: str, db, company_id: Optional[str] = None) -> str:
+    """Return a formatted summary of the user's recent applications, scoped
+    to the calling tenant so the same phone number across two tenants can't
+    leak applications between them."""
+    query: Dict[str, Any] = {"user_id": phone}
+    if company_id:
+        query["company_id"] = company_id
     apps = await db.applications.find(
-        {"user_id": phone},
+        query,
         {"_id": 0, "tracking_id": 1, "service_name": 1, "status": 1, "created_at": 1},
         sort=[("created_at", -1)],
     ).limit(5).to_list(5)
@@ -892,7 +1057,7 @@ async def _wa_my_applications(phone: str, db) -> str:
     if not apps:
         return (
             "You have no applications on record.\n\n"
-            "To start, type the service name — e.g. *Passport*, *OCI*, *Visa*, *Attestation*."
+            "Type the name of the service you need to get started."
         )
 
     lines = ["📋 *Your Recent Applications*\n"]
@@ -987,7 +1152,11 @@ async def _wa_save_on_timeout(db, session_id: str):
         ta = (sess or {}).get("metadata", {}).get("wa_type_a", {})
         if ta and ta.get("state") and ta.get("service"):
             svc_key  = ta["service"]
-            svc_meta = _WA_TYPE_A.get(svc_key, {})
+            # Best-effort name lookup; falls back to the key if the tenant
+            # row was edited/removed between the start and timeout.
+            sess_co_id = (sess or {}).get("metadata", {}).get("company_id") \
+                         or (sess or {}).get("company_id") or ""
+            svc_meta = (await _wa_type_a_services(sess_co_id)).get(svc_key, {}) if sess_co_id else {}
             form_data = {
                 "full_name":            ta.get("full_name", ""),
                 "email":                ta.get("email", ""),
@@ -1071,9 +1240,12 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
     Returns the tracking ID.
     """
     ta = await _type_a_get(db, session_id)
-    svc_key      = ta.get("service", "passport")
-    svc          = _WA_TYPE_A.get(svc_key, {})
-    service_name = svc.get("name", svc_key.title())
+    svc_key      = ta.get("service") or ""
+    # Look up the tenant's service row to source name + required docs.
+    sess = await db.chat_sessions.find_one({"id": session_id}, {"company_id": 1, "metadata.company_id": 1})
+    co_id = (sess or {}).get("company_id") or (sess or {}).get("metadata", {}).get("company_id") or ""
+    svc          = (await _wa_type_a_services(co_id)).get(svc_key, {}) if co_id else {}
+    service_name = svc.get("name") or (svc_key.title() if svc_key else "Application")
     gov_ref      = ta.get("gov_reference", "")
     form_data    = {
         "full_name":             ta.get("full_name", ""),
@@ -1105,6 +1277,9 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
 
     # Generate and deliver PDF
     from services.pdf_service import generate_application_pdf
+    _cfg_pdf = await get_bot_config(co_id) if co_id else None
+    _pdf_org = (_cfg_pdf.org_name or _cfg_pdf.bot_name) if _cfg_pdf else ""
+    _pdf_branding = dict(_cfg_pdf.pdf_branding or {}) if _cfg_pdf else {}
     loop = asyncio.get_event_loop()
     try:
         pdf_bytes = await loop.run_in_executor(
@@ -1114,6 +1289,8 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
                 form_data=form_data,
                 tracking_id=tracking_id,
                 uploaded_docs=doc_list,
+                org_name=_pdf_org,
+                branding=_pdf_branding,
             ),
         )
         if pdf_bytes:
@@ -1127,9 +1304,13 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
                     from_override=waba_number,
                 )
             if form_data.get("email"):
+                _brand2 = ""
+                if co_id:
+                    _bc2 = await get_bot_config(co_id)
+                    _brand2 = _bc2.bot_name or _bc2.org_name or ""
                 loop2 = asyncio.get_event_loop()
                 await loop2.run_in_executor(
-                    None, _smtp_send, form_data["email"], service_name, tracking_id, pdf_bytes,
+                    None, _smtp_send, form_data["email"], service_name, tracking_id, pdf_bytes, _brand2,
                 )
                 await ics_waba.send_text(
                     phone,
@@ -1144,30 +1325,43 @@ async def _type_a_submit(phone: str, session_id: str, waba_number: str, db) -> s
 
 
 async def _wa_services_menu(company_id: str) -> str:
-    """Build the WhatsApp services menu showing all Type A and Type B services."""
-    lines = [
-        "🏛️ *Consular Services — Seva Setu Bot*\n",
-        "─────────────────────────────",
-        "🌐 *Type A — Apply via Government Portal*",
-        "_(Bot records your reference number & generates PDF)_\n",
+    """Build the WhatsApp services menu from this tenant's service rows."""
+    cfg = await get_bot_config(company_id) if company_id else None
+    title = (cfg.bot_name if cfg else "") or "Services"
+    type_a = await _wa_type_a_services(company_id)
+    type_b_services = [
+        s for s in await list_services(company_id)
+        if s.service_key not in type_a
     ]
-    num = 1
-    for key, svc in _WA_TYPE_A.items():
-        lines.append(f"{num}. *{svc['name']}*\n   🔗 {svc['gov_url']}")
-        num += 1
 
-    lines.append(
-        "\n─────────────────────────────\n"
-        "📝 *Type B — Fill Form Directly Here*\n"
-        "_(Complete the form in this chat)_\n"
-    )
-    for svc in await list_services(company_id):
-        if svc.service_key not in _WA_TYPE_A:
+    lines: list[str] = [f"🏛️ *{title}*\n", "─────────────────────────────"]
+    num = 1
+    if type_a:
+        lines += [
+            "🌐 *Apply via Government Portal*",
+            "_(Bot records your reference number & generates PDF)_\n",
+        ]
+        for _key, svc in type_a.items():
+            gov = svc.get("gov_url") or ""
+            line = f"{num}. *{svc['name']}*"
+            if gov:
+                line += f"\n   🔗 {gov}"
+            lines.append(line)
+            num += 1
+        lines.append("")
+    if type_b_services:
+        lines += [
+            "─────────────────────────────",
+            "📝 *Fill the Form in this Chat*",
+            "_(Complete and submit without leaving WhatsApp)_\n",
+        ]
+        for svc in type_b_services:
             lines.append(f"{num}. *{svc.name}*")
             num += 1
+        lines.append("")
 
     lines.append(
-        "\n─────────────────────────────\n"
+        "─────────────────────────────\n"
         "💬 Type the *service name* or *number* to begin.\n"
         "📋 Type *my applications* to view your submissions."
     )
@@ -1213,6 +1407,11 @@ async def _handle_message(
     the webhook entry point. When None (legacy callers), `_log_message`'s
     own fallback to config.COMPANY_ID kicks in — but new code should pass it.
     """
+
+    # Preload tenant flow keywords so the sync apply/yes/no helpers
+    # downstream pick up per-tenant overrides from bot_config.
+    await preload_flow_keywords(company_id)
+    await preload_service_patterns(company_id)
 
     # ── Parse interactive input ───────────────────────────────────────
     selected_id    = None
@@ -1291,8 +1490,10 @@ async def _handle_message(
                     phone, "system", "[session reset — idle timeout]",
                     {"step": "timeout_reset", "idle_seconds": int(_idle_seconds)}, db,
                 )
-                await ics_waba.send_text(phone, _WA_GREETING_TEXT, from_override=waba_number)
-                await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
+                _greeting = await _resolve_greeting(company_id)
+                _menu = await _build_language_menu(company_id)
+                await ics_waba.send_text(phone, _greeting, from_override=waba_number)
+                await ics_waba.send_text(phone, _menu, from_override=waba_number)
                 await _set_lang_pending(db, session_id)
                 return
         except Exception:
@@ -1305,7 +1506,7 @@ async def _handle_message(
     if not _form_active and not selected_id:
         _t_lower = clean_text.strip().lower()
         if _t_lower in _MY_APPS_WORDS:
-            apps_msg = await _wa_my_applications(phone, db)
+            apps_msg = await _wa_my_applications(phone, db, company_id=company_id)
             await _wa_send(phone, apps_msg, db, "my_apps", waba_number)
             await session_manager.add_message(session_id, "user", user_text)
             await session_manager.add_message(session_id, "assistant", apps_msg)
@@ -1321,7 +1522,7 @@ async def _handle_message(
     # During lang_pending: numbers 1-42 AND typed names are treated as language picks.
     # At any other time: only a bare typed language name switches the language.
     if _lang_pending_flag and not _form_active:
-        lang_result = _detect_language_input(clean_text)
+        lang_result = await _detect_language_input(clean_text, company_id=company_id)
         if lang_result:
             eng_name, code = lang_result
             await _set_session_language(db, session_id, eng_name, code)
@@ -1348,17 +1549,20 @@ async def _handle_message(
             "choose language", "switch language", "भाषा", "langue", "lugha",
         }
         if _t in _LANG_MENU_TRIGGERS:
-            await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
-            await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+            _menu = await _build_language_menu(company_id)
+            await ics_waba.send_text(phone, _menu, from_override=waba_number)
+            await _log_message(phone, "outbound", _menu, {"step": "lang_menu"}, db)
             await _set_lang_pending(db, session_id)
             await session_manager.add_message(session_id, "user", user_text)
             return
 
-        # Bare typed language name → confirm switch then show menu for re-selection
-        _name_match = (
-            _LANG_BY_NAME.get(_t)
-            or _LANG_BY_NAME.get(clean_text.strip())
-        )
+        # Bare typed language name → confirm switch then show menu for re-selection.
+        # Tenant-scoped detection rejects names that aren't in the tenant's
+        # supported_languages, so a user can't accidentally switch into a
+        # language the tenant doesn't serve.
+        _name_match = await _detect_language_input(_t, company_id=company_id)
+        if not _name_match:
+            _name_match = await _detect_language_input(clean_text.strip(), company_id=company_id)
         if _name_match:
             eng_name, code = _name_match
             await _set_session_language(db, session_id, eng_name, code)
@@ -1368,21 +1572,24 @@ async def _handle_message(
             await session_manager.add_message(session_id, "user", user_text)
             await session_manager.add_message(session_id, "assistant", confirm_msg)
             # Show menu again so user can change their mind
-            await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
-            await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+            _menu = await _build_language_menu(company_id)
+            await ics_waba.send_text(phone, _menu, from_override=waba_number)
+            await _log_message(phone, "outbound", _menu, {"step": "lang_menu"}, db)
             await _set_lang_pending(db, session_id)
             return
 
     # ── Numbered reply fallback (when interactive messages unsupported) ─
     # Context-aware: interpretation depends on current flow state.
-    # Build (once) the ordered key list that matches _wa_services_menu():
-    #   Type A first (passport, visa, pcc), then Type B — same order the user sees.
-    global _WA_MENU_SVCKEYS
-    if not _WA_MENU_SVCKEYS:
-        _all_services = await list_services(company_id or config.COMPANY_ID)
-        _WA_MENU_SVCKEYS = list(_WA_TYPE_A.keys()) + [
-            s.service_key for s in _all_services if s.service_key not in _WA_TYPE_A
+    # Build the ordered key list that matches _wa_services_menu() per tenant:
+    #   Type A first, then Type B — same order the user sees.
+    _menu_tenant = company_id or config.COMPANY_ID or ""
+    if _menu_tenant not in _WA_MENU_SVCKEYS:
+        _tenant_type_a = await _wa_type_a_services(_menu_tenant)
+        _all_services  = await list_services(_menu_tenant) if _menu_tenant else []
+        _WA_MENU_SVCKEYS[_menu_tenant] = list(_tenant_type_a.keys()) + [
+            s.service_key for s in _all_services if s.service_key not in _tenant_type_a
         ]
+    _menu_svckeys = _WA_MENU_SVCKEYS.get(_menu_tenant, [])
 
     # Pre-load wa_edit state for docs_pending so the numbered fallback below can
     # distinguish "field-selecting" mode (numbers = field indices) from normal mode
@@ -1427,8 +1634,8 @@ async def _handle_message(
         # Default: main service menu (idle / new user types "4" for OCI, etc.)
         else:
             n = user_choice - 1
-            if 0 <= n < len(_WA_MENU_SVCKEYS):
-                selected_id = _WA_MENU_SVCKEYS[n]
+            if 0 <= n < len(_menu_svckeys):
+                selected_id = _menu_svckeys[n]
 
     # ── Map button/list IDs to text understood by process_flow() ─────
     # This bridges WhatsApp interactive buttons to the shared state machine.
@@ -1456,7 +1663,8 @@ async def _handle_message(
         elif selected_id.startswith("apply_"):
             # Extract the service key directly — more reliable than text matching
             _svc_key = selected_id[len("apply_"):]
-            if _svc_key in _WA_TYPE_A:
+            _tenant_type_a = await _wa_type_a_services(_menu_tenant)
+            if _svc_key in _tenant_type_a:
                 # Type A service — will be intercepted by state machine below
                 clean_text = f"apply {_svc_key}"
             else:
@@ -1487,10 +1695,12 @@ async def _handle_message(
     is_menu_trigger = _is_new_session or _is_greeting_word
 
     if is_menu_trigger and not selected_id:
-        await ics_waba.send_text(phone, _WA_GREETING_TEXT, from_override=waba_number)
-        await _log_message(phone, "outbound", _WA_GREETING_TEXT, {"step": "greeting"}, db)
-        await ics_waba.send_text(phone, _LANGUAGE_MENU, from_override=waba_number)
-        await _log_message(phone, "outbound", _LANGUAGE_MENU, {"step": "lang_menu"}, db)
+        _greeting = await _resolve_greeting(company_id)
+        _menu = await _build_language_menu(company_id)
+        await ics_waba.send_text(phone, _greeting, from_override=waba_number)
+        await _log_message(phone, "outbound", _greeting, {"step": "greeting"}, db)
+        await ics_waba.send_text(phone, _menu, from_override=waba_number)
+        await _log_message(phone, "outbound", _menu, {"step": "lang_menu"}, db)
         await _set_lang_pending(db, session_id)
         return
 
@@ -1552,8 +1762,9 @@ async def _handle_message(
         # ── Step handler: active Type A application ──────────────────────
         if _ta_state:
             from services.application_flow import is_discard as _is_discard
-            _ta_svc  = _ta.get("service", "passport")
-            _ta_name = _WA_TYPE_A.get(_ta_svc, {}).get("name", _ta_svc.title())
+            _ta_svc  = _ta.get("service") or ""
+            _tenant_type_a = await _wa_type_a_services(_menu_tenant)
+            _ta_name = _tenant_type_a.get(_ta_svc, {}).get("name") or (_ta_svc.title() if _ta_svc else "Application")
 
             if _ta_state == "awaiting_ref":
                 ref = clean_text.strip()
@@ -1625,8 +1836,7 @@ async def _handle_message(
                     confirm = (
                         f"🎉 *Application Submitted!*\n\n"
                         f"🔖 Tracking ID: `{tracking_id}`\n\n"
-                        f"Your PDF summary has been sent. The Consulate will contact you.\n\n"
-                        f"📞 +27 11-4828484 | 📧 cons.jburg@mea.gov.in"
+                        f"Your PDF summary has been sent. We will be in touch with you."
                     )
                     await _wa_send(phone, confirm, db, "type_a_submitted", waba_number)
                     await session_manager.add_message(session_id, "user", user_text)
@@ -1637,22 +1847,27 @@ async def _handle_message(
         if not _ta_state:
             _det_svc = detect_service(clean_text)
             _ta_trigger = None
-            if _det_svc in _WA_TYPE_A and is_apply_intent(clean_text):
+            _tenant_type_a = await _wa_type_a_services(_menu_tenant)
+            if _det_svc in _tenant_type_a and is_apply_intent(clean_text):
                 _ta_trigger = _det_svc
-            elif is_apply_intent(clean_text) and current_flow.get("service") in _WA_TYPE_A:
+            elif is_apply_intent(clean_text) and current_flow.get("service") in _tenant_type_a:
                 _ta_trigger = current_flow.get("service")
             if _ta_trigger:
-                svc_info = _WA_TYPE_A[_ta_trigger]
-                docs_text = "\n".join(f"  • {d}" for d in svc_info["documents"])
+                svc_info = _tenant_type_a[_ta_trigger]
+                docs_text = "\n".join(f"  • {d}" for d in svc_info.get("documents", []))
+                gov_url   = svc_info.get("gov_url") or ""
+                vfs_note  = svc_info.get("vfs_note") or ""
+                apply_line  = f"🌐 {gov_url}\n\n" if gov_url else ""
+                step1_text  = f"at {gov_url}" if gov_url else "at the official portal"
                 info_msg = _md_to_wa(
                     f"*{svc_info['name']}*\n\n"
-                    f"Apply via the official government portal:\n"
-                    f"🌐 {svc_info['gov_url']}\n\n"
+                    f"Apply via the official portal:\n"
+                    f"{apply_line}"
                     f"*Required Documents:*\n{docs_text}\n\n"
-                    f"{svc_info.get('vfs_note', '')}\n\n"
+                    f"{vfs_note + chr(10) + chr(10) if vfs_note else ''}"
                     f"*Steps:*\n"
-                    f"1️⃣ Complete your application at {svc_info['gov_url']}\n"
-                    f"2️⃣ Submit documents at VFS Global / Consulate\n"
+                    f"1️⃣ Complete your application {step1_text}\n"
+                    f"2️⃣ Submit any required documents at the official submission centre\n"
                     f"3️⃣ Return here and send your *government reference number*\n"
                     f"   (Bot will record it and generate your application PDF)"
                 )
@@ -1757,14 +1972,14 @@ async def _handle_message(
     scraped_summary = ""
     knowledge_base  = {}
     try:
-        knowledge_base = await get_realtime_knowledge()
+        knowledge_base = await get_realtime_knowledge(company_id)
 
         # hybrid_search always runs — same as web bot (context_info goes to LLM)
         context_info = await hybrid_search(clean_text, knowledge_base)
 
         # Blocked keyword: reply with canned message and skip LLM entirely
         if context_info == BLOCKED_SENTINEL:
-            _blocked_reply = "I'm sorry, I don't have information on that topic. For assistance please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+            _blocked_reply = "I'm sorry, I don't have information on that topic. For assistance please contact us directly using the contact details provided."
             await session_manager.add_message(session_id, "user", user_text)
             await session_manager.add_message(session_id, "assistant", _blocked_reply)
             await _wa_send(phone, _blocked_reply, db, "idle", waba_number)
@@ -1777,7 +1992,7 @@ async def _handle_message(
         elif detect_website_service(clean_text):
             # Website-only service — keyword search from scraped pages
             words = [w for w in clean_text.lower().split() if len(w) > 3]
-            cgi_text = knowledge_base.get("cgi_joburg", {}).get("page_content", "")
+            cgi_text = knowledge_base.get("cgi_joburg", {}).get("page_content", "") or knowledge_base.get("main", {}).get("page_content", "")
             vfs_text = knowledge_base.get("vfs_global", {}).get("page_content", "")
             relevant = [
                 line.strip() for line in (cgi_text + "\n" + vfs_text).split("\n")
@@ -1833,20 +2048,6 @@ async def _handle_message(
                 return
 
     image_doc_data = {"filename": "whatsapp_doc", "file_id": media_id, "status": "uploaded"} if has_doc else None
-
-    # ── Deterministic intent shortcuts (mirrors web ChatWidget bot) ────────
-    # Greeting and language-switch are already handled above; skip them here.
-    # Only fire when the user is idle (not mid-form, not mid-flow).
-    _SKIP_INTENTS = {IntentCategory.GREETING, IntentCategory.LANGUAGE_SWITCH}
-    if not _form_active and current_flow.get("state", "idle") == "idle" and not is_apply_intent(clean_text):
-        _intent_result = classify_intent(clean_text)
-        _det_text = get_deterministic_response(_intent_result)
-        if _det_text and _intent_result.category not in _SKIP_INTENTS:
-            _wa_det = _md_to_wa(_det_text)
-            await session_manager.add_message(session_id, "user", user_text)
-            await session_manager.add_message(session_id, "assistant", _wa_det)
-            await _wa_send(phone, _wa_det, db, _intent_result.category.value, waba_number)
-            return
 
     flow_response, needs_llm, step = await process_flow(
         session_id=session_id,
@@ -1960,7 +2161,7 @@ async def _handle_message(
     elif step == "submitted":
         await _wa_send(phone, bot_text, db, step, wa)
         # Generate PDF and send via WhatsApp document + email
-        await _wa_after_submit(phone, session_id, wa, db)
+        await _wa_after_submit(phone, session_id, wa, db, company_id=company_id)
 
     elif step == "tracking":
         await _wa_send(phone, bot_text, db, step, wa)
@@ -2010,9 +2211,11 @@ async def _handle_message(
     # ── Handle "Send PDF" button reply for tracking queries ─────────────
     if selected_id and selected_id.startswith("pdf_"):
         _req_tid = selected_id[4:]
-        _pdf = await _wa_generate_pdf(_req_tid, db)
+        _pdf = await _wa_generate_pdf(_req_tid, db, company_id=company_id)
         if _pdf and APP_BASE_URL:
             _pdf_url = f"{APP_BASE_URL}/api/ics-whatsapp/pdf/{_req_tid}"
+            if company_id:
+                _pdf_url += f"?company_id={company_id}"
             await ics_waba.send_media(
                 to=phone,
                 media_type="document",
@@ -2022,10 +2225,19 @@ async def _handle_message(
                 from_override=wa,
             )
         elif not APP_BASE_URL:
+            # Pull a tenant-appropriate "contact support" hint instead of the
+            # legacy CGI-specific "contact the Consulate". Falls back to a
+            # neutral phrase when no email is configured.
+            try:
+                from services.bot_config import get_bot_config as _gbc
+                _cfg = await _gbc(company_id or config.COMPANY_ID)
+                _email = (_cfg.contact or {}).get("email") or ""
+                _support = f"Please email {_email} for assistance." if _email else "Please contact support for assistance."
+            except Exception:
+                _support = "Please contact support for assistance."
             await ics_waba.send_text(
                 phone,
-                "⚠️ PDF delivery is not configured on this server. "
-                "Please contact the Consulate to request your application copy.",
+                "⚠️ PDF delivery is not configured on this server. " + _support,
                 from_override=wa,
             )
 
@@ -2035,14 +2247,22 @@ async def _handle_message(
 # =====================================================================
 
 @router.get("/pdf/{tracking_id}")
-async def serve_application_pdf(tracking_id: str):
+async def serve_application_pdf(
+    tracking_id: str,
+    company_id: Optional[str] = Query(default=None),
+):
     """
     Serve the generated application PDF by tracking ID.
-    Used by ICS WABA to deliver the document to WhatsApp users.
+
+    Used by ICS WABA to deliver the document to WhatsApp users. The bot
+    constructs the URL with ``?company_id=<UUID>`` so tracking IDs from
+    one tenant cannot be downloaded by another tenant; requests without
+    the query param fall back to a global lookup (legacy behaviour) so
+    in-flight links from before this change still work.
     Set APP_BASE_URL env var so the WhatsApp bot can construct this URL.
     """
     db        = await get_database()
-    pdf_bytes = await _wa_generate_pdf(tracking_id, db)
+    pdf_bytes = await _wa_generate_pdf(tracking_id, db, company_id=company_id)
     if not pdf_bytes:
         return Response(content="Application not found.", status_code=404, media_type="text/plain")
     safe     = tracking_id.upper().replace("/", "_")

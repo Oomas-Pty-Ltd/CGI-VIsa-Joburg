@@ -59,10 +59,10 @@ export default function FieldEditor({
   };
 
   return (
-    <div className="rounded-lg border bg-white p-3 space-y-3">
+    <div className="rounded-lg border bg-card p-3 space-y-3">
       {/* Header: drag handle, key, type, reorder, delete */}
       <div className="flex items-center gap-2">
-        <GripVertical className="h-4 w-4 text-slate-300 shrink-0" />
+        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
         <div className="flex-1 grid grid-cols-2 gap-2">
           <div>
             <Label className="text-xs">Key (form-data key)</Label>
@@ -116,7 +116,7 @@ function InputPanel({ field, update }) {
         rows={2}
         placeholder="Please enter your **full name** (as it appears on your passport):"
       />
-      <p className="text-xs text-slate-400 mt-1">Markdown **bold** is rendered in chat.</p>
+      <p className="text-xs text-muted-foreground mt-1">Markdown **bold** is rendered in chat.</p>
     </div>
   );
 }
@@ -152,7 +152,7 @@ function ConditionalPanel({ field, update, priorFieldKeys }) {
   const displayValue = op === "in" ? (cond.in || []).join(", ") : opValue;
 
   return (
-    <div className="space-y-2 bg-slate-50 rounded p-2">
+    <div className="space-y-2 bg-muted/40 rounded p-2">
       <div className="grid grid-cols-[1fr,1fr,2fr] gap-2 items-end">
         <div>
           <Label className="text-xs">IF field</Label>
@@ -215,7 +215,7 @@ function ApiCallPanel({ field, update, priorFieldKeys }) {
   const updateCfg = (patch) => update({ api_config: { ...cfg, ...patch } });
 
   return (
-    <div className="space-y-2 bg-slate-50 rounded p-2">
+    <div className="space-y-2 bg-muted/40 rounded p-2">
       <div className="grid grid-cols-[100px,1fr] gap-2">
         <div>
           <Label className="text-xs">Method</Label>
@@ -227,7 +227,7 @@ function ApiCallPanel({ field, update, priorFieldKeys }) {
           </Select>
         </div>
         <div>
-          <Label className="text-xs">URL <span className="text-slate-400">(supports {`{{field_key}}`} substitution)</span></Label>
+          <Label className="text-xs">URL <span className="text-muted-foreground">(supports {`{{field_key}}`} substitution)</span></Label>
           <Input
             value={cfg.url || ""}
             onChange={(e) => updateCfg({ url: e.target.value })}
@@ -290,7 +290,7 @@ function ApiCallPanel({ field, update, priorFieldKeys }) {
       </div>
 
       {priorFieldKeys.length > 0 && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted-foreground">
           Available substitutions: {priorFieldKeys.map((k) => `{{${k}}}`).join("  ")}
         </p>
       )}

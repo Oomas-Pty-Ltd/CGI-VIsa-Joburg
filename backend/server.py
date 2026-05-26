@@ -90,6 +90,15 @@ async def lifespan(app: FastAPI):
         from template_routes import init_default_templates
         await init_default_templates()
         logger.info("Default templates initialization complete")
+
+        # Preload platform_config so synchronous get() calls during the first
+        # request return the resolved values (not the hardcoded defaults).
+        try:
+            from services.platform_config import ensure_loaded as _pc_load
+            await _pc_load()
+            logger.info("platform_config preloaded")
+        except Exception as e:
+            logger.warning(f"platform_config preload failed (using defaults): {e}")
         
         # Start background monitoring
         monitoring_task = asyncio.create_task(start_background_monitoring())
@@ -102,19 +111,21 @@ async def lifespan(app: FastAPI):
         # Check WhatsApp/ICS WABA configuration
         _check_whatsapp_config()
         
-        # In-process Playwright crawling disabled — starves the API on 1-CPU hosts.
-        # Run the crawler out-of-process (cron / separate pm2 job) instead.
-        # To re-enable, uncomment the block below.
-        # from knowledge_scraper import get_realtime_knowledge, start_periodic_cgi_crawl
-        # asyncio.create_task(get_realtime_knowledge())
-        # asyncio.create_task(start_periodic_cgi_crawl())
+        # In-process Playwright crawling is disabled — starves the API on
+        # 1-CPU hosts. Run the crawler out-of-process (cron / pm2 job)
+        # instead: ``cd backend && python -m crawler.main run``.
         logger.info("Background crawler disabled (run out-of-process via cron)")
         
-        # Start session cleanup task (runs every hour)
+        # Start session cleanup task. Interval is platform-config driven
+        # (session_cleanup_interval_seconds, default 3600s = 1h). The value
+        # is resolved on every iteration so super-admin tuning applies on
+        # the next cycle without restarting the task.
         async def periodic_session_cleanup():
+            from services.platform_config import get as _pc_get
             while True:
                 try:
-                    await asyncio.sleep(3600)  # Run every hour
+                    interval = int(_pc_get("session_cleanup_interval_seconds", 3600))
+                    await asyncio.sleep(interval)
                     await session_manager.cleanup_expired_sessions()
                 except asyncio.CancelledError:
                     break
@@ -181,13 +192,26 @@ async def root_ics_or_info(
         return await ics_delivery_callback(
             request, qStatus, qMobile, qMsgRef, qDTime, SMSMSGID, None, NOTES,
         )
-    return {"message": "Seva Setu Bot API", "status": "running"}
+    return {"message": f"{os.environ.get('PLATFORM_NAME', 'Bot')} API", "status": "running"}
 
 async def init_super_admin():
-    """Initialize super admin, always syncing password from env vars."""
+    """Initialise the super-admin row.
+
+    Credentials MUST come from ``SUPER_ADMIN_EMAIL`` and ``SUPER_ADMIN_PASSWORD``
+    env vars. There are deliberately no fallback defaults — a hardcoded
+    bootstrap password in source is a credential-exposure risk and prevents
+    white-label deployment. If either is unset we log and skip; the install
+    cannot be used until they're provided.
+    """
     try:
-        super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', 'superadmin@sarthak.ai')
-        super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', 'Admin@2025')
+        super_admin_email = os.environ.get('SUPER_ADMIN_EMAIL', '').strip()
+        super_admin_password = os.environ.get('SUPER_ADMIN_PASSWORD', '')
+        if not super_admin_email or not super_admin_password:
+            logger.error(
+                "init_super_admin: SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD not set — "
+                "super-admin not provisioned. Set both env vars and restart."
+            )
+            return
         hashed = bcrypt.hashpw(super_admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
         existing = await db.super_admins.find_one({"email": super_admin_email})
@@ -266,7 +290,7 @@ async def root(
         return await ics_delivery_callback(
             request, qStatus, qMobile, qMsgRef, qDTime, SMSMSGID, None, NOTES,
         )
-    return {"message": "Seva Setu Bot API", "status": "running"}
+    return {"message": f"{os.environ.get('PLATFORM_NAME', 'Bot')} API", "status": "running"}
 
 # Webhook endpoint for SEV-SETU delivery status callbacks
 # Alias for /api/ with webhook-style naming convention

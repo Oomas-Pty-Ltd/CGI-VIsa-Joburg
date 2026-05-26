@@ -481,7 +481,7 @@ curl https://consulai.preview.emergentagent.com/health
 │   └── monitoring_routes.py # Health & metrics
 ├── frontend/
 │   ├── public/
-│   │   └── embed.js       # Embeddable widget
+│   │   └── seva-widget.js # Embeddable widget (built by `yarn build:widget`)
 │   └── src/
 │       └── pages/         # React pages
 └── docs/

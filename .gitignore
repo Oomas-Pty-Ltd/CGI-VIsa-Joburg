@@ -113,6 +113,11 @@ frontend/node_modules/.cache/default-development/0.pack
 
 *.md
 
+*.png
+
+.claude/*
+.playwright-mcp/*
+.mcp.json
 backend/backup/*
 frontend/backup/*
 .gitignore

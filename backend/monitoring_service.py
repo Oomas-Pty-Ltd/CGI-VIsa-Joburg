@@ -95,11 +95,22 @@ class MonitoringService:
         self.webhook_url = os.environ.get('ALERT_WEBHOOK_URL', '')
         
     def get_system_metrics(self) -> Dict[str, float]:
-        """Get current system resource usage"""
+        """Get current system resource usage.
+
+        Disk path is resolved from ``MONITORING_DISK_PATH`` (defaults to the
+        process CWD's filesystem root). Previously hardcoded to ``/app``
+        which 500'd on any non-container host.
+        """
+        disk_path = os.environ.get("MONITORING_DISK_PATH") or os.path.abspath(os.sep)
+        try:
+            disk_percent = psutil.disk_usage(disk_path).percent
+        except FileNotFoundError:
+            # Fallback: filesystem root always exists.
+            disk_percent = psutil.disk_usage(os.path.abspath(os.sep)).percent
         return {
             "cpu_percent": psutil.cpu_percent(interval=1),
             "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/app').percent,
+            "disk_percent": disk_percent,
             "memory_used_gb": psutil.virtual_memory().used / (1024**3),
             "memory_total_gb": psutil.virtual_memory().total / (1024**3),
         }
@@ -285,13 +296,13 @@ class MonitoringService:
     async def send_email_alert(self, alert: Dict):
         """Send alert via email"""
         try:
-            subject = f"[{alert['severity'].upper()}] Seva Setu Bot Alert: {alert['type']}"
+            subject = f"[{alert['severity'].upper()}] {os.environ.get('PLATFORM_NAME', 'Bot')} Alert: {alert['type']}"
             
             body = f"""
             <html>
             <body style="font-family: Arial, sans-serif;">
                 <h2 style="color: {'#dc2626' if alert['severity'] == 'critical' else '#f59e0b'};">
-                    ⚠️ Seva Setu Bot Alert
+                    ⚠️ {os.environ.get('PLATFORM_NAME', 'Bot')} Alert
                 </h2>
                 <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
                     <tr>
@@ -314,7 +325,7 @@ class MonitoringService:
                     </tr>
                 </table>
                 <p style="color: #666; margin-top: 20px;">
-                    This is an automated alert from Seva Setu Bot Monitoring System.
+                    This is an automated alert from {os.environ.get('PLATFORM_NAME', 'Bot')} Monitoring System.
                 </p>
             </body>
             </html>
@@ -347,7 +358,7 @@ class MonitoringService:
             payload = {
                 "text": f"🚨 *{alert['severity'].upper()}* - {alert['type']}\n{alert['message']}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "service": "Seva Setu Bot",
+                "service": os.environ.get('PLATFORM_NAME', 'Bot'),
                 **alert
             }
             
@@ -368,7 +379,7 @@ class MonitoringService:
         latest_metrics = self.metrics_history[-1] if self.metrics_history else None
         
         return {
-            "service": "Seva Setu Bot",
+            "service": os.environ.get('PLATFORM_NAME', 'Bot'),
             "status": latest_metrics.status if latest_metrics else "unknown",
             "status_emoji": "🟢" if latest_metrics and latest_metrics.status == "healthy" else "🟡" if latest_metrics and latest_metrics.status == "degraded" else "🔴",
             "uptime": {

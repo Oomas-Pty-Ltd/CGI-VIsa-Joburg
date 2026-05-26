@@ -79,13 +79,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
-      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md" data-testid="login-form">
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div className="bg-card border border-border rounded-xl shadow-sm p-8 w-full max-w-md" data-testid="login-form">
         <div className="flex justify-center mb-6">
-          <Shield className="w-16 h-16 text-[#E06F2C]" />
+          <div className="h-12 w-12 rounded-lg bg-primary flex items-center justify-center">
+            <Shield className="w-6 h-6 text-primary-foreground" />
+          </div>
         </div>
-        <h1 className="text-3xl font-bold text-center text-[#1A2E40] mb-2">Sign in</h1>
-        <p className="text-center text-gray-600 mb-8">Seva Setu console</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-center text-foreground mb-1">Sign in</h1>
+        <p className="text-center text-sm text-muted-foreground mb-8">{(process.env.REACT_APP_SITE_NAME || 'Admin') + ' console'}</p>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
@@ -118,7 +120,7 @@ export default function LoginPage() {
           <div>
             <Label htmlFor="company_id">
               Company ID
-              <span className="text-xs text-gray-400 ml-1">(optional — leave blank if super-admin)</span>
+              <span className="text-xs text-muted-foreground ml-1">(optional — leave blank if super-admin)</span>
             </Label>
             <Input
               id="company_id"
@@ -129,14 +131,14 @@ export default function LoginPage() {
               className="mt-1 font-mono text-xs"
               data-testid="login-company-id-input"
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Local admins can usually leave this blank — only fill it in if your email is shared between multiple tenants.
             </p>
           </div>
 
           <Button
             type="submit"
-            className="w-full bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+            className="w-full"
             disabled={loading}
             data-testid="login-submit"
           >
@@ -148,7 +150,7 @@ export default function LoginPage() {
           <Button
             variant="link"
             onClick={() => navigate("/")}
-            className="text-[#1A2E40]"
+            className="text-muted-foreground hover:text-foreground"
             data-testid="back-to-home-btn"
           >
             Back to Home

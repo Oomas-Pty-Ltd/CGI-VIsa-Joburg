@@ -7,12 +7,13 @@ import axios from "axios";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { 
-  BOT_CONFIG, 
-  GREETING_MESSAGE, 
-  ADVISORY_MESSAGES, 
-  SUPPORTED_LANGUAGES 
+import {
+  BOT_CONFIG as DEFAULT_BOT_CONFIG,
+  GREETING_MESSAGE as DEFAULT_GREETING,
+  ADVISORY_MESSAGES as DEFAULT_ADVISORIES,
+  SUPPORTED_LANGUAGES as DEFAULT_LANGUAGES
 } from "../config/botMessages";
+import { fetchBranding } from "../lib/widgetConfig";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -168,7 +169,7 @@ const TypeACard = ({ msg, onFinalize }) => {
     <div className="bg-white border border-[#E06F2C] rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
       {/* Reference ID */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">Seva Setu Reference</span>
+        <span className="text-xs text-gray-500">Reference</span>
         <span className="font-mono text-sm font-bold text-[#E06F2C]">{msg.service?.reference_id}</span>
       </div>
 
@@ -269,127 +270,136 @@ const STEPS = [
   { id: 4, label: "Sign", value: "sign" }
 ];
 
-const SERVICE_INFO = {
-  passport: {
-    key: "passport", name: "Passport Services", emoji: "🛂", category: "TYPE_A",
-    gov_url: "https://passportindia.gov.in",
-    description: "Apply for a new Indian passport, renew your existing passport, or update personal details via the official Passport Seva portal.",
-    documents: ["Valid / Expired Indian Passport (original + copy)", "Completed Application Form (available on Govt. portal)", "2 recent passport-size photographs (white background)", "Proof of South African address (utility bill / lease)", "Birth Certificate (for new applicants)"],
-  },
-  visa: {
-    key: "visa", name: "Indian Visa", emoji: "✈️", category: "TYPE_A",
-    gov_url: "https://indianvisaonline.gov.in",
-    description: "Apply for an Indian visa (tourist, business, medical, or student) via the official Indian Visa Online portal.",
-    documents: ["Valid Passport (minimum 6 months validity)", "Completed Visa Application Form", "2 recent passport-size photographs", "Travel itinerary / confirmed tickets", "Hotel booking / invitation letter", "Bank statement (last 3 months)"],
-  },
-  pcc: {
-    key: "pcc", name: "Police Clearance Certificate (PCC)", emoji: "📋", category: "TYPE_A",
-    gov_url: "https://passportindia.gov.in/pcc",
-    description: "Obtain a PCC required for immigration, employment abroad, or other official purposes via the Passport Seva portal.",
-    documents: ["Valid Indian Passport (original + copy)", "Completed PCC Application Form", "Proof of current South African residential address", "Copy of South African Permanent Residence / Visa", "2 passport-size photographs"],
-  },
-  oci: {
-    key: "oci", name: "OCI (Overseas Citizen of India)", emoji: "🇮🇳", category: "TYPE_B",
-    description: "Apply for an OCI card — lifelong multiple-entry visa to India and other benefits. Application processed entirely at this consulate.",
-    documents: ["Proof of Indian origin (old Indian passport / parent's Indian passport)", "Current valid foreign passport (copy)", "2 recent passport-size photographs (50×50mm, white background)", "Renunciation / Surrender Certificate (if applicable)", "South African ID / Residence permit"],
-  },
-  ec_death: {
-    key: "ec_death", name: "EC / Death Certificate", emoji: "📄", category: "TYPE_B",
-    description: "Apply for an Emergency Certificate or get a Death Certificate attested / transcribed for use in India. Processed at this consulate.",
-    documents: ["Indian Passport of the deceased (copy)", "South African Death Certificate (original + notarised copy)", "Proof of relationship to deceased", "Applicant's valid Indian Passport or OCI card", "Two passport-size photographs of applicant"],
-  },
-  surrender: {
-    key: "surrender", name: "Surrender / Renunciation", emoji: "📜", category: "TYPE_B",
-    description: "Surrender your Indian passport and renounce Indian citizenship after acquiring foreign nationality. Personal visit to the consulate is required.",
-    documents: ["Original Indian Passport (to be surrendered)", "Copy of acquired foreign citizenship / naturalisation certificate", "Completed Renunciation Form (Form I)", "Two passport-size photographs", "Proof of South African citizenship"],
-  },
-  marriage: {
-    key: "marriage", name: "Marriage Certificate", emoji: "💍", category: "TYPE_B",
-    description: "Register your marriage or get your South African marriage certificate attested for use in India. Processed at this consulate.",
-    documents: ["Valid Indian Passport or OCI card (copy)", "South African Marriage Certificate (original + copy)", "Two passport-size photographs of both spouses", "Proof of address"],
-  },
-  misc: {
-    key: "misc", name: "Miscellaneous / Other", emoji: "🗂️", category: "TYPE_B",
-    description: "For other consular services — affidavits, power of attorney, document attestation, name correction, and more. Submit a miscellaneous form at this consulate.",
-    documents: ["Valid Indian Passport or OCI card (copy)", "Relevant supporting documents (case-specific)", "Two passport-size photographs", "Affidavit / Notarised documents (where required)"],
-  },
-};
+// Service definitions and keyword detection patterns are tenant-driven and
+// fetched on mount from /api/consular/widget-config (which returns the
+// tenant's `tenant_services` rows). See `useMemo`/`useEffect` blocks inside
+// the component below. No hardcoded service catalogue lives here.
 
-const SERVICE_KEYWORDS = [
-  { key: "passport", pattern: /\b(passport|passaport)\b/i },
-  { key: "visa",     pattern: /\b(visa)\b/i },
-  { key: "pcc",      pattern: /\b(pcc|police clearance|clearance cert)\b/i },
-  { key: "oci",      pattern: /\b(oci|overseas citizen)\b/i },
-  { key: "ec_death", pattern: /\b(death cert|ec cert|emergency cert)\b/i },
-  { key: "surrender",pattern: /\b(surrender|renunciation|renounce)\b/i },
-  { key: "marriage", pattern: /\b(marriage cert(ificate)?|marriage registration|marriage)\b/i },
-  { key: "misc",     pattern: /\b(misc|miscellaneous|affidavit|attestation|power of attorney)\b/i },
+// Normalize a single widget-config service row into the shape this page
+// previously expected from `SERVICE_INFO` (the dialogue/cards use the same
+// keys). `gov_url` is the legacy alias the cards read; map from
+// `external_url` returned by the API.
+function _normalizeService(row) {
+  if (!row || !row.key) return null;
+  return {
+    key:         row.key,
+    name:        row.name || row.key,
+    emoji:       row.emoji || "",
+    category:    row.category || "TYPE_A",
+    gov_url:     row.external_url || "",
+    description: row.description || "",
+    documents:   Array.isArray(row.documents) ? row.documents : [],
+    keywords:    Array.isArray(row.keywords)  ? row.keywords  : [],
+    post_confirm_message: row.post_confirm_message || "",
+  };
+}
+
+// Languages and BCP-47 speech codes are tenant-driven via widget-config.
+// LANGUAGES + SPEECH_LANG_MAP are now derived inside the component below from
+// `tenantBranding.supported_languages` — see `_LANGUAGES_LIST` and
+// `_SPEECH_LANG_MAP` useMemo blocks. A minimal English-only fallback is kept
+// here so the widget renders before widget-config resolves.
+const _FALLBACK_LANGUAGES = [
+  { code: "en", name: "English", flag: "" },
 ];
 
-// Language configuration with codes
-const LANGUAGES = [
-  // English
-  { code: "en",  name: "English",                flag: "🇬🇧" },
-  // Indian languages
-  { code: "hi",  name: "हिंदी (Hindi)",            flag: "🇮🇳" },
-  { code: "bn",  name: "বাংলা (Bengali)",           flag: "🇮🇳" },
-  { code: "mr",  name: "मराठी (Marathi)",           flag: "🇮🇳" },
-  { code: "te",  name: "తెలుగు (Telugu)",           flag: "🇮🇳" },
-  { code: "ta",  name: "தமிழ் (Tamil)",             flag: "🇮🇳" },
-  { code: "gu",  name: "ગુજરાતી (Gujarati)",        flag: "🇮🇳" },
-  { code: "ur",  name: "اردو (Urdu)",               flag: "🇮🇳" },
-  { code: "kn",  name: "ಕನ್ನಡ (Kannada)",           flag: "🇮🇳" },
-  { code: "or",  name: "ଓଡ଼ିଆ (Odia)",              flag: "🇮🇳" },
-  { code: "ml",  name: "മലയാളം (Malayalam)",        flag: "🇮🇳" },
-  { code: "pa",  name: "ਪੰਜਾਬੀ (Punjabi)",          flag: "🇮🇳" },
-  { code: "as",  name: "অসমীয়া (Assamese)",         flag: "🇮🇳" },
-  { code: "mai", name: "मैथिली (Maithili)",          flag: "🇮🇳" },
-  { code: "sa",  name: "संस्कृत (Sanskrit)",         flag: "🇮🇳" },
-  { code: "sat", name: "ᱥᱟᱱᱛᱟᱲᱤ (Santali)",        flag: "🇮🇳" },
-  { code: "ks",  name: "کٲشُر (Kashmiri)",          flag: "🇮🇳" },
-  { code: "ne",  name: "नेपाली (Nepali)",            flag: "🇮🇳" },
-  { code: "sd",  name: "سنڌي (Sindhi)",             flag: "🇮🇳" },
-  { code: "doi", name: "डोगरी (Dogri)",              flag: "🇮🇳" },
-  { code: "kok", name: "कोंकणी (Konkani)",           flag: "🇮🇳" },
-  { code: "mni", name: "মৈতৈলোন্ (Manipuri)",        flag: "🇮🇳" },
-  { code: "brx", name: "बड़ो (Bodo)",                flag: "🇮🇳" },
-  { code: "mwr", name: "मारवाड़ी (Marwari)",          flag: "🇮🇳" },
-  // South African languages
-  { code: "zu",  name: "isiZulu",                   flag: "🇿🇦" },
-  { code: "xh",  name: "isiXhosa",                  flag: "🇿🇦" },
-  { code: "af",  name: "Afrikaans",                 flag: "🇿🇦" },
-  { code: "nso", name: "Sepedi",                    flag: "🇿🇦" },
-  { code: "tn",  name: "Setswana",                  flag: "🇿🇦" },
-  { code: "st",  name: "Sesotho",                   flag: "🇿🇦" },
-  { code: "ts",  name: "Xitsonga",                  flag: "🇿🇦" },
-  { code: "ss",  name: "siSwati",                   flag: "🇿🇦" },
-  { code: "ve",  name: "Tshivenda",                 flag: "🇿🇦" },
-  { code: "nr",  name: "isiNdebele",                flag: "🇿🇦" },
-  // Other languages
-  { code: "ar",  name: "العربية (Arabic)",           flag: "🇸🇦" },
-  { code: "fr",  name: "Français (French)",          flag: "🇫🇷" },
-  { code: "sw",  name: "Kiswahili (Swahili)",        flag: "🇹🇿" },
-  { code: "ha",  name: "Hausa",                     flag: "🇳🇬" },
-  { code: "yo",  name: "Yorùbá (Yoruba)",            flag: "🇳🇬" },
-  { code: "ig",  name: "Igbo",                      flag: "🇳🇬" },
-  { code: "am",  name: "አማርኛ (Amharic)",             flag: "🇪🇹" },
-  { code: "om",  name: "Oromoo (Oromo)",             flag: "🇪🇹" },
-];
-
-// BCP-47 codes for speech recognition (browser Web Speech API)
-const SPEECH_LANG_MAP = {
-  en: "en-GB", hi: "hi-IN", bn: "bn-IN", mr: "mr-IN", te: "te-IN",
-  ta: "ta-IN", gu: "gu-IN", ur: "ur-IN", kn: "kn-IN", or: "or-IN",
-  ml: "ml-IN", pa: "pa-IN", as: "as-IN", mai: "hi-IN", sa: "sa-IN",
-  sat: "hi-IN", ks: "hi-IN", ne: "ne-NP", sd: "ur-IN", doi: "hi-IN",
-  kok: "mr-IN", mni: "hi-IN", brx: "hi-IN", mwr: "hi-IN",
-  zu: "zu-ZA", xh: "xh-ZA", af: "af-ZA", nso: "af-ZA", tn: "af-ZA",
-  st: "st-ZA", ts: "af-ZA", ss: "af-ZA", ve: "af-ZA", nr: "af-ZA",
-  ar: "ar-SA", fr: "fr-FR", sw: "sw-KE", ha: "ha-NE", yo: "yo-NG",
-  ig: "ig-NG", am: "am-ET", om: "om-ET",
-};
 
 export default function ConsularBot() {
+  // Tenant branding — fetched once on mount from /api/consular/widget-config.
+  // Everything in this component reads through BOT_CONFIG / GREETING_MESSAGE
+  // / ADVISORY_MESSAGES / SUPPORTED_LANGUAGES so the brand strings stay in
+  // one place and fall back to neutral defaults until the fetch resolves.
+  const [tenantBranding, setTenantBranding] = useState(null);
+  const BOT_CONFIG = {
+    title:        tenantBranding?.bot_name        || DEFAULT_BOT_CONFIG.title,
+    subtitle:     tenantBranding?.header_tagline  || DEFAULT_BOT_CONFIG.subtitle,
+    tagline:      tenantBranding?.footer_copy     || DEFAULT_BOT_CONFIG.tagline,
+    organization: tenantBranding?.org_name        || DEFAULT_BOT_CONFIG.organization,
+    location:     DEFAULT_BOT_CONFIG.location,
+  };
+  const GREETING_MESSAGE  = tenantBranding?.greeting || DEFAULT_GREETING;
+  // widget-config returns only already-active advisories with no `active`
+  // flag, so we stamp it back on so existing `.filter(a => a.active)` calls
+  // downstream don't drop them.
+  const ADVISORY_MESSAGES = (
+    tenantBranding?.advisories?.length
+      ? tenantBranding.advisories.map(a => ({ active: true, ...a }))
+      : DEFAULT_ADVISORIES
+  ) || [];
+  const SUPPORTED_LANGUAGES = (
+    Array.isArray(tenantBranding?.supported_languages) && tenantBranding.supported_languages.length
+      ? tenantBranding.supported_languages.map(l => l?.name || l?.code).filter(Boolean)
+      : DEFAULT_LANGUAGES
+  );
+
+  // Full language objects (code + name + optional flag) used by the picker.
+  // Falls back to a minimal English-only list before widget-config resolves.
+  const LANGUAGES = (
+    Array.isArray(tenantBranding?.supported_languages) && tenantBranding.supported_languages.length
+      ? tenantBranding.supported_languages
+          .filter((l) => l?.code && l?.name)
+          .map((l) => ({ code: l.code, name: l.name, flag: l.flag || "" }))
+      : _FALLBACK_LANGUAGES
+  );
+
+  // BCP-47 lookup ({ "hi": "hi-IN", ... }) used by browser Web Speech API.
+  // When a tenant entry omits `bcp47_code`, the language code itself is used
+  // (e.g. "hi" → "hi"), which most speech APIs accept as a coarse hint.
+  const SPEECH_LANG_MAP = (() => {
+    const out = {};
+    for (const l of (tenantBranding?.supported_languages || [])) {
+      if (l?.code) out[l.code] = l.bcp47_code || l.code;
+    }
+    if (!out.en) out.en = "en-GB"; // safety net for chat default
+    return out;
+  })();
+
+  // TTS voice preference per language ("female" | "male" | ""). Used by the
+  // browser TTS voice-selection heuristic.
+  const TTS_VOICE_PREFS = (() => {
+    const out = {};
+    for (const l of (tenantBranding?.supported_languages || [])) {
+      if (l?.code && l.tts_voice_preference) out[l.code] = l.tts_voice_preference;
+    }
+    return out;
+  })();
+
+  // Tenant-driven service catalogue from widget-config. SERVICE_INFO_MAP is a
+  // `{key: ServiceShape}` lookup matching the legacy hardcoded SERVICE_INFO
+  // shape so the rest of the component doesn't need restructuring.
+  // SERVICE_KEYWORDS is built from each service's `keywords` field — empty
+  // when a tenant hasn't supplied any (no client-side detection happens).
+  const SERVICE_INFO_MAP = (() => {
+    const rows = Array.isArray(tenantBranding?.services) ? tenantBranding.services : [];
+    const out = {};
+    for (const r of rows) {
+      const n = _normalizeService(r);
+      if (n) out[n.key] = n;
+    }
+    return out;
+  })();
+  const SERVICE_KEYWORDS = (() => {
+    const out = [];
+    for (const svc of Object.values(SERVICE_INFO_MAP)) {
+      for (const kw of (svc.keywords || [])) {
+        const safe = String(kw).trim();
+        if (!safe) continue;
+        // Escape regex metacharacters so config-supplied keywords can't break out.
+        const escaped = safe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        out.push({ key: svc.key, pattern: new RegExp(`\\b(${escaped})\\b`, "i") });
+      }
+    }
+    return out;
+  })();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBranding()
+      .then((b) => { if (!cancelled && b) setTenantBranding(b); })
+      .catch(() => { /* fall back silently to defaults */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState(() => localStorage.getItem("consular_session_id") || null);
@@ -550,18 +560,22 @@ export default function ConsularBot() {
       .catch(() => {});
   }, []);
 
-  // Inactivity auto-logout — 10 minutes
+  // Inactivity auto-logout — per-tenant duration via widget-config.
+  // Falls back to 10 minutes if the tenant hasn't overridden it.
   useEffect(() => {
     if (!sevaToken) return;
+    const inactivityMinutes = Number(tenantBranding?.security?.client_inactivity_minutes) || 10;
+    const inactivityMs = inactivityMinutes * 60 * 1000;
     const touch = () => { lastActivityRef.current = Date.now(); };
     window.addEventListener("mousemove", touch);
     window.addEventListener("keydown", touch);
     window.addEventListener("click", touch);
+    const checkIntervalMs = Number(tenantBranding?.platform?.inactivity_check_ms) || 30000;
     const tick = setInterval(() => {
-      if (Date.now() - lastActivityRef.current > 10 * 60 * 1000) {
+      if (Date.now() - lastActivityRef.current > inactivityMs) {
         handleSevaLogout(true);
       }
-    }, 30000);
+    }, checkIntervalMs);
     return () => {
       clearInterval(tick);
       window.removeEventListener("mousemove", touch);
@@ -626,7 +640,7 @@ export default function ConsularBot() {
   };
 
   const handleSevaShowInfo = (svcKey) => {
-    const svcInfo = SERVICE_INFO[svcKey];
+    const svcInfo = SERVICE_INFO_MAP[svcKey];
     if (!svcInfo) return;
     setMessages(prev => [...prev, { role: "seva_service_info", svc: svcInfo }]);
   };
@@ -835,9 +849,15 @@ export default function ConsularBot() {
 
   const handleSevaUploadDoc = async (file, docName) => {
     if (!file || !sevaCurrentApp) return;
-    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
-    if (!allowed.includes(file.type)) { toast.error("Only PDF, JPG, PNG files are accepted."); return; }
-    if (file.size > 5 * 1024 * 1024) { toast.error("File too large. Max size is 5MB."); return; }
+    const allowed = (tenantBranding?.security?.upload_allowed_mime_types
+                    || ["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
+    if (!allowed.includes(file.type)) { toast.error(`Unsupported file type. Allowed: ${allowed.join(", ")}.`); return; }
+    const maxBytes = Number(tenantBranding?.security?.upload_max_bytes) || (5 * 1024 * 1024);
+    if (file.size > maxBytes) {
+      const maxMB = (maxBytes / (1024 * 1024)).toFixed(1);
+      toast.error(`File too large. Max size is ${maxMB} MB.`);
+      return;
+    }
 
     // Capture preview dataUrl before upload
     const previewDataUrl = await new Promise(resolve => {
@@ -948,10 +968,11 @@ export default function ConsularBot() {
         a.href = pdfUrl; a.target = "_blank"; a.rel = "noopener noreferrer";
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
       }, 600);
-      if (sevaSelectedService?.category === "surrender") {
+      const postConfirm = sevaSelectedService?.post_confirm_message;
+      if (postConfirm) {
         setMessages(prev => [...prev, {
           role: "assistant",
-          content: `⚠️ **Important Reminder:** You must visit the Consulate in person to physically surrender your original Indian passport to complete this process.\n\n📍 1 Eton Road, Parktown 2193, Johannesburg\n📞 +27 11 581 9800`
+          content: postConfirm
         }]);
       }
     } catch (e) {
@@ -1013,7 +1034,7 @@ export default function ConsularBot() {
           enable_voice: false,
           language: selectedLanguageRef.current,
         }),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(Number(tenantBranding?.platform?.chat_stream_timeout_ms) || 60000),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1110,7 +1131,7 @@ export default function ConsularBot() {
     let detectedServiceKey = null;
     if (!sevaAuthStep) {
       const matched = SERVICE_KEYWORDS.find(({ pattern }) => pattern.test(messageText));
-      if (matched && SERVICE_INFO[matched.key]) {
+      if (matched && SERVICE_INFO_MAP[matched.key]) {
         detectedServiceKey = matched.key;
       }
     }
@@ -1132,7 +1153,7 @@ export default function ConsularBot() {
           enable_voice: false,   // voice not supported over stream
           language: selectedLanguageRef.current,
         }),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(Number(tenantBranding?.platform?.chat_stream_timeout_ms) || 60000),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1188,10 +1209,10 @@ export default function ConsularBot() {
               }
             }
             // After LLM responds with knowledge base info, show Apply card for detected service
-            if (detectedServiceKey && SERVICE_INFO[detectedServiceKey]) {
+            if (detectedServiceKey && SERVICE_INFO_MAP[detectedServiceKey]) {
               setMessages(prev => [...prev, {
                 role: "seva_service_action",
-                svc: SERVICE_INFO[detectedServiceKey],
+                svc: SERVICE_INFO_MAP[detectedServiceKey],
               }]);
             }
             // Speak the completed response if voice is enabled
@@ -1320,24 +1341,33 @@ export default function ConsularBot() {
     const targetLang = SPEECH_LANG_MAP[selectedLanguageRef.current] || "en-GB";
     const langFamily = targetLang.split("-")[0];
 
-    const FEMALE_NAMES = /heera|priya|aditi|neerja|kalpana|swara|zira|samantha|karen|moira|fiona|tessa|victoria|linda|emma|aria|jenny|sonia|natasha|susan|hazel|amelie|alice|alva|anna|claire|carmit|damayanti|ioana|joana|laura|lekha|luciana|mariska|mei\-jia|melina|milena|monica|paulina|sangeeta|sara|satu|sin\-ji|yelda|yuna|zosia/i;
+    // Voice gender bias: tenants set ``tts_voice_preference`` per language
+    // on bot_config (``female`` / ``male`` / unset = neutral). When set, we
+    // prefer matching voices first; otherwise we accept any voice for the
+    // target language.
+    const VOICE_NAME_HINTS = {
+      female: /heera|priya|aditi|neerja|kalpana|swara|zira|samantha|karen|moira|fiona|tessa|victoria|linda|emma|aria|jenny|sonia|natasha|susan|hazel|amelie|alice|alva|anna|claire|carmit|damayanti|ioana|joana|laura|lekha|luciana|mariska|mei\-jia|melina|milena|monica|paulina|sangeeta|sara|satu|sin\-ji|yelda|yuna|zosia|female|woman|girl/i,
+      male:   /david|mark|james|fred|tom|alex|daniel|diego|jorge|luca|miguel|nicolas|oliver|rishi|ravi|amit|male|man|boy/i,
+    };
     const allVoices  = window.speechSynthesis.getVoices();
-    const isFemale   = (v) => FEMALE_NAMES.test(v.name) || /female|woman|girl/i.test(v.name);
+    const voicePref  = TTS_VOICE_PREFS[selectedLanguageRef.current] || "";
+    const preferRx   = VOICE_NAME_HINTS[voicePref] || null;
+    const matches    = (v) => !preferRx || preferRx.test(v.name);
 
     // Find a voice for the selected language only.
     // Never fall back to an English voice when another language is selected —
     // instead leave .voice unset so Chrome/Edge use their cloud TTS engine
     // (Google TTS / Windows Speech) for the target language automatically.
     const matchingVoice =
-      allVoices.find((v) => isFemale(v) && v.lang === targetLang) ||
-      allVoices.find((v) => isFemale(v) && v.lang.startsWith(langFamily + "-")) ||
+      allVoices.find((v) => matches(v) && v.lang === targetLang) ||
+      allVoices.find((v) => matches(v) && v.lang.startsWith(langFamily + "-")) ||
       allVoices.find((v) => v.lang === targetLang) ||
       allVoices.find((v) => v.lang.startsWith(langFamily + "-")) ||
       null;
 
     // Chrome bug: utterances > ~300 chars may cut off silently.
     // Split on sentence boundaries and queue them all.
-    const CHUNK_SIZE = 250;
+    const CHUNK_SIZE = Number(tenantBranding?.platform?.tts_chunk_size_chars) || 250;
     const sentences = plain.match(/[^।॥.!?]+[।॥.!?]*/g) || [plain];
     const chunks = [];
     let current = "";
@@ -1392,7 +1422,7 @@ export default function ConsularBot() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: chunk, language: selectedLanguageRef.current }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(Number(tenantBranding?.platform?.tts_timeout_ms) || 30000),
     });
     if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
     const data = await res.json();
@@ -1643,8 +1673,12 @@ export default function ConsularBot() {
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File size exceeds 10MB limit.');
+    // Use the tenant-configured upload cap; default 10 MB for chat
+    // uploads (looser than the 5 MB Seva Setu doc upload).
+    const _chatMaxBytes = Number(tenantBranding?.security?.upload_max_bytes) || (10 * 1024 * 1024);
+    if (file.size > _chatMaxBytes) {
+      const _chatMaxMB = (_chatMaxBytes / (1024 * 1024)).toFixed(1);
+      toast.error(`File size exceeds ${_chatMaxMB} MB limit.`);
       return;
     }
 
@@ -1872,7 +1906,7 @@ export default function ConsularBot() {
                 <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
                   <img
                     src="https://static.prod-images.emergentagent.com/jobs/41ee56b6-38da-4112-8da3-b4cf6bfcfd91/images/1fc401012f88731c201ca30b4be56212c44bad84c995e7ed04da381c8740f43b.png"
-                    alt="Seva Setu Bot"
+                    alt={BOT_CONFIG.title || 'Bot'}
                     className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
                   />
                   
@@ -1992,8 +2026,8 @@ export default function ConsularBot() {
             {sevaToken && sevaUser && (
               <div className="flex items-center justify-between px-4 py-2 mb-2 rounded-xl bg-[#1A2E40] shadow">
                 <div className="flex items-center gap-2 text-sm text-white">
-                  <UserCheck className="w-4 h-4 text-[#FF9933]" />
-                  <span className="font-semibold text-[#FF9933]">{sevaUser.name}</span>
+                  <UserCheck className="w-4 h-4 text-white" />
+                  <span className="font-semibold text-white">{sevaUser.name}</span>
                   <span className="text-gray-400 text-xs hidden sm:inline">· {sevaUser.email}</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2051,7 +2085,7 @@ export default function ConsularBot() {
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                     data-testid={`message-${index}`}
                     role="article"
-                    aria-label={`${msg.role === "user" ? "Your message" : "Seva Setu response"}`}
+                    aria-label={`${msg.role === "user" ? "Your message" : "Bot response"}`}
                   >
                     {msg.role === "advisory" ? (
                       <div 

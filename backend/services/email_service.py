@@ -1,6 +1,11 @@
 """
-Email service for Seva Setu — OTP, review link, and confirmation emails.
+Email service — OTP, review link, and confirmation emails.
 Uses SMTP (configurable via env vars). Falls back to console logging in dev mode.
+
+Brand strings (subject/header) are tenant-driven: callers pass ``bot_name``
+(the bot's display name) and ``org_name`` (the organisation/tenant name).
+Both default to empty — when empty the email uses generic phrasing without
+exposing a brand fallback.
 """
 import os
 import smtplib
@@ -16,14 +21,17 @@ logger = logging.getLogger(__name__)
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
-# Support both SMTP_PASSWORD and legacy SMTP_PASS
 SMTP_PASS = os.environ.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASS", "")
-# Support both FROM_EMAIL and legacy SMTP_FROM
 SMTP_FROM = os.environ.get("FROM_EMAIL") or os.environ.get("SMTP_FROM") or SMTP_USER
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-# Dev mode: skip actual send when SMTP credentials are not fully configured
 _DEV_MODE = not (SMTP_USER and SMTP_PASS)
+
+
+def _brand(bot_name: str, org_name: str) -> str:
+    """Return the best brand label for headers/subjects. Falls back to a
+    neutral label only when both are empty."""
+    return (bot_name or org_name or "Application Assistant").strip()
 
 
 def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = None, attachment_name: str = "application.pdf") -> bool:
@@ -34,7 +42,7 @@ def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = 
             f"  Set SMTP_USER + SMTP_PASSWORD in .env to enable real delivery.\n"
             f"  OTP fallback: 123456"
         )
-        return False   # return False so callers know delivery didn't happen
+        return False
     try:
         msg = MIMEMultipart("mixed")
         msg["From"] = SMTP_FROM
@@ -65,12 +73,12 @@ def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = 
         return False
 
 
-def send_otp_email(to: str, otp: str) -> bool:
+def send_otp_email(to: str, otp: str, bot_name: str = "", org_name: str = "") -> bool:
+    brand = _brand(bot_name, org_name)
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto">
       <div style="background:#000080;padding:20px;text-align:center">
-        <h2 style="color:#fff;margin:0">Seva Setu — Consulate General of India</h2>
-        <p style="color:#FF9933;margin:4px 0">Johannesburg</p>
+        <h2 style="color:#fff;margin:0">{brand}</h2>
       </div>
       <div style="padding:24px;background:#fff">
         <h3 style="color:#1A2E40">Your Verification Code</h3>
@@ -81,19 +89,19 @@ def send_otp_email(to: str, otp: str) -> bool:
         <p style="color:#888;font-size:12px">If you did not request this, please ignore this email.</p>
       </div>
     </div>"""
-    return _send(to, "Your Seva Setu Verification Code", html)
+    return _send(to, f"{brand} — Verification Code", html)
 
 
-def send_account_created_email(to: str, name: str, reference_id: str, service_name: str) -> bool:
+def send_account_created_email(to: str, name: str, reference_id: str, service_name: str, bot_name: str = "", org_name: str = "") -> bool:
+    brand = _brand(bot_name, org_name)
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto">
       <div style="background:#000080;padding:20px;text-align:center">
-        <h2 style="color:#fff;margin:0">Seva Setu — Account Created</h2>
-        <p style="color:#FF9933;margin:4px 0">Consulate General of India, Johannesburg</p>
+        <h2 style="color:#fff;margin:0">{brand} — Account Created</h2>
       </div>
       <div style="padding:24px;background:#fff">
         <p>Dear <strong>{name}</strong>,</p>
-        <p>Your Seva Setu account has been created successfully for <strong>{service_name}</strong>.</p>
+        <p>Your account has been created successfully for <strong>{service_name}</strong>.</p>
         <div style="background:#FFF8F2;border-left:4px solid #E06F2C;padding:12px 16px;margin:16px 0">
           <p style="margin:0;font-size:13px;color:#555">Reference ID</p>
           <p style="margin:4px 0;font-size:20px;font-weight:bold;color:#E06F2C">{reference_id}</p>
@@ -105,16 +113,13 @@ def send_account_created_email(to: str, name: str, reference_id: str, service_na
           <li>Upload required documents</li>
           <li>Submit and receive your confirmation email with PDF</li>
         </ol>
-        <p style="color:#888;font-size:12px;margin-top:24px">
-          Consulate General of India, Johannesburg<br>
-          1 Eton Road, Parktown 2193 | +27 11 581 9800 | cons.joburg@mea.gov.in
-        </p>
       </div>
     </div>"""
-    return _send(to, f"Seva Setu — Account Created ({reference_id})", html)
+    return _send(to, f"{brand} — Account Created ({reference_id})", html)
 
 
-def send_review_email(to: str, name: str, reference_id: str, edit_token: str, form_summary: dict) -> bool:
+def send_review_email(to: str, name: str, reference_id: str, edit_token: str, form_summary: dict, bot_name: str = "", org_name: str = "") -> bool:
+    brand = _brand(bot_name, org_name)
     edit_url = f"{FRONTEND_URL}/review/{edit_token}"
     rows = "".join(
         f"<tr><td style='padding:6px 12px;color:#555;font-size:13px'>{k.replace('_',' ').title()}</td>"
@@ -125,7 +130,7 @@ def send_review_email(to: str, name: str, reference_id: str, edit_token: str, fo
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
       <div style="background:#000080;padding:20px;text-align:center">
         <h2 style="color:#fff;margin:0">Review Your Application</h2>
-        <p style="color:#FF9933;margin:4px 0">Seva Setu — Consulate General of India, Johannesburg</p>
+        <p style="color:#FF9933;margin:4px 0">{brand}</p>
       </div>
       <div style="padding:24px;background:#fff">
         <p>Dear <strong>{name}</strong>,</p>
@@ -144,25 +149,22 @@ def send_review_email(to: str, name: str, reference_id: str, edit_token: str, fo
           </a>
         </div>
         <p style="color:#888;font-size:12px">This link expires in 24 hours. After expiry, your application will be submitted as-is.</p>
-        <p style="color:#888;font-size:12px;margin-top:24px">
-          Consulate General of India, Johannesburg<br>
-          1 Eton Road, Parktown 2193 | +27 11 581 9800 | cons.joburg@mea.gov.in
-        </p>
       </div>
     </div>"""
-    return _send(to, f"Seva Setu — Review Your Application [{reference_id}]", html)
+    return _send(to, f"{brand} — Review Your Application [{reference_id}]", html)
 
 
-def send_confirmation_email(to: str, name: str, reference_id: str, service_name: str, pdf_bytes: Optional[bytes] = None) -> bool:
+def send_confirmation_email(to: str, name: str, reference_id: str, service_name: str, pdf_bytes: Optional[bytes] = None, bot_name: str = "", org_name: str = "") -> bool:
+    brand = _brand(bot_name, org_name)
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
       <div style="background:#000080;padding:20px;text-align:center">
         <h2 style="color:#fff;margin:0">Application Confirmed</h2>
-        <p style="color:#FF9933;margin:4px 0">Seva Setu — Consulate General of India, Johannesburg</p>
+        <p style="color:#FF9933;margin:4px 0">{brand}</p>
       </div>
       <div style="padding:24px;background:#fff">
         <p>Dear <strong>{name}</strong>,</p>
-        <p>Your <strong>{service_name}</strong> application has been confirmed and received by the Consulate.</p>
+        <p>Your <strong>{service_name}</strong> application has been confirmed and received.</p>
         <div style="background:#FFF8F2;border-left:4px solid #E06F2C;padding:12px 16px;margin:16px 0">
           <p style="margin:0;font-size:13px;color:#555">Application Reference Number</p>
           <p style="margin:4px 0;font-size:22px;font-weight:bold;color:#E06F2C">{reference_id}</p>
@@ -174,19 +176,12 @@ def send_confirmation_email(to: str, name: str, reference_id: str, service_name:
           <li>You will be contacted via email if additional documents are required</li>
           <li>Track your application using your Reference ID</li>
         </ul>
-        <h4 style="color:#1A2E40">Contact &amp; Office Hours</h4>
-        <p style="color:#555">
-          <strong>Phone:</strong> +27 11 581 9800<br>
-          <strong>Email:</strong> cons.joburg@mea.gov.in<br>
-          <strong>Address:</strong> 1 Eton Road, Parktown 2193, Johannesburg<br>
-          <strong>Hours:</strong> Mon–Fri, 09:00–13:00 (Consular Section)
-        </p>
         <p style="color:#888;font-size:12px">Your completed application PDF is attached to this email.</p>
       </div>
     </div>"""
     return _send(
         to,
-        f"Seva Setu — Application Confirmed [{reference_id}]",
+        f"{brand} — Application Confirmed [{reference_id}]",
         html,
         attachment_bytes=pdf_bytes,
         attachment_name=f"{reference_id}.pdf"

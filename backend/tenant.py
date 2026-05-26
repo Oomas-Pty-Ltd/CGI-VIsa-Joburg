@@ -35,9 +35,17 @@ from database import get_database
 logger = logging.getLogger("tenant")
 
 # Small TTL cache so we don't hit Mongo for every authenticated request.
-# A deactivated tenant is rejected within at most _CACHE_TTL_SECONDS.
-_CACHE_TTL_SECONDS = 60
+# A deactivated tenant is rejected within at most ``_cache_ttl()`` seconds.
+# TTL is platform-config driven (cache_tenant_ttl_seconds).
 _validity_cache: dict[str, float] = {}   # company_id -> expiry monotonic ts
+
+
+def _cache_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("cache_tenant_ttl_seconds", 60))
+    except Exception:
+        return 60
 
 
 async def _is_active_company(company_id: str) -> bool:
@@ -56,7 +64,7 @@ async def _is_active_company(company_id: str) -> bool:
         # tenant was just (re-)activated.
         return False
 
-    _validity_cache[company_id] = now + _CACHE_TTL_SECONDS
+    _validity_cache[company_id] = now + _cache_ttl()
     return True
 
 

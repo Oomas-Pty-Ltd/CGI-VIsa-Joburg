@@ -389,8 +389,8 @@ export default function ICSWhatsAppBot() {
             <MessageCircle size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-white font-semibold text-sm leading-none">Seva Setu — WhatsApp Bot</h1>
-            <p className="text-green-100 text-xs mt-0.5">Consulate General of India, Johannesburg</p>
+            <h1 className="text-white font-semibold text-sm leading-none">{(process.env.REACT_APP_SITE_NAME || 'Bot') + ' — WhatsApp'}</h1>
+            <p className="text-green-100 text-xs mt-0.5">Operator Console</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -573,7 +573,7 @@ export default function ICSWhatsAppBot() {
                 <MessageCircle size={36} className="text-[#128C7E]" />
               </div>
               <div className="text-center">
-                <h2 className="text-xl font-light text-[#41525d] mb-1">Seva Setu WhatsApp Bot</h2>
+                <h2 className="text-xl font-light text-[#41525d] mb-1">{(process.env.REACT_APP_SITE_NAME || 'Bot') + ' WhatsApp'}</h2>
                 <p className="text-sm text-[#667781] mb-3">Select a conversation or start a new one</p>
                 <Button
                   onClick={() => setShowNewConv(true)}

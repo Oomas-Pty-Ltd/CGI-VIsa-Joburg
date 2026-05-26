@@ -41,6 +41,17 @@ class Service:
     description:   str  = ""
     documents:     List[str]                = field(default_factory=list)
     fields:        List[Dict[str, Any]]     = field(default_factory=list)
+    # Optional sub-types for services that ramify into variants (e.g.
+    # passport: lost / damaged / emergency / tatkal). Each entry:
+    #   {key, label, description, extra_docs: list[str], keywords: list[str]}
+    # When the user's query matches a subtype's keywords the bot prepends
+    # the subtype description + docs to the standard service info card.
+    # See services.application_flow._detect_subtype.
+    subtypes:      List[Dict[str, Any]]     = field(default_factory=list)
+    # Optional workflow hooks keyed by hook point (pre_consent / pre_submit
+    # / post_submit). Empty dict means "no hooks" — application_flow falls
+    # through to the default state machine. See services.service_hooks.
+    hooks:         Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     category:      str  = "TYPE_A"
     external_url:  Optional[str]            = None
     enabled:       bool = True
@@ -56,8 +67,9 @@ class Service:
         return None
 
     def is_redirect_only(self) -> bool:
-        """TYPE_B services hand the user off to an external portal (VFS Global,
-        passportindia.gov.in) rather than collecting data in-house."""
+        """TYPE_B services hand the user off to an external portal rather
+        than collecting data in-house. The external URL lives on
+        ``external_url`` and is provided by the tenant."""
         return self.category == "TYPE_B"
 
 
@@ -69,6 +81,8 @@ def _row_to_service(row: Dict[str, Any]) -> Service:
         description=row.get("description") or "",
         documents=list(row.get("documents") or []),
         fields=list(row.get("fields") or []),
+        subtypes=list(row.get("subtypes") or []),
+        hooks=dict(row.get("hooks") or {}),
         category=row.get("category") or "TYPE_A",
         external_url=row.get("external_url"),
         enabled=bool(row.get("enabled", True)),
@@ -79,9 +93,17 @@ def _row_to_service(row: Dict[str, Any]) -> Service:
 
 # ── TTL cache ───────────────────────────────────────────────────────────────
 
-_CACHE_TTL_SECONDS = 60
+# TTL is platform-config driven (cache_service_registry_ttl_seconds).
 _list_cache:   Dict[str, tuple[float, List[Service]]] = {}   # (company_id, all-enabled) → (expiry, services)
 _lookup_cache: Dict[str, tuple[float, Dict[str, Service]]] = {}  # company_id → (expiry, {key: Service})
+
+
+def _cache_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("cache_service_registry_ttl_seconds", 60))
+    except Exception:
+        return 60
 
 
 def invalidate_cache(company_id: Optional[str] = None) -> None:
@@ -117,9 +139,9 @@ async def list_services(company_id: str, enabled_only: bool = True) -> List[Serv
         services = cached[1]
     else:
         services = await _load_all(company_id)
-        _list_cache[company_id] = (now + _CACHE_TTL_SECONDS, services)
+        _list_cache[company_id] = (now + _cache_ttl(), services)
         # warm the lookup cache too — same DB round-trip
-        _lookup_cache[company_id] = (now + _CACHE_TTL_SECONDS, {s.service_key: s for s in services})
+        _lookup_cache[company_id] = (now + _cache_ttl(), {s.service_key: s for s in services})
 
     if enabled_only:
         return [s for s in services if s.enabled]

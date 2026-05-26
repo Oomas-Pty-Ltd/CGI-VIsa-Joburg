@@ -219,19 +219,19 @@ INTENT_PATTERNS = {
     },
     
     IntentCategory.OFFICE_INFO: {
+        # Tenant-agnostic office/contact keywords. CGI-specific terms
+        # ("cgi", "joburg", "consulate general") used to live here; tenants
+        # that want to recognise their own building or city in user messages
+        # add them via ``tenant_bot_config.intent_keywords.office_info``.
         "keywords": [
             "address", "location", "office", "timing", "hours", "open",
             "closed", "contact", "phone", "email", "where", "directions",
-            "cgi", "consulate", "johannesburg", "joburg", "jburg",
-            "consul general", "consulate general"
         ],
         "patterns": [
             r"(where|what).*(office|address|location)",
-            r"(office|consulate).*(timing|hours|address)",
+            r"(office).*(timing|hours|address)",
             r"(contact|phone|email).*(number|address)",
             r"(when|what time).*open",
-            r"cgi\s*(joburg|johannesburg|jburg)?",
-            r"(consulate|consul).*(general|india|johannesburg|joburg)?"
         ],
         "response_key": "office_info"
     },
@@ -343,535 +343,9 @@ INTENT_PATTERNS = {
 }
 
 
-# =====================================================================
-# STRUCTURED RESPONSES (Deterministic)
-# =====================================================================
-STRUCTURED_RESPONSES = {
-
-    "passport_info": {
-        "title": "🛂 Passport Services",
-        "content": """**🛂 Indian Passport Services**
-*Consulate General of India, Johannesburg*
-
----
-
-**📋 Types of Applications**
-
-| Type | Description |
-|---|---|
-| New Passport | First-time applicants |
-| Renewal / Re-issue | Expired or expiring passport |
-| Lost / Damaged | FIR (police report) required |
-| Tatkal | Urgent processing |
-
----
-
-**💰 Fee Schedule**
-
-| Application Type | Fee (ZAR) |
-|---|---|
-| 36-page passport | ZAR 2,280 |
-| 60-page passport | ZAR 2,655 |
-| Minor / Emergency passport | ZAR 780 |
-| Tatkal surcharge | Additional fees apply |
-
-> All fees include ICWF charge of ZAR 30.
-
----
-
-**⏱ Processing Time**
-
-- Normal: Up to one month
-- Tatkal: 1–2 weeks
-
----
-
-**🔗 How to Apply**
-
-1. Apply online at cgijoburg.gov.in passport services
-2. Complete the online application form
-3. Pay the fee and save your receipt
-4. Book appointment via VFS Global Johannesburg
-5. Visit VFS with all original documents
-6. Collect your passport when ready
-
-> ⚠️ Applications are **not** accepted directly at the Consulate — all go through **VFS Global**.
-
----
-
-**📁 Documents Required**
-
-- ✅ Completed online application form
-- ✅ Original current / expired passport
-- ✅ 3 passport-size photos (5×5 cm, white background)
-- ✅ Proof of residential address in South Africa
-- ✅ Original proof of payment (no photocopies)
-- ✅ Valid South African visa / permit
-- ✅ FIR / Police Report *(lost or stolen only)*
-
----
-
-**🏢 VFS Global — Passport / PCC**
-
-📍 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB 2198
-📞 012 425 3007 / 011 484 0327
-🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
-
----
-
-📞 **Consulate:** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in""",
-        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
-    },
-
-    "visa_info": {
-        "title": "✈️ Indian Visa Information",
-        "content": """**✈️ Indian Visa Services**
-*Consulate General of India, Johannesburg*
-
----
-
-**🗂 Visa Types Available**
-
-| Visa Type | Notes |
-|---|---|
-| Tourist | Up to 10 years, multiple entry |
-| Business | For trade / corporate visits |
-| Student | For study programmes in India |
-| Medical | For treatment in India |
-| Employment | For working in India |
-| Conference / Research | Short-duration visits |
-| Transit | Passing through India |
-| e-Visa | Online — available at 30+ airports |
-
----
-
-**💰 Visa Fees**
-
-> 🎉 **South African nationals receive Indian visa GRATIS (free of charge).**
-> For other nationalities, fees are as per MEA notification.
-
----
-
-**⏱ Processing Time**
-
-- Regular visa: 3–5 working days
-- e-Visa: Apply minimum **5 working days** before departure
-
----
-
-**🔗 How to Apply**
-
-*Regular Visa:*
-1. Apply online at indianvisaonline.gov.in
-2. Fill the form and upload photos
-3. Pay the visa fee online
-4. Book appointment at VFS Global (Visa)
-5. Submit biometrics and documents at VFS
-6. Collect visa when ready
-
-*e-Visa:*
-1. Apply at indianvisaonline.gov.in/evisa
-2. Upload documents and photo
-3. Pay online — receive e-Visa by email
-
----
-
-**📁 Documents Required**
-
-- ✅ Valid passport — min **6 months** validity from departure
-- ✅ At least **2 blank pages** in passport
-- ✅ Completed application form
-- ✅ Recent passport-size photographs
-- ✅ Proof of travel (tickets / itinerary)
-- ✅ Supporting documents *(varies by visa type)*
-
----
-
-**🏢 VFS Global — Visa Submission**
-
-> ⚠️ **No visa applications at the Consulate** — all through VFS only.
-
-📍 1st Floor, Rivonia Village Office Block, Rivonia, JHB
-📞 012 425 3007
-🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
-
----
-
-📞 **Consulate:** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in""",
-        "source": "VFS Global / CGI Johannesburg Official"
-    },
-
-    "oci_info": {
-        "title": "🇮🇳 OCI Card Information",
-        "content": """**🇮🇳 OCI Card — Overseas Citizen of India**
-*Consulate General of India, Johannesburg*
-
----
-
-**ℹ️ What is OCI?**
-
-An OCI Card is a **multi-purpose, multi-entry, lifelong visa** to India. It grants:
-
-- ✅ Unlimited entry to India for any purpose
-- ✅ No need to report to police on arrival
-- ✅ Parity with NRIs for economic, financial & educational purposes
-- ✅ No expiry — valid for life
-
----
-
-**✅ Eligibility**
-
-You may apply if:
-- You were an **Indian citizen on or after 26 January 1950**, OR
-- Your **parent, grandparent or great-grandparent** was Indian, OR
-- You are the **spouse of an Indian citizen / OCI holder** (married ≥ 2 years)
-- You are a **minor child** of an Indian citizen
-
-*Not eligible:* Pakistan / Bangladesh nationals; foreign military personnel.
-
----
-
-**💰 Fees**
-
-> Fees are **as per MEA notification** — contact Consulate for current rates.
-> 📧 cons.jburg@mea.gov.in
-
----
-
-**🔗 How to Apply**
-
-1. Apply online at ociservices.gov.in
-2. Upload all required documents
-3. Email cons.jburg@mea.gov.in to book appointment
-4. Visit the Consulate with all original documents
-5. Collect your OCI card when ready
-
----
-
-**📁 Documents Required**
-
-- ✅ Current foreign passport (original + all page copies)
-- ✅ Renunciation / Surrender Certificate
-- ✅ Proof of Indian origin (old Indian passport / birth / school cert)
-- ✅ Proof of SA residential address
-- ✅ SA ID / Permanent Residence / Work Permit
-- ✅ 2 recent passport-size photos (51×51 mm)
-- ✅ Marriage certificate *(if applying as spouse)*
-
----
-
-**🏢 Consulate Office**
-
-📍 No. 1, Eton Road, Park Town 2193, Johannesburg
-📞 +27 11-4828484 | 📧 cons.jburg@mea.gov.in
-🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)""",
-        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
-    },
-
-    "office_info": {
-        "title": "🏢 CGI Johannesburg Office",
-        "content": """**🏢 Consulate General of India, Johannesburg**
-
----
-
-**📌 Contact Details**
-
-| Field | Details |
-|---|---|
-| Acting Consul General | Mr. Harish Kumar |
-| Address | No. 1, Eton Road, Park Town 2193, Johannesburg |
-| Phone | +27 11-4828484 / +27 11-4828485 / +27 11-4828486 |
-| Emergency | +27 11 581 9800 |
-| General Email | ccom.jburg@mea.gov.in |
-| Consular / OCI Email | cons.jburg@mea.gov.in |
-| Website | www.cgijoburg.gov.in |
-
----
-
-**🕐 Office Hours**
-
-| Day | Hours |
-|---|---|
-| Monday – Friday | 08:30 – 17:00 |
-| Lunch Break | 13:00 – 13:30 |
-| Saturday – Sunday | Closed |
-| Public Holidays | Closed |
-
----
-
-**🗺 Jurisdiction**
-
-Gauteng · North West · Limpopo · Mpumalanga
-
----
-
-**🏢 VFS Global — Passport / PCC**
-
-📍 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB 2198
-📞 012 425 3007 / 011 484 0327
-🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
-
----
-
-**🏢 VFS Global — Visa**
-
-📍 1st Floor, Rivonia Village Office Block, Rivonia, JHB
-📞 012 425 3007
-🕐 Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00
-
----
-
-> ⚠️ **FRAUD ALERT:** The Consulate NEVER requests money over phone or SMS.""",
-        "source": "CGI Johannesburg Official — cgijoburg.gov.in"
-    },
-
-    "emergency_contact": {
-        "title": "🚨 Emergency Assistance",
-        "content": """**🚨 Emergency Consular Assistance**
-
----
-
-**📞 24/7 Emergency Helpline**
-
-> **+27 11 581 9800**
-> *Available around the clock for Indian citizens in distress*
-
----
-
-**🆘 When to Call**
-
-- 🔴 Lost or stolen passport
-- 🔴 Arrest or detention
-- 🔴 Medical emergency
-- 🔴 Death of an Indian national
-- 🔴 Natural disaster / civil unrest
-- 🔴 Stranded without funds or documents
-
----
-
-**🕐 Regular Office Hours**
-
-📞 +27 11-4828484 / +27 11-4828485 / +27 11-4828486
-📧 ccom.jburg@mea.gov.in
-🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)
-
----
-
-**🏢 Consulate Address**
-
-📍 No. 1, Eton Road, Park Town 2193, Johannesburg
-
----
-
-> ⚠️ **FRAUD ALERT:** The Consulate **NEVER** calls asking for money. Hang up and report to ccom.jburg@mea.gov.in immediately.""",
-        "source": "CGI Johannesburg Official",
-        "escalation": True
-    },
-
-    "escalation": {
-        "title": "👤 Human Assistance",
-        "content": """**👤 Connecting You to Human Assistance**
-
-Your request has been noted and flagged for human review.
-
----
-
-**📞 Contact the Consulate Directly**
-
-| Channel | Details |
-|---|---|
-| Phone | +27 11-4828484 / +27 11-4828485 / +27 11-4828486 |
-| Emergency | +27 11 581 9800 *(24/7)* |
-| General Email | ccom.jburg@mea.gov.in |
-| Consular / OCI | cons.jburg@mea.gov.in |
-| Website | www.cgijoburg.gov.in |
-
----
-
-**🕐 Office Hours**
-
-Mon–Fri **08:30–17:00** | Lunch: 13:00–13:30
-Saturday, Sunday & Public Holidays — Closed
-
----
-
-**🏢 Walk-In Address**
-
-📍 No. 1, Eton Road, Park Town 2193, Johannesburg
-
----
-
-> A consular officer will review your query and respond as soon as possible.""",
-        "source": "CGI Johannesburg",
-        "escalation": True
-    },
-
-    "greeting": {
-        "title": "Welcome",
-        "content": """🙏 **Namaste! Welcome to Seva Setu Bot**
-*Your official AI assistant for Indian consular services in South Africa*
-
----
-
-**🏛️ I Can Help You With**
-
-| Service | |
-|---|---|
-| 🛂 Passport | New, renewal, lost/damaged, Tatkal |
-| ✈️ Indian Visa | Tourist, business, student, e-Visa |
-| 🇮🇳 OCI / PIO Card | Lifelong visa for persons of Indian origin |
-| 📋 Police Clearance (PCC) | For immigration or employment abroad |
-| 📄 EC / Death Certificate | Emergency certificate and attestation |
-| 📜 Surrender / Renunciation | Surrender Indian passport |
-| 💍 Marriage Certificate | Registration and attestation |
-| 🗂️ Miscellaneous | Affidavits, power of attorney, apostille |
-| 🏢 Office Info | Hours, address, contact numbers |
-
----
-
-Just type your question or say **"help"** to see everything I can do!""",
-        "source": "Seva Setu Bot"
-    },
-
-    "capabilities": {
-        "title": "Services & Features",
-        "content": """🤖 **Seva Setu Bot — Complete Guide**
-*Official AI assistant for the Consulate General of India, Johannesburg*
-
----
-
-**🏛️ Consular Services**
-
-| # | Service | What It Covers |
-|---|---|---|
-| 1 | 🛂 Passport | New, renewal, lost/damaged, Tatkal — via VFS Global |
-| 2 | ✈️ Indian Visa | Tourist, business, student, medical, e-Visa — via VFS Global |
-| 3 | 📋 PCC | Police Clearance Certificate for immigration / employment |
-| 4 | 🇮🇳 OCI Card | Lifelong multi-entry visa — processed at the Consulate |
-| 5 | 📄 EC / Death Cert | Emergency Certificate and Death Certificate attestation |
-| 6 | 📜 Renunciation | Surrender Indian passport after acquiring foreign nationality |
-| 7 | 💍 Marriage Cert | Register or attest South African marriage for India |
-| 8 | 🗂️ Miscellaneous | Affidavits, power of attorney, apostille, name correction |
-
----
-
-**💬 What You Can Ask Me**
-
-- 📁 Required documents for any service
-- 💰 Fees and processing times
-- 📅 How to book an appointment
-- 🔍 Track your application status
-- 🏢 Office address, timings, and contact info
-- 🚨 Emergency consular assistance
-
----
-
-**✨ Extra Features**
-
-| Feature | Details |
-|---|---|
-| 🌐 20+ Languages | Hindi, Tamil, Zulu, Xhosa, Afrikaans, Arabic, French & more |
-| 🎤 Voice Input | Speak your question in your language |
-| 📷 Document Upload | Auto-scan and extract fields from your documents |
-| 📄 PDF Receipt | Get a tracking ID and PDF summary after each application |
-| 📱 WhatsApp | Same bot available on WhatsApp |
-| 🔒 Secure | All uploads are virus-scanned; sessions are private |
-
----
-
-📞 **Need human help?** +27 11-4828484 | 📧 ccom.jburg@mea.gov.in
-🕐 Mon–Fri 08:30–17:00""",
-        "source": "Seva Setu Bot"
-    },
-
-    "platform_info": {
-        "title": "About Seva Setu Bot",
-        "content": """🌟 **What Makes Seva Setu Bot Different?**
-*The only official AI assistant for the Consulate General of India, Johannesburg*
-
----
-
-**🏆 Seva Setu Bot vs Other Chatbots**
-
-| Feature | ✅ Seva Setu Bot | ❌ Generic Chatbots |
-|---|---|---|
-| Official source | CGI Johannesburg verified | Third-party / unverified |
-| Live consulate data | Scraped from cgijoburg.gov.in | Static or outdated |
-| Guided application flow | Step-by-step + PDF output | Information only |
-| Document upload & scan | Auto-extracts fields | Not supported |
-| 20+ languages | Hindi, Tamil, Zulu, Xhosa & more | English only |
-| Voice input | Speak in your language | Rarely available |
-| WhatsApp support | Same bot on WhatsApp | Web only |
-| Emergency helpline | 24/7 emergency contact | Not available |
-| Cost | 100% Free | Often paid |
-
----
-
-**💰 Pricing — Is This Free?**
-
-> ✅ **Seva Setu Bot is completely free.** No subscription, no sign-up fee, no hidden charges.
-
-The government consulate services have official fees:
-
-| Service | Fee (ZAR) |
-|---|---|
-| Passport 36-page | ZAR 2,280 |
-| Passport 60-page | ZAR 2,655 |
-| Minor / Emergency Passport | ZAR 780 |
-| Indian Visa | Gratis for South African nationals |
-| Birth Registration | Gratis (free) |
-| OCI Card | As per MEA notification |
-| Attestation / Other | As per consular schedule |
-
----
-
-**🔧 Can I Customise the Services?**
-
-These are official government processes — requirements cannot be changed. However, you can personalise your experience:
-
-- 🌐 Choose from **20+ languages**
-- 🎤 Use **voice input** in your language
-- 📷 **Upload documents** for auto-scanning
-- 📋 Follow a **guided step-by-step** application flow
-- 🔍 Ask **specific questions** about your situation
-
----
-
-**🔒 Why Trust This Platform?**
-
-- ✅ **Official** — The only AI assistant endorsed by CGI Johannesburg
-- ✅ **Government-backed** — Data from CGI Joburg, VFS Global & MEA notifications
-- ✅ **Secure** — Every document is virus-scanned before processing
-- ✅ **Private** — Conversations never sold or shared
-- ✅ **Transparent** — Always directs to official government portals
-- ⚠️ **Fraud Alert** — The Consulate NEVER calls asking for money.
-
----
-
-**🚀 How to Get Started**
-
-1. **Select language** — click the 🌐 flag button at the top
-2. **Ask your question** — type naturally, e.g. *"I need to renew my passport"*
-3. **Follow the guided flow** — the bot collects your details step by step
-4. **Upload documents** — use the 📷 camera or 📎 upload button when prompted
-5. **Receive your PDF** — get a tracking ID and summary upon submission
-
----
-
-📞 **Consulate:** +27 11-4828484 / +27 11 581 9800 *(24/7 emergency)*
-📧 ccom.jburg@mea.gov.in | 🕐 Mon–Fri 08:30–17:00""",
-        "source": "Seva Setu Bot — CGI Johannesburg Official"
-    },
-
-    "language_switch": {
-        "title": "Language Switch",
-        "content": "🌐 Switching language for you...",
-        "source": "Seva Setu Bot"
-    }
-}
-
-
-# Maps common language names (lower-case) → language code used by the frontend
+# Platform-default name → code map used when a tenant hasn't configured
+# its own ``supported_languages``. Tenants extend or override this via
+# ``bot_config.supported_languages[].name``/``native_name``/``aliases``.
 LANGUAGE_NAME_TO_CODE = {
     "english": "en",
     "hindi": "hi", "हिंदी": "hi", "हिन्दी": "hi",
@@ -898,32 +372,152 @@ LANGUAGE_NAME_TO_CODE = {
 }
 
 
-def detect_target_language(text: str):
-    """Extract the target language code from a language-switch message. Returns None if not found."""
+def _build_tenant_lang_map(supported_languages: list) -> dict:
+    """Build a {name_lower: code} map from a tenant's supported_languages
+    list. Includes the English label, native script label, and any
+    operator-supplied aliases. Empty / malformed rows are skipped."""
+    out: dict = {}
+    for entry in (supported_languages or []):
+        if not isinstance(entry, dict):
+            continue
+        code = (entry.get("code") or "").strip().lower()
+        if not code:
+            continue
+        for raw in (entry.get("name"), entry.get("native_name"), *(entry.get("aliases") or [])):
+            label = (str(raw) if raw else "").strip().lower()
+            if label:
+                out[label] = code
+    return out
+
+
+async def detect_target_language(text: str, company_id: Optional[str] = None):
+    """Extract the target language code from a language-switch message.
+
+    When ``company_id`` is supplied the tenant's configured
+    ``supported_languages`` map is consulted first (so e.g. a tenant who
+    serves only English + Hindi never accidentally matches "Tamil" in
+    free text). Returns None if nothing matches.
+    """
+    if not text:
+        return None
     text_lower = text.lower()
-    for name, code in LANGUAGE_NAME_TO_CODE.items():
-        if name in text_lower:
+
+    tenant_map: dict = {}
+    if company_id:
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            tenant_map = _build_tenant_lang_map(cfg.supported_languages or [])
+        except Exception:
+            tenant_map = {}
+
+    # Tenant map first — tenants can both add aliases and (by leaving rows
+    # out) implicitly disable detection of languages they don't serve.
+    for name, code in tenant_map.items():
+        if name and name in text_lower:
             return code
+    # Fall back to the platform map only if the tenant didn't configure any
+    # languages (legacy tenants) — avoid surprising cross-tenant matches.
+    if not tenant_map:
+        for name, code in LANGUAGE_NAME_TO_CODE.items():
+            if name in text_lower:
+                return code
     return None
+
+
+# ── Per-tenant intent-keyword cache ─────────────────────────────────────────
+# Populated by ``preload_intent_keywords(company_id)`` at request entry.
+# Each entry is a copy of ``INTENT_PATTERNS`` with each category's
+# ``keywords`` list **replaced** by the tenant's override when present.
+# Sync ``classify()`` reads from this cache so we don't pay an async
+# bot_config lookup on every classification.
+_TENANT_INTENT_PATTERNS: Dict[str, Dict[IntentCategory, dict]] = {}
+
+
+def _category_for_name(name: str) -> Optional[IntentCategory]:
+    """Resolve a stringy intent name (from bot_config keys) to the enum.
+
+    Accepts upper/lower/mixed case. Returns None for unknown names so
+    tenant typos surface gracefully (logged, ignored) instead of crashing.
+    """
+    if not name:
+        return None
+    norm = str(name).strip().upper()
+    try:
+        return IntentCategory[norm]
+    except KeyError:
+        return None
+
+
+def _build_tenant_intent_patterns(tenant_overrides: Dict[str, list]) -> Dict[IntentCategory, dict]:
+    """Merge tenant ``intent_keywords`` into a copy of ``INTENT_PATTERNS``.
+
+    Per-category semantics match ``preload_flow_keywords`` in
+    application_flow: when the tenant provides a non-empty keyword list
+    for a category, it **replaces** the platform default for that category.
+    Categories the tenant didn't mention keep their platform default.
+    """
+    merged: Dict[IntentCategory, dict] = {}
+    for cat, cfg in INTENT_PATTERNS.items():
+        merged[cat] = dict(cfg)  # shallow copy is enough — only `keywords` is replaced
+    for name, kws in (tenant_overrides or {}).items():
+        cat = _category_for_name(name)
+        if not cat or cat not in merged:
+            logger.debug("[intent_classifier] tenant intent override ignored — unknown category %r", name)
+            continue
+        clean = [str(k).lower() for k in (kws or []) if k]
+        if clean:
+            merged[cat] = {**merged[cat], "keywords": clean}
+    return merged
+
+
+async def preload_intent_keywords(company_id: Optional[str]) -> None:
+    """Populate the per-tenant intent-pattern cache. Call once per request
+    before invoking the sync ``classify_intent`` helper. Safe to call
+    repeatedly — relies on bot_config's own 60s cache.
+    """
+    if not company_id:
+        return
+    try:
+        from services.bot_config import get_bot_config
+        cfg = await get_bot_config(company_id)
+        overrides = (cfg.raw or {}).get("intent_keywords") or {}
+        if overrides:
+            _TENANT_INTENT_PATTERNS[company_id] = _build_tenant_intent_patterns(overrides)
+    except Exception as exc:
+        logger.debug("[preload_intent_keywords] %s: %s", company_id, exc)
+
+
+def _resolve_patterns(tenant_id: Optional[str]) -> Dict[IntentCategory, dict]:
+    """Resolved INTENT_PATTERNS for the request — tenant override → platform."""
+    if tenant_id and tenant_id in _TENANT_INTENT_PATTERNS:
+        return _TENANT_INTENT_PATTERNS[tenant_id]
+    return INTENT_PATTERNS
 
 
 class IntentClassifier:
     """
-    Rule-based intent classifier for consular queries.
+    Rule-based intent classifier.
     Reduces LLM calls for common, deterministic queries.
+
+    Tenants override the keyword lists per category via
+    ``tenant_bot_config.intent_keywords`` (see ``preload_intent_keywords``
+    above). Without an override, the platform defaults in
+    ``INTENT_PATTERNS`` fire.
     """
-    
+
     def __init__(self):
         self.patterns = INTENT_PATTERNS
-        self.responses = STRUCTURED_RESPONSES
         self.classification_count = 0
         self.llm_fallback_count = 0
-    
-    def classify(self, text: str) -> IntentResult:
+
+    def classify(self, text: str, tenant_id: Optional[str] = None) -> IntentResult:
         """
         Classify user intent from text.
-        
+
         Returns IntentResult with category, confidence, and whether LLM is needed.
+        ``tenant_id`` reads the cache populated by
+        :py:func:`preload_intent_keywords` for per-tenant keyword overrides.
         """
         if not text or len(text.strip()) < 2:
             return IntentResult(
@@ -931,19 +525,21 @@ class IntentClassifier:
                 confidence=0.0,
                 requires_llm=True
             )
-        
+
         text_lower = text.lower().strip()
         # Strip leading/trailing non-word punctuation so "hi'", "hello.", "hi!!!"
         # match the same patterns as "hi" — keeps interior punctuation intact.
         text_lower = re.sub(r"^[^\w]+|[^\w]+$", "", text_lower)
         self.classification_count += 1
 
+        patterns = _resolve_patterns(tenant_id)
+
         best_match = None
         best_score = 0.0
         matched_keywords = []
 
         # Check each intent category
-        for category, config in self.patterns.items():
+        for category, config in patterns.items():
             score, keywords = self._calculate_match_score(text_lower, config)
 
             if score > best_score:
@@ -987,7 +583,7 @@ class IntentClassifier:
         for _exact_cat in (IntentCategory.GREETING, IntentCategory.CAPABILITIES,
                            IntentCategory.PLATFORM_INFO, IntentCategory.LANGUAGE_SWITCH):
             if best_match == _exact_cat:
-                for pat in self.patterns[_exact_cat].get("patterns", []):
+                for pat in patterns[_exact_cat].get("patterns", []):
                     if re.search(pat, text_lower, re.IGNORECASE):
                         requires_llm = False
                         break
@@ -995,9 +591,16 @@ class IntentClassifier:
 
         # Safety net: short messages starting with a greeting word still resolve
         # to GREETING even if the pattern missed (e.g. "hii", "hellooo there").
+        # The platform default greeting set covers the common surfaces;
+        # tenants who need different greetings (e.g. "salaam", "hola") add
+        # them via intent_keywords.GREETING.
         if requires_llm and len(text_lower) <= 25:
-            for _g in ("namaste", "hello", "hey", "hi"):
-                if text_lower.startswith(_g):
+            _greeting_starts = patterns.get(IntentCategory.GREETING, {}).get("keywords") or []
+            # Take the first 6 short tokens as the "startswith" set to keep
+            # the safety net cheap.
+            _safety_net = [g for g in _greeting_starts if len(g) <= 12][:6] or ["hello", "hey", "hi"]
+            for _g in _safety_net:
+                if text_lower.startswith(_g.lower()):
                     best_match = IntentCategory.GREETING
                     requires_llm = False
                     matched_keywords = [_g]
@@ -1005,23 +608,23 @@ class IntentClassifier:
 
         if requires_llm:
             self.llm_fallback_count += 1
-        
+
         # Check for subcategory (e.g., visa type)
         subcategory = None
         if best_match == IntentCategory.VISA:
             subcategory = self._detect_visa_type(text_lower)
-        
+
         # Check if escalation is needed
         escalation_needed = False
-        if best_match and self.patterns.get(best_match, {}).get("escalation"):
+        if best_match and patterns.get(best_match, {}).get("escalation"):
             escalation_needed = True
-        
+
         result = IntentResult(
             category=best_match or IntentCategory.UNKNOWN,
             subcategory=subcategory.value if subcategory else None,
             confidence=best_score,
             keywords_matched=matched_keywords,
-            suggested_response_key=self.patterns.get(best_match, {}).get("response_key"),
+            suggested_response_key=patterns.get(best_match, {}).get("response_key"),
             requires_llm=requires_llm,
             escalation_needed=escalation_needed
         )
@@ -1075,10 +678,6 @@ class IntentClassifier:
         
         return VisaType.UNKNOWN
     
-    def get_structured_response(self, response_key: str) -> Optional[Dict]:
-        """Get pre-defined structured response"""
-        return self.responses.get(response_key)
-    
     def get_stats(self) -> Dict:
         """Get classifier statistics"""
         total = self.classification_count or 1
@@ -1094,24 +693,13 @@ class IntentClassifier:
 intent_classifier = IntentClassifier()
 
 
-def classify_intent(text: str) -> IntentResult:
-    """Convenience function to classify intent"""
-    return intent_classifier.classify(text)
+def classify_intent(text: str, tenant_id: Optional[str] = None) -> IntentResult:
+    """Convenience function to classify intent.
+
+    Pass ``tenant_id`` to apply per-tenant ``intent_keywords`` overrides
+    (the cache must have been primed via :py:func:`preload_intent_keywords`
+    earlier in the request — usually at the route entry-point).
+    """
+    return intent_classifier.classify(text, tenant_id=tenant_id)
 
 
-def get_deterministic_response(intent_result: IntentResult) -> Optional[str]:
-    """
-    Get deterministic response if available.
-    Returns None if LLM should handle it.
-    """
-    if intent_result.requires_llm:
-        return None
-    
-    if not intent_result.suggested_response_key:
-        return None
-    
-    response_data = intent_classifier.get_structured_response(intent_result.suggested_response_key)
-    if not response_data:
-        return None
-    
-    return response_data.get("content")

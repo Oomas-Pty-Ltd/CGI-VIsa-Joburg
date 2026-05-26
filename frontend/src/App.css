@@ -1,20 +1,23 @@
+/* ─────────────────────────────────────────────────────────────────────
+   App-level CSS. Almost all styling is Tailwind utilities + the
+   semantic tokens declared in `index.css`. This file is reserved for
+   custom animations and a tiny set of accessibility / motion overrides
+   that can't be expressed as utility classes.
+   ──────────────────────────────────────────────────────────────────── */
+
 .consular-bot {
     min-height: 100vh;
 }
+
+/* ── Avatar / mic pulse (consumer chat) ── */
 
 .avatar-pulse {
     animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
-    0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.8;
-        transform: scale(1.05);
-    }
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.8; transform: scale(1.05); }
 }
 
 .mic-active {
@@ -24,11 +27,11 @@
 @keyframes mic-pulse {
     0%, 100% {
         transform: scale(1);
-        box-shadow: 0 0 0 0 rgba(224, 111, 44, 0.7);
+        box-shadow: 0 0 0 0 hsl(var(--primary) / 0.55);
     }
     50% {
         transform: scale(1.1);
-        box-shadow: 0 0 0 20px rgba(224, 111, 44, 0);
+        box-shadow: 0 0 0 20px hsl(var(--primary) / 0);
     }
 }
 
@@ -38,31 +41,41 @@
     100% { transform: translateX(300%); width: 40%; }
 }
 
-.step-line-active {
-    background: linear-gradient(90deg, #E06F2C 0%, #2E8B57 100%);
+/* ── Reduced motion: kill anything decorative when the OS asks ── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .avatar-pulse, .mic-active, .animate-pulse, .animate-bounce {
+        animation: none !important;
+    }
 }
+
+/* ── Touch-target minimum for buttons + radio/checkbox ── */
+button,
+[role="button"] {
+    min-height: 36px;
+}
+
+/* ── Legacy classes still used by ConsularBot (will move to tokens
+   when the consumer-chat redesign sprint runs).
+   ──────────────────────────────────────────────────────────────────── */
 
 .glass-card {
-    background: rgba(255, 255, 255, 0.95);
+    background: hsl(var(--card) / 0.95);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(224, 111, 44, 0.1);
+    border: 1px solid hsl(var(--border));
 }
 
-.admin-sidebar {
-    background: linear-gradient(180deg, #1A2E40 0%, #0F172A 100%);
-}
-
-/* ====================================================================
-   ACCESSIBILITY UTILITIES
-   ==================================================================== */
-
-/* Skip Link - Keyboard Navigation */
 .skip-link {
     position: absolute;
     top: -50px;
     left: 16px;
-    background: #1A2E40;
-    color: white;
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
     padding: 12px 24px;
     z-index: 9999;
     text-decoration: none;
@@ -74,115 +87,6 @@
 
 .skip-link:focus {
     top: 0;
-    outline: 3px solid #E06F2C;
+    outline: 3px solid hsl(var(--ring));
     outline-offset: 2px;
-}
-
-/* Screen Reader Only */
-.sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-}
-
-.sr-only-focusable:focus {
-    position: static;
-    width: auto;
-    height: auto;
-    padding: inherit;
-    margin: inherit;
-    overflow: visible;
-    clip: auto;
-    white-space: normal;
-}
-
-/* Enhanced Focus Indicators */
-*:focus-visible {
-    outline: 3px solid #E06F2C;
-    outline-offset: 2px;
-    border-radius: 4px;
-}
-
-button:focus-visible,
-[role="button"]:focus-visible,
-a:focus-visible {
-    outline: 3px solid #E06F2C;
-    outline-offset: 3px;
-    box-shadow: 0 0 0 6px rgba(224, 111, 44, 0.15);
-}
-
-/* Reduced Motion Support */
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-        scroll-behavior: auto !important;
-    }
-    
-    .avatar-pulse,
-    .mic-active,
-    .animate-pulse,
-    .animate-bounce {
-        animation: none !important;
-    }
-}
-
-/* High Contrast Mode Support */
-@media (prefers-contrast: high) {
-    .glass-card {
-        background: white;
-        border: 2px solid #1A2E40;
-    }
-    
-    button, input, textarea, select {
-        border: 2px solid currentColor !important;
-    }
-}
-
-/* Minimum Touch Target Size - 44x44px */
-button,
-[role="button"],
-input[type="checkbox"],
-input[type="radio"] {
-    min-width: 44px;
-    min-height: 44px;
-}
-
-/* Improved Link Visibility */
-a:not(.skip-link) {
-    text-decoration-thickness: 2px;
-    text-underline-offset: 3px;
-}
-
-a:hover {
-    text-decoration-thickness: 3px;
-}
-
-/* Form Field Focus States */
-input:focus,
-textarea:focus,
-select:focus {
-    border-color: #E06F2C;
-    box-shadow: 0 0 0 3px rgba(224, 111, 44, 0.2);
-}
-
-/* Error State Styling */
-input[aria-invalid="true"],
-textarea[aria-invalid="true"] {
-    border-color: #B91C1C;
-    background-color: #FEF2F2;
-}
-
-input[aria-invalid="true"]:focus,
-textarea[aria-invalid="true"]:focus {
-    box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.2);
 }

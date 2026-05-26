@@ -201,7 +201,6 @@ async def _crawl_and_store(
         _run_deep_crawl,
         _deep_scan_cache,
         _SERVICE_KEYWORDS,
-        _DEEP_SCAN_TTL,
     )
     try:
         await _run_deep_crawl(cache_key, keywords, query)
@@ -370,14 +369,14 @@ async def _hybrid_search_impl(query: str, knowledge_base: Dict, tenant_id: str) 
 
     # ── Layer 3: per-keyword deep-scan cache ─────────────────────────
     try:
-        from knowledge_scraper import _deep_scan_cache, _DEEP_SCAN_TTL
+        from knowledge_scraper import _deep_scan_cache, _kb_deep_scan_ttl
         cached = _deep_scan_cache.get(cache_key)
         if cached:
             age = (
                 datetime.now(timezone.utc)
                 - datetime.fromisoformat(cached["scanned_at"])
             ).total_seconds()
-            if age < _DEEP_SCAN_TTL and cached.get("content"):
+            if age < _kb_deep_scan_ttl() and cached.get("content"):
                 logger.debug(f"[HYBRID L3] '{cache_key}' — deep-scan cache hit (age {int(age)}s)")
                 return cached["content"]
     except Exception:

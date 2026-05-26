@@ -24,7 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 class KnowledgeCategory(Enum):
-    """Knowledge base categories"""
+    """Knowledge base categories — platform fallback set.
+
+    Tenants override this list via ``tenant_bot_config.knowledge_categories``.
+    The enum stays for back-compat with internal callers that pass
+    ``KnowledgeCategory.GENERAL`` as a default; everywhere else (admin
+    create/list endpoints) we accept any string in the tenant's resolved
+    category list so a freshly-onboarded tenant can name its own buckets.
+    """
     PASSPORT = "passport"
     VISA = "visa"
     OCI = "oci"
@@ -33,6 +40,22 @@ class KnowledgeCategory(Enum):
     EMERGENCY = "emergency"
     OFFICE = "office"
     GENERAL = "general"
+
+
+# Neutral platform default — used when a tenant hasn't configured
+# ``knowledge_categories`` on bot_config. Mirrors the legacy enum values
+# minus the CGI-tinged ones ("oci", "consular") so a generic tenant
+# doesn't see those in the category dropdown.
+DEFAULT_KNOWLEDGE_CATEGORIES: List[str] = [
+    "general", "fees", "emergency", "office", "announcement", "event", "other",
+]
+
+
+def resolve_knowledge_categories(stored: List[str] | None) -> List[str]:
+    """Return the effective category list for a tenant. Empty/missing
+    ``stored`` falls back to ``DEFAULT_KNOWLEDGE_CATEGORIES``."""
+    out = [str(c).strip().lower() for c in (stored or []) if str(c).strip()]
+    return out or list(DEFAULT_KNOWLEDGE_CATEGORIES)
 
 
 class KnowledgeStatus(Enum):
@@ -48,7 +71,10 @@ class KnowledgeEntry:
     """Knowledge base entry"""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     company_id: Optional[str] = None  # Tenant that owns this entry
-    category: KnowledgeCategory = KnowledgeCategory.GENERAL
+    # Either a ``KnowledgeCategory`` enum member or a free-form string from
+    # the tenant's ``knowledge_categories`` config. ``to_dict`` collapses
+    # both to a plain string for storage.
+    category: Any = KnowledgeCategory.GENERAL
     title: str = ""
     question: str = ""  # FAQ question
     answer: str = ""  # FAQ answer
@@ -70,10 +96,12 @@ class KnowledgeEntry:
     event_status: Optional[str] = None
 
     def to_dict(self) -> Dict:
+        cat = self.category
+        cat_str = cat.value if isinstance(cat, KnowledgeCategory) else str(cat)
         return {
             "id": self.id,
             "company_id": self.company_id,
-            "category": self.category.value,
+            "category": cat_str,
             "title": self.title,
             "question": self.question,
             "answer": self.answer,
@@ -95,592 +123,11 @@ class KnowledgeEntry:
 
 # =====================================================================
 # DEFAULT KNOWLEDGE BASE
-# Source: www.cgijoburg.gov.in (compiled April 2026)
+# Empty by design — every tenant seeds its own knowledge via the Knowledge
+# Base tab in the super-admin UI. Previously this list contained CGI
+# Johannesburg-specific entries that leaked across tenants on first run.
 # =====================================================================
-DEFAULT_KNOWLEDGE = [
-    {
-        "category": "office",
-        "title": "Office Information",
-        "question": "What are the CGI Johannesburg office hours and address?",
-        "answer": """**Consulate General of India, Johannesburg**
-
-**Address:**
-No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road)
-Park Town 2193, PO Box 6805, Johannesburg 2000, South Africa
-
-**Telephone:** +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-**Fax:** +27 11 482 4648 / +27 11 482 8492
-**Email (General):** ccom.jburg@mea.gov.in
-**Email (Consular/OCI appointments):** cons.jburg@mea.gov.in
-**Website:** www.cgijoburg.gov.in
-
-**Office Hours:** Monday–Friday: 08:30 – 17:00 (Lunch: 13:00–13:30)
-
-**VFS Global — Passport & Consular Submissions:**
-2nd Floor, Harrow Court 1, Isle of Houghton Office Park
-Boundary Road, Park Town, Johannesburg – 2198
-Tel: 012 425 3007 / 011 484 0327 | Email: Info.inza@vfshelpline.com
-Submission: 08:00–15:00 | Collection: 11:00–16:00
-
-**Jurisdiction:** Gauteng, North West, Limpopo and Mpumalanga
-**Acting Consul General:** Mr. Harish Kumar""",
-        "keywords": ["office", "address", "hours", "timing", "contact", "location",
-                     "phone", "email", "fax", "parktown", "eton road", "jan smuts",
-                     "vfs", "working hours", "open", "close", "consulate"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "passport",
-        "title": "Passport Services — How to Apply",
-        "question": "How do I apply for or renew my Indian passport in South Africa?",
-        "answer": """**Passport Services — CGI Johannesburg**
-
-All passport services are processed through **VFS Global** (not directly at the Consulate).
-
-**Step 1 — Apply Online:**
-Complete application at: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
-
-**Step 2 — Submit at VFS Global:**
-Indian Visa and Consular Application Centre
-2nd Floor, Harrow Court 1, Isle of Houghton Office Park
-Boundary Road, Park Town, Johannesburg – 2198
-Tel: 012 425 3007 / 011 484 0327
-Submission hours: 08:00–15:00 | Collection: 11:00–16:00
-
-**Processing Time:** Up to one month (if all documents are in order)
-
-**Services Available:**
-• Re-issue on expiry
-• Re-issue for lost/stolen passport (requires FIR/Police Report)
-• Re-issue for damaged passport
-• New passport for minor child born in South Africa
-• Re-issue on change of name/particulars
-• Re-issue on exhaustion of pages
-
-**Photos:** 3 passport-sized photos (5cm x 5cm, coloured, white background)
-**Payment:** EFT or Credit/Debit Card — original proof required; photocopies NOT accepted
-**Applicants may be called for interview** if required by the Consulate.""",
-        "keywords": ["passport", "renewal", "renew", "reissue", "apply", "new passport",
-                     "lost passport", "stolen passport", "damaged passport", "expired passport",
-                     "passport application", "vfs passport", "passportindia"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "fees",
-        "title": "Passport Fees Schedule",
-        "question": "What are the passport fees in South Africa / CGI Johannesburg?",
-        "answer": """**Passport Fees — CGI Johannesburg (as of April 2023)**
-All fees include ICWF (Indian Community Welfare Fund) of ZAR 30.
-
-**36-Page Passport:**
-• Re-issue (expiry / lost / stolen / damaged / name change / exhaustion): **ZAR 2,280**
-
-**60-Page Passport:**
-• Re-issue (expiry / lost / stolen / damaged / name change / exhaustion): **ZAR 2,655**
-
-**Minor Child (new passport — 5-year validity):** **ZAR 780**
-
-**Emergency Travel Document:** **ZAR 780**
-
-**OCI & Other Consular Fees:**
-• Birth Registration: **Gratis (free)**
-• OCI Miscellaneous updates (address/passport details): **Gratis**
-• Fresh OCI Card / PCC / Attestation / Non-Impediment Letter: As per MEA/VFS schedule
-
-**Payment Methods:** EFT or Credit/Debit Card at VFS Global or the Consulate.
-Original proof of payment required — photocopies/scanned copies NOT accepted.""",
-        "keywords": ["fees", "cost", "price", "payment", "charges", "zar", "rand",
-                     "passport fees", "how much", "2280", "2655", "780",
-                     "visa fees", "oci fees", "consular fees", "icwf"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "passport",
-        "title": "Lost or Stolen Passport",
-        "question": "What do I do if my Indian passport is lost or stolen in South Africa?",
-        "answer": """**Lost / Stolen Passport — Steps to Follow:**
-
-1. **File a Police Report** — Obtain original FIR/Police Report from SA Police (10111)
-2. **Apply Online:** https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/
-3. **Submit at VFS Global** with the following documents:
-   • Original FIR/Police Report for lost/stolen passport
-   • 3 passport-sized photographs (5cm x 5cm, white background)
-   • Proof of Indian citizenship (if original passport not available)
-   • Proof of residential address in South Africa
-   • Original proof of fee payment
-4. **Fee:** ZAR 2,280 (36-page) or ZAR 2,655 (60-page), includes ICWF of ZAR 30
-5. **Processing:** Up to one month
-
-**For Emergency Travel (need to travel urgently):**
-An Emergency Travel Document can be issued for a single journey to India.
-Fee: ZAR 780 | Required: Police report, proof of identity, 2 photos, proof of travel.
-
-**VFS Global Address:**
-2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB – 2198
-Tel: 012 425 3007 / 011 484 0327""",
-        "keywords": ["lost passport", "stolen passport", "missing passport", "fir",
-                     "police report", "emergency travel", "emergency document"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "passport",
-        "title": "Minor Child Passport",
-        "question": "How to get an Indian passport for a minor child born in South Africa?",
-        "answer": """**Passport for Minor Child Born in South Africa:**
-
-**Fee:** ZAR 780 (includes ICWF of ZAR 30) — 5-year validity passport issued
-
-**Documents Required:**
-• Completed online application (https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/)
-• 3 passport-sized photographs (5cm x 5cm, white background)
-• Birth registration at the Consulate (obtain this first — it is free)
-• Birth certificate issued by South African Home Department and local hospital
-• Both parents must sign the form at the declaration column
-• For infants: thumb impression in the box on Page 1 and Page 2 after Serial No. 26
-
-**Submit at VFS Global:**
-2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB – 2198
-Tel: 012 425 3007 / 011 484 0327 | Submission: 08:00–15:00
-
-**Note:** Birth must first be registered at the Consulate (free service) before applying for passport.""",
-        "keywords": ["minor passport", "child passport", "baby passport", "infant passport",
-                     "born in south africa", "new passport minor", "child born"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "visa",
-        "title": "Indian Visa for South African Nationals",
-        "question": "How do South African nationals apply for an Indian visa?",
-        "answer": """**Indian Visa — For South African Nationals**
-
-**South African nationals receive Indian visas GRATIS (free of charge).**
-
-**Apply Online:** https://indianvisaonline.gov.in/visa/index.html
-
-**Submit at VFS Global (Visa Centre):**
-1st Floor, Rivonia Village Office Block
-cnr Rivonia Boulevard and Mutual Road, Rivonia, Johannesburg
-Tel: 012 425 3007 / 011 484 0327
-
-**Biometrics:** Mandatory for all regular visa applicants (since 17 July 2017)
-
-**Requirements:**
-• Passport valid for minimum 6 months from date of departure from India
-• At least 2 blank pages in passport
-• Completed online application form
-• Biometrics captured at VFS
-
-**Visa Types Available:** Tourist, Business, Employment, Student, Medical, Research,
-Journalist, Conference, Transit, Entry (X), Medical Attendant, Missionary/Religious Worker
-
-**Special Note:** South African nationals holding diplomatic/official passports are
-exempt from visa for up to 90 days (bilateral agreement).
-
-**No visa applications accepted directly at the Consulate — all through VFS only.**""",
-        "keywords": ["visa", "indian visa", "south african visa", "visit india", "travel india",
-                     "tourist visa", "business visa", "student visa", "medical visa",
-                     "gratis", "free visa", "visa application", "vfs visa"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "visa",
-        "title": "E-Visa Information",
-        "question": "What is e-Visa and how do I apply for it to visit India?",
-        "answer": """**E-Visa for India — South African Nationals (GRATIS)**
-
-South African nationals are eligible for e-Visa at no charge.
-
-**Apply Online:** https://indianvisaonline.gov.in/evisa/tvoa.html
-Apply minimum **5 working days** before departure.
-
-**E-Visa Categories:**
-• **e-Tourist Visa:** 30 days / 1 year / 5 years — Double/Multiple entry; tourism & visiting friends/relatives
-• **e-Business Visa:** 1 year, Multiple entry — business visits
-• **e-Medical Visa:** 60 days, Triple entry — medical treatment in India
-• **e-Medical Attendant Visa:** 60 days, Triple entry — max 2 attendants per e-Medical Visa
-• **e-Conference Visa:** 30 days — attending conferences/seminars
-
-**Key Rules:**
-• e-Visa is linked to specific ports of entry (30+ international airports, 5 seaports)
-• Arrive/depart through designated airports/seaports only
-• Activities can be combined across categories (except e-Conference, which only allows e-Tourist activities)
-
-**No need to visit VFS for e-Visa — apply and receive entirely online.**""",
-        "keywords": ["evisa", "e-visa", "e visa", "online visa", "tourist visa online",
-                     "e tourist", "e business visa", "e medical visa", "e conference"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "oci",
-        "title": "OCI Card Application",
-        "question": "How to apply for an OCI (Overseas Citizen of India) card?",
-        "answer": """**OCI (Overseas Citizen of India) Card**
-
-OCI provides a multi-purpose, multi-entry, life-long visa for India.
-
-**Eligibility:**
-• Person who was an Indian citizen at any time since 26 January 1950
-• Person whose parent/grandparent/great-grandparent was an Indian citizen
-• Spouse of foreign origin of an Indian citizen or OCI holder (marriage registered ≥ 2 years)
-• Minor child where both/one parent is Indian citizen
-• NOT eligible: Pakistan/Bangladesh nationals; foreign military personnel (serving or retired)
-
-**Apply Online:** https://ociservices.gov.in/
-
-**Submit to the Consulate** (appointment required — email: cons.jburg@mea.gov.in):
-• Computer-generated application form with registration number
-• 2 photos (51mm x 51mm) — one pasted on form, one attached separately
-• Proof of present citizenship (current foreign passport)
-• Proof of renunciation of Indian citizenship / surrender certificate
-• Proof of Indian origin (old Indian passport, birth certificate, school certificate, land records)
-• Proof of residential address in SA (utility bill, lease, property papers)
-• For spouse of Indian citizen: marriage certificate + copy of spouse's Indian passport
-
-**Fees:** As per MEA notification (contact Consulate for current fees)
-
-**Important Restrictions:**
-• OCI does NOT permit missionary work, mountaineering, or research without GoI permission
-• Fees are not refunded if OCI is not granted
-• Husband/wife must each claim OCI on strength of their own parents — not each other's""",
-        "keywords": ["oci", "overseas citizen", "indian origin", "oci card", "oci application",
-                     "oci eligibility", "oci documents", "pio to oci", "ociservices"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "consular",
-        "title": "Police Clearance Certificate (PCC)",
-        "question": "How do I apply for a Police Clearance Certificate (PCC)?",
-        "answer": """**Police Clearance Certificate (PCC)**
-
-PCC is required by Indian nationals for immigration, change of nationality,
-employment abroad, or longer stay in another country.
-
-**PCC service is outsourced to VFS Global.**
-
-**Apply Online:** https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-• Select CGI Johannesburg
-• Submit application at VFS Global Johannesburg
-
-**VFS Global Address:**
-2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB – 2198
-Tel: 012 425 3007 / 011 484 0327
-
-**Applicants in:** Gauteng, North West, Limpopo, and Mpumalanga must apply through CGI Johannesburg.
-
-**Check Status:** https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/
-
-**VFS Reference:** https://www.vfsglobal.com/one-pager/India/SouthAfrica/consular-services/""",
-        "keywords": ["pcc", "police clearance", "police clearance certificate",
-                     "clearance certificate", "immigration clearance"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "consular",
-        "title": "Birth Registration",
-        "question": "How do I register the birth of my child (born in South Africa) at the Consulate?",
-        "answer": """**Birth Registration — Children Born in South Africa to Indian Nationals**
-
-**Service is Gratis (free of charge).**
-
-**Required Documents:**
-• Birth certificate issued by South African Home Department
-• Birth certificate from local hospital
-• Indian passport(s) of parent(s)
-
-**Process:**
-• Visit the Consulate directly (not VFS) to register the birth
-• The registered birth certificate is then used for minor passport applications
-
-**Contact:** cons.jburg@mea.gov.in or call +27 11-4828484 / +27 11 581 9800
-**Office Hours:** Mon–Fri 08:30–17:00 (Lunch 13:00–13:30)""",
-        "keywords": ["birth registration", "register birth", "child born", "newborn",
-                     "birth certificate", "register child"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "consular",
-        "title": "Document Attestation",
-        "question": "How do I get Indian documents attested at the Consulate?",
-        "answer": """**Document Attestation — CGI Johannesburg**
-
-**For Indian Nationals (Academic Degrees & General Documents):**
-• Indian documents must first be **apostilled by MEA (Ministry of External Affairs, India)**
-• MEA Apostille: http://www.mea.gov.in/apostille.htm
-• Submit apostilled/attested documents with application to the Consulate
-
-**General Power of Attorney (GPA/PoA):**
-• For Indian nationals wishing to attest GPA/PoA for use in India
-• Bring original documents and self-attested copies
-• Fee as per consular schedule
-
-**For Foreign Nationals:**
-• Attestation of Indian documents for use in South Africa
-• Applicable for legal, business, or personal documents
-
-**One and the Same Certificate:**
-• Issued when a name spelling difference exists across your documents
-• Bring self-attested copies of all documents showing name variations
-
-**Contact:** ccom.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800""",
-        "keywords": ["attestation", "attest", "apostille", "document attestation",
-                     "power of attorney", "gpa", "poa", "notarize", "one and the same"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "emergency",
-        "title": "Emergency Travel Document & Assistance",
-        "question": "How to get emergency consular assistance or an emergency travel document?",
-        "answer": """**Emergency Consular Assistance — CGI Johannesburg**
-
-**Consulate Contact (office hours Mon–Fri 08:30–17:00):**
-📞 +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800
-📧 ccom.jburg@mea.gov.in
-
-**For emergencies involving Indian nationals:**
-• Indians in distress (arrest, detention, accident, death)
-• Lost/stolen passports requiring urgent travel
-• Medical emergencies
-
-**Emergency Travel Document (ETD):**
-• Issued when valid Indian passport not available due to loss/theft/damage
-• Valid for **single journey to India only**
-• **Fee:** ZAR 780 (includes ICWF)
-• Required: Police report, proof of identity, 2 photographs, proof of travel booking
-
-**Pravasi Bharatiya Sahayata Kendra (for Indians abroad in distress):**
-Toll Free (India only): 1800 11 3090
-WhatsApp: +91-7428 3211 44
-Email: helpline@mea.gov.in
-
-**Local Emergency (SA Police):** 10111
-**Ambulance / Fire:** 10177
-
-⚠️ The Consulate NEVER calls asking for money. Report scam calls to local police.""",
-        "keywords": ["emergency", "urgent", "help", "crisis", "distress",
-                     "emergency travel document", "etd", "indian in trouble",
-                     "arrested", "accident", "death", "pravasi"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "consular",
-        "title": "Other Consular Services",
-        "question": "What other services does CGI Johannesburg offer?",
-        "answer": """**Other Services at CGI Johannesburg:**
-
-**Non-Impediment Letter:**
-• Issued to Indian nationals wishing to marry a foreign national
-• Certifies the applicant is not married and is free to marry
-• Required: Indian passport, proof of address, application form
-
-**NOC for Child Passport in India:**
-• Required when one parent applies for a child's passport in India
-• Other parent (in South Africa) obtains NOC from the Consulate
-• Required: Passport copies of both parents, child's birth certificate, application form
-
-**Translation of Indian Driving Licence:**
-• Certified translation for use in South Africa
-
-**Registration of NRIs/PIOs/OCIs:**
-• Indian nationals in South Africa encouraged to register with the Consulate
-• Helps in emergencies and for consular assistance
-
-**Tracing the Roots Programme:**
-• For persons of Indian origin to trace their ancestral roots in India
-• MEA facilitates visits to villages/districts of origin
-• Contact Consulate for application process
-
-**Open House (Grievance Redressal):**
-• Consulate periodically holds open house sessions
-• Dates announced on website and social media
-
-**Contact for appointments/enquiries:**
-📞 +27 11-4828484 / +27 11 581 9800
-📧 cons.jburg@mea.gov.in (consular services & OCI)
-📧 ccom.jburg@mea.gov.in (general)""",
-        "keywords": ["non impediment", "noc", "driving licence", "driving license translation",
-                     "register nri", "tracing roots", "open house", "grievance",
-                     "marriage abroad", "child noc", "consular services"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "general",
-        "title": "Trade & Commerce — India–South Africa Bilateral Relations",
-        "question": "What are the trade and commercial relations between India and South Africa?",
-        "answer": """**Trade & Commerce — India–South Africa Bilateral Relations**
-
-India and South Africa established diplomatic relations in **1993**. Both countries are members of **BRICS** and the **G20**.
-
-**South Africa at a Glance:**
-• Population: Over 64 million | Area: 1.22 million sq km
-• GDP: Services 62.75% | Industry 24.46% | Growth rate (2024): ~1.0%
-• Key resources: World's largest producer of platinum, vanadium, chromium, and manganese
-• Financial capital of Africa: Johannesburg
-
-**India–South Africa Trade Facts:**
-• Indian firms have invested approximately **USD 10 billion** in South Africa
-• More than **150 Indian companies** operating in South Africa
-• Major Indian MNCs: TATA, Mahindra, Vedanta, Jindal, Cipla, Sun Pharma (Ranbaxy), TCS, WIPRO, Zensar, TechMahindra
-• Indian companies employ approximately **18,000 South Africans**
-• Key bilateral sectors: IT, Mining, Infrastructure, Automobiles, Pharmaceuticals, Agriculture, Heavy Machinery
-
-**Double Taxation Avoidance Agreement (DTAA):**
-Entered into force on **28 November 1997** (Notification No. GSR 198(E), dated 21-04-1998)
-
-**Services for Indian Companies:**
-Trade advisory, market intelligence, business meeting facilitation, partner identification, export/import guidance, exhibition support.
-
-**Services for South African Companies:**
-Market entry advisory for India, introductions to Indian counterparts, investment/regulatory information, Buyer-Seller Meets (BSM) support.
-
-**Contact:** ccom.jburg@mea.gov.in | +27 11-4828484 / +27 11 581 9800""",
-        "keywords": ["trade", "commerce", "bilateral", "india south africa trade", "brics", "g20",
-                     "investment", "indian companies", "tata", "mahindra", "dtaa", "double taxation",
-                     "business south africa", "indian business", "wipro", "tcs"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "general",
-        "title": "Important Links & Online Portals",
-        "question": "What are the important links and online portals for CGI Johannesburg services?",
-        "answer": """**Important Links & Online Portals — CGI Johannesburg**
-
-| Service | Link |
-|---|---|
-| Consulate Website | www.cgijoburg.gov.in |
-| Passport Application | https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ |
-| Regular Visa Application | https://indianvisaonline.gov.in/visa/index.html |
-| E-Visa Application | https://indianvisaonline.gov.in/evisa/tvoa.html |
-| OCI Services | https://ociservices.gov.in/ |
-| PCC Application | https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ |
-| VFS Global South Africa | https://services.vfsglobal.com/zaf/en/ind/ |
-| Passport Status Check | https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ |
-| MEA Apostille | http://www.mea.gov.in/apostille.htm |
-| Ministry of External Affairs | www.mea.gov.in |
-| High Commission of India, Pretoria | www.hcipretoria.gov.in |
-
-**Key Contacts:**
-• **General Email:** ccom.jburg@mea.gov.in
-• **Consular / OCI Email:** cons.jburg@mea.gov.in
-• **VFS Johannesburg:** 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town — Tel: 012 425 3007
-
-**Pravasi Bharatiya Sahayata Kendra (Indians abroad in distress):**
-Toll Free (India): 1800 11 3090 | WhatsApp: +91-7428 3211 44 | helpline@mea.gov.in
-
-**Office of Protector General of Emigrants:**
-pge@mea.gov.in | diroe1@mea.gov.in
-
-**Social Media:**
-Twitter/X: @indiainjoburg | Facebook: IndiaInSouthAfricaJohannesburg
-Instagram: @indiainjohannesburg | YouTube: @Indiainjoburg""",
-        "keywords": ["links", "portal", "website", "online", "url", "apply online",
-                     "passportindia", "indianvisaonline", "ociservices", "vfs global",
-                     "status check", "social media", "twitter", "facebook", "instagram"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "general",
-        "title": "Latest News & Events — CGI Johannesburg (April 2026)",
-        "question": "What are the latest news and events from CGI Johannesburg?",
-        "answer": """**Latest News & Events — CGI Johannesburg (as of April 2026)**
-
-**Recent Activities:**
-• **11 Mar 2026:** ACG Mr. Harish Kumar inaugurates the 11th Agritec South Africa with MEC: Agriculture Ms. Vuyiswa Ramokgopa.
-• **27 Jan 2026:** India–South Africa A.I. Dialogue — 100+ participants, in preparation for India A.I. Impact Summit.
-• **29 Jan 2026:** Consulate hosts the 77th Republic Day evening reception.
-• **26 Jan 2026:** India's 77th Republic Day — Flag Unfurling at Chancery.
-• **30 Jan 2026:** Hindi Poetry and Costume contest on Vishwa Hindi Diwas.
-• **25 Dec 2025:** ACG Mr. Harish Kumar at St. Thomas Indian Orthodox Church, Midrand.
-• **24 Dec 2025:** Consulate team visits children of Leratong Joy for One Foundation.
-• **23 Oct 2025:** Commercial Representative addresses Delegates at JCCI Annual Conference 2025.
-• **08 Oct 2025:** CG Shri Mahesh Kumar welcomes Shri Harivansh Narayan Singh (Chairman, Rajya Sabha).
-• **05 Oct 2025:** Speaker of Delhi Legislative Assembly plants sapling under Ek Ped Maa Ke Naam.
-
-**Recent Press Releases:**
-• India–South Africa A.I. Dialogue (Jan 2026)
-• Launch of Study in India Portal (SII) & e-Student Visa for Foreign Students (Sep 2025)
-• Viksit Bharat Run (Sep 2025)
-• All-party Indian Parliamentary delegation led by Hon. Ms. Supriya Sule (May 2025)
-• Digitization of Disembarkation Card for Foreign Nationals Visiting India
-
-**Upcoming / Recent Notices:**
-• Tender — Renovation of rooms at the Consulate (Apr 01, 2026)
-• Tender — Security Services (Nov 11, 2025)
-• Tender — Boundary Wall Reconstruction (Nov 01, 2025)
-• 88th Edition of Know India Programme (KIP)
-• 61st IHGF Delhi Fair (Spring 2026), India Expo Centre, Greater Noida
-• SEPC Buyer-Seller Meet in Johannesburg (09–10 Mar 2026)
-
-**Acting Consul General:** Mr. Harish Kumar
-For latest updates: www.cgijoburg.gov.in | @indiainjoburg""",
-        "keywords": ["news", "events", "latest", "recent", "republic day", "agritec",
-                     "consul general", "harish kumar", "know india", "kip", "tender",
-                     "press release", "ai dialogue", "vishwa hindi diwas"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    },
-    {
-        "category": "general",
-        "title": "Frequently Asked Questions (FAQ)",
-        "question": "Frequently asked questions about CGI Johannesburg services",
-        "answer": """**Frequently Asked Questions — CGI Johannesburg**
-
-**Q: How do I apply for a new/renewal/lost/damaged passport?**
-A: Complete online application at https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/ and submit at VFS Global with prior appointment.
-
-**Q: What is the timeframe for passport reissue?**
-A: Approximately 3–4 weeks, provided all documents are in place and approved by Indian authorities.
-
-**Q: What is a damaged passport?**
-A: Ink/water spill, scribbling, torn paper, missing data page, spine damage, or thread out.
-
-**Q: How do I apply for PCC?**
-A: Apply online at https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ — submit at VFS Global Johannesburg.
-
-**Q: How do I get Indian documents attested?**
-A: Indian documents must first be apostilled by MEA India — see http://www.mea.gov.in/apostille.htm
-
-**Q: Is my foreign spouse entitled to an OCI card?**
-A: Yes, if the marriage has been registered and continuously subsisted for not less than two years.
-
-**Q: Are foreign military personnel eligible for OCI?**
-A: No. Foreign military personnel, whether serving or retired, are NOT entitled to an OCI card.
-
-**Q: What should I do if I find a mistake in my passport?**
-A: Visit the Consulate immediately and return the passport for rectification. Additional fees may apply.
-
-**Q: What is a minor vs major name change?**
-A: Minor = spelling discrepancy without total phonetic change (e.g., Rakesh vs Rakash). Major = complete or phonetically different name change.
-
-**Q: How do I apply for an emergency visa?**
-A: Apply online at www.indianvisaonline.gov.in and submit in person at VFS Global Johannesburg. Tel: 012 425 3007.
-
-**Q: Can I apply for OCI on my spouse's eligibility?**
-A: No. Husband and wife must each claim OCI on the strength of their own parents/grandparents.
-
-**Q: How do I check passport/PCC status?**
-A: Passport: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/ | PCC: https://www.cgijoburg.gov.in/page/status-of-indian-passport-pcc/""",
-        "keywords": ["faq", "frequently asked", "questions", "how to", "what is",
-                     "damaged passport", "name change", "emergency visa", "spouse oci",
-                     "military oci", "passport mistake", "passport status", "pcc status"],
-        "source": "https://www.cgijoburg.gov.in",
-        "source_verified": True
-    }
-]
+DEFAULT_KNOWLEDGE = []
 
 
 class KnowledgeService:
@@ -693,19 +140,14 @@ class KnowledgeService:
         self.initialized = False
     
     async def initialize(self):
-        """Initialize the default tenant's knowledge base.
+        """Initialise the default tenant's knowledge base.
 
-        The DEFAULT_KNOWLEDGE seed is CGI-Johannesburg-specific so it's
-        scoped to ``config.COMPANY_ID`` (the env-configured default
-        tenant). New tenants don't get any auto-seed — they upload their
-        own data via the super-admin knowledge endpoints. This keeps the
-        seed from leaking into other tenants' searches.
-
-        Flow:
-        1. If the default tenant's KB is empty → attempt live scrape
-           of https://www.cgijoburg.gov.in/ and store as one 'live' entry.
-        2. Always upsert DEFAULT_KNOWLEDGE entries (PDF-verified data) so
-           corrections are applied on every restart regardless of live scrape.
+        DEFAULT_KNOWLEDGE is empty by design — every tenant supplies its own
+        entries via the super-admin Knowledge Base tab. On first start, if
+        the default tenant's KB is empty AND it has scrape sources
+        configured on bot_config, a live scrape is performed and stored as
+        a single ``live`` entry. New tenants never get any auto-seeded
+        content — they upload their own data via the super-admin endpoints.
         """
         if self.initialized:
             return
@@ -723,21 +165,22 @@ class KnowledgeService:
 
         # ── Step 1: Live scrape on first run (empty KB for default tenant) ──
         if count == 0:
-            logger.info("[KB INIT] Default tenant KB empty — attempting live scrape of cgijoburg.gov.in")
+            logger.info("[KB INIT] Default tenant KB empty — attempting live scrape from configured sources")
             try:
-                scraped = await scrape_cgi_joburg()
+                scraped = await scrape_cgi_joburg(_default_tenant)
                 page_content = scraped.get("page_content", "")
                 pages_crawled = scraped.get("pages_crawled", 0)
+                src_url = scraped.get("source", "")
 
                 if page_content and pages_crawled > 0:
                     live_entry = KnowledgeEntry(
                         company_id=_default_tenant,
                         category=KnowledgeCategory.GENERAL,
-                        title="Live Scraped Content — CGI Johannesburg",
-                        question="What is the latest information from the CGI Johannesburg website?",
+                        title="Live Scraped Content",
+                        question="What is the latest information from the primary website?",
                         answer=page_content[:8000],  # cap to avoid oversized docs
-                        keywords=["cgi", "consulate", "johannesburg", "live", "latest"],
-                        source="https://www.cgijoburg.gov.in/",
+                        keywords=["live", "latest", "official"],
+                        source=src_url or "primary",
                         source_verified=True,
                         created_by="system_scraper"
                     )
@@ -783,8 +226,7 @@ class KnowledgeService:
         """Search knowledge base for relevant entries within a tenant.
 
         ``company_id`` is required — searching cross-tenant would mix one
-        tenant's FAQs into another tenant's bot responses (e.g. CGI
-        Johannesburg answers showing up for a Mumbai consulate user)."""
+        tenant's FAQs into another tenant's bot responses."""
         await self.initialize()
 
         db = await get_database()
@@ -793,7 +235,7 @@ class KnowledgeService:
         # Build search filter (tenant-scoped, active entries only)
         filter_query: Dict[str, Any] = {"status": "active", "company_id": company_id}
         if category:
-            filter_query["category"] = category.value
+            filter_query["category"] = category.value if isinstance(category, KnowledgeCategory) else str(category)
 
         # Get all active entries (500 gives full coverage for large PDF knowledge bases)
         entries = await db.knowledge_base.find(
@@ -1047,7 +489,7 @@ class KnowledgeService:
 
         filter_query: Dict[str, Any] = {}
         if category:
-            filter_query["category"] = category.value
+            filter_query["category"] = category.value if isinstance(category, KnowledgeCategory) else str(category)
         if status:
             filter_query["status"] = status.value
         if company_id is not None:

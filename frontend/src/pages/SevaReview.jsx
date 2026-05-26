@@ -119,12 +119,13 @@ export default function SevaReview() {
   const fields = data?.fields || [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4">
       <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="bg-[#000080] rounded-t-2xl px-6 py-4 text-center">
+        {/* Header — tenant-neutral. Operators who want brand colours can
+            override via Tailwind theme tokens later. */}
+        <div className="bg-[#1A2E40] rounded-t-2xl px-6 py-4 text-center">
           <h1 className="text-white font-bold text-lg">Review Your Application</h1>
-          <p className="text-[#FF9933] text-sm mt-0.5">Seva Setu — Consulate General of India, Johannesburg</p>
+          {data?.brand && <p className="text-white/80 text-sm mt-0.5">{data.brand}</p>}
         </div>
 
         <div className="bg-white rounded-b-2xl shadow-xl p-6">

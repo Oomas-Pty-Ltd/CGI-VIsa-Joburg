@@ -1,56 +1,80 @@
-@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Inter:wght@400;500;600;700&family=Google+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Import accessibility styles */
+/* Accessibility utilities (focus-visible, sr-only, reduced-motion). */
 @import './styles/accessibility.css';
+/* `google-design.css` (Material-3 hand-styled classes) was removed in
+   the Modern-SaaS redesign — none of its classes were referenced from
+   JSX. Re-introduce a competing style system only via a design review. */
 
-/* Import Google AI design system */
-@import './styles/google-design.css';
-
-body {
-    margin: 0;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    font-family: 'Merriweather', serif;
-}
-
-code {
-    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-}
-
+/* ─────────────────────────────────────────────────────────────────────
+   Design tokens — Modern SaaS palette (Linear / Vercel / Stripe lineage).
+   Override the shadcn defaults in components.json with a neutral + single
+   accent system. Hex equivalents are noted next to each HSL triple so
+   anyone reading this can cross-reference with a colour picker.
+   ──────────────────────────────────────────────────────────────────── */
 @layer base {
     :root {
-        --background: 0 0% 100%;
-        --foreground: 213 31% 17%;
-        --primary: 19 84% 53%;
-        --primary-foreground: 0 0% 100%;
-        --secondary: 213 31% 17%;
-        --secondary-foreground: 0 0% 100%;
-        --accent: 152 52% 42%;
-        --accent-foreground: 0 0% 100%;
-        --muted: 220 14% 96%;
-        --muted-foreground: 220 9% 46%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 220 13% 91%;
-        --input: 220 13% 91%;
-        --ring: 19 84% 53%;
-        --radius: 0.5rem;
+        /* Neutrals — slate scale */
+        --background:         210 20% 98%;   /* #f8fafc */
+        --foreground:         222 47% 11%;   /* #0f172a */
+        --card:               0   0% 100%;   /* #ffffff */
+        --card-foreground:    222 47% 11%;
+        --popover:            0   0% 100%;
+        --popover-foreground: 222 47% 11%;
+
+        /* Brand accent — neutral indigo (override per-tenant via [data-tenant-primary] later) */
+        --primary:            234 89% 64%;   /* #6366f1 */
+        --primary-foreground: 0   0% 100%;
+
+        /* Quiet secondary surface */
+        --secondary:          210 16% 93%;   /* #e2e8f0 */
+        --secondary-foreground: 222 47% 11%;
+
+        /* Muted text and surfaces */
+        --muted:              210 20% 96%;   /* #f1f5f9 */
+        --muted-foreground:   215 16% 47%;   /* #64748b */
+
+        /* Interactive accent — same as primary by default */
+        --accent:             234 89% 64%;
+        --accent-foreground:  0   0% 100%;
+
+        /* Semantic colours */
+        --success:            142 71% 45%;   /* #22c55e */
+        --warning:            38  92% 50%;   /* #f59e0b */
+        --destructive:        0   84% 60%;   /* #ef4444 */
+        --destructive-foreground: 0 0% 100%;
+
+        /* Borders, inputs, focus rings */
+        --border:             214 32% 91%;   /* #e2e8f0 */
+        --input:              214 32% 91%;
+        --ring:               234 89% 64%;
+
+        --radius:             0.5rem;
     }
 }
 
 @layer base {
-    * {
-        @apply border-border;
-    }
+    * { @apply border-border; }
     body {
+        margin: 0;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-feature-settings: 'cv11', 'ss01', 'tnum';
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
         @apply bg-background text-foreground;
+    }
+    /* Replace the Merriweather serif headings — Modern SaaS uses one
+       sans family across the board. Sizes/weights come from utility
+       classes; this just makes sure h1-h6 inherit the body font. */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: inherit;
+        letter-spacing: -0.01em;
+    }
+    code, pre {
+        font-family: 'JetBrains Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
     }
 }

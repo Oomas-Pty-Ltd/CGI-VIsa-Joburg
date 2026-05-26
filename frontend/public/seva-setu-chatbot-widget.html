@@ -72,9 +72,10 @@
 <body>
 
 <div class="demo-center">
-  <h1>🇮🇳 Seva Setu Widget</h1>
-  <p>Consulate General of India — Johannesburg<br>
-     Live demo. The chat widget is loaded below via a single <code>&lt;script&gt;</code> tag.</p>
+  <h1>Embeddable Chat Widget</h1>
+  <p>Live demo. The chat widget is loaded below via a single
+     <code>&lt;script&gt;</code> tag — branding, languages, and service catalogue
+     come from the tenant's <code>data-company-id</code>.</p>
 
   <div class="embed-box">
     <h2>Embed on any website — copy this 1 line:</h2>
@@ -90,9 +91,27 @@
 
 <div class="arrow">↘</div>
 
-<!-- EMBED SNIPPET — paste this 1 line anywhere on your site -->
-<!-- Chatbot widget -->
-<script src="http://localhost:3000/seva-widget.js" data-company-id="3350431e-c50c-4008-b7ee-00cb5b1a5574"></script>
+<!-- EMBED SNIPPET — paste this 1 line anywhere on your site.
+
+  Tenant resolution priority (see frontend/src/lib/widgetConfig.js):
+    1. `data-company-id` attribute on this script tag (production embed)
+    2. `window.__SEVA_CONFIG__.companyId` set BEFORE the script loads
+    3. `?company_id=…` in the page URL (local testing only)
+
+  The block below uses option 3 for local previews — append
+  `?company_id=<UUID>` to the URL to swap tenants without editing the file.
+  Falls back to the legacy hardcoded UUID when the query param is absent.
+-->
+<script>
+  (function () {
+    var qp = new URLSearchParams(window.location.search).get('company_id');
+    var fallback = 'fac76aeb-28e7-4978-8469-0a1cec06ae54';
+    var s = document.createElement('script');
+    s.src = 'http://localhost:3000/seva-widget.js';
+    s.dataset.companyId = (qp && qp.trim()) || fallback;
+    document.body.appendChild(s);
+  })();
+</script>
 
 </body>
 </html>

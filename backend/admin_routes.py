@@ -39,10 +39,12 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import (
-    knowledge_service, 
-    KnowledgeCategory, 
-    KnowledgeStatus
+    knowledge_service,
+    KnowledgeCategory,
+    KnowledgeStatus,
+    resolve_knowledge_categories,
 )
+from services.bot_config import get_bot_config
 from services.intent_classifier import intent_classifier
 
 logger = logging.getLogger(__name__)
@@ -198,10 +200,19 @@ async def get_knowledge_entries(
     status_enum = None
 
     if category:
-        try:
-            category_enum = KnowledgeCategory(category)
-        except ValueError:
+        # Accept either a legacy enum value or any category from the
+        # tenant's configured ``knowledge_categories`` list. We pass the
+        # raw string through to ``get_all_entries`` — knowledge_service
+        # handles enum-vs-string for the Mongo filter.
+        if company_id:
+            cfg = await get_bot_config(company_id)
+            allowed = resolve_knowledge_categories(cfg.raw.get("knowledge_categories") or [])
+        else:
+            allowed = resolve_knowledge_categories(None)
+        cat_lc = str(category).strip().lower()
+        if cat_lc not in allowed and not any(cat_lc == e.value for e in KnowledgeCategory):
             raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+        category_enum = cat_lc
 
     if entry_status:
         try:
@@ -272,10 +283,12 @@ async def create_knowledge_entry(
     entry belongs to (entries without a tenant would never be searchable).
     Local admins can only create entries for their own tenant."""
     company_id = enforce_tenant_scope(payload, company_id)
-    try:
-        category_enum = KnowledgeCategory(request.category)
-    except ValueError:
+    cfg = await get_bot_config(company_id)
+    allowed = resolve_knowledge_categories(cfg.raw.get("knowledge_categories") or [])
+    cat_lc = str(request.category or "").strip().lower()
+    if cat_lc not in allowed and not any(cat_lc == e.value for e in KnowledgeCategory):
         raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")
+    category_enum = cat_lc
 
     if request.event_status and request.event_status not in VALID_EVENT_STATUSES:
         raise HTTPException(

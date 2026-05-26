@@ -10,6 +10,7 @@ Manages templates for:
 ====================================================================
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
@@ -18,6 +19,8 @@ from datetime import datetime, timezone
 from database import get_database
 from auth_utils import verify_token
 from tenant import get_tenant_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
@@ -81,21 +84,20 @@ DEFAULT_TEMPLATES = [
     {
         "name": "Welcome Email",
         "category": "email",
-        "subject": "Welcome to Seva Setu - Your Consular Services Partner",
-        "body": """🙏 Namaste {{user_name}},
+        "subject": "Welcome to {{org_name}}",
+        "body": """Hello {{user_name}},
 
-Welcome to Seva Setu Bot - your trusted assistant for Indian consular services in South Africa.
+Welcome to {{org_name}} — your assistant.
 
 Your account has been successfully created. You can now:
-- Apply for passport services
-- Request visa assistance
-- Get document verification
-- Access consular information 24/7
+- Apply for services
+- Get document assistance
+- Access information 24/7
 
 If you have any questions, simply chat with our bot or contact us.
 
 Best regards,
-Consulate General of India, Johannesburg""",
+{{org_name}}""",
         "variables": ["user_name"],
         "language": "en",
         "is_public": True,
@@ -117,7 +119,7 @@ Last Updated: {{update_date}}
 For any queries, please contact us or use our chatbot.
 
 Regards,
-Seva Setu Bot""",
+{{org_name}}""",
         "variables": ["user_name", "service_type", "application_id", "status", "update_date", "additional_notes"],
         "language": "en",
         "is_public": True,
@@ -142,7 +144,7 @@ Documents Required:
 Please arrive 15 minutes early with all required documents.
 
 Regards,
-Consulate General of India, Johannesburg""",
+{{org_name}}""",
         "variables": ["user_name", "appointment_date", "appointment_time", "location", "service_type", "documents_list"],
         "language": "en",
         "is_public": True,
@@ -153,14 +155,14 @@ Consulate General of India, Johannesburg""",
     {
         "name": "WhatsApp Welcome",
         "category": "whatsapp",
-        "body": """🙏 Namaste {{user_name}}!
+        "body": """Hello {{user_name}}!
 
-Welcome to Seva Setu Bot. I'm here to help you with Indian consular services.
+Welcome to {{org_name}}. I'm here to help you with your queries.
 
 Reply with:
-1️⃣ Passport
-2️⃣ Visa
-3️⃣ Documents
+1️⃣ Services
+2️⃣ Documents
+3️⃣ Appointments
 4️⃣ Other
 
 Or simply type your question!""",
@@ -215,9 +217,7 @@ Please investigate immediately.""",
 
 {{alert_message}}
 
-If you have any concerns, please contact:
-📞 Emergency: (+27) 11 581 9800
-📧 Email: cons.joburg@mea.gov.in
+If you have any concerns, please contact us directly.
 
 Stay vigilant. Stay safe.""",
         "variables": ["alert_title", "alert_message"],
@@ -231,16 +231,16 @@ Stay vigilant. Stay safe.""",
         "name": "स्वागत ईमेल (Hindi Welcome)",
         "category": "email",
         "subject": "सेवा सेतु में आपका स्वागत है",
-        "body": """🙏 नमस्ते {{user_name}} जी,
+        "body": """नमस्ते {{user_name}} जी,
 
-सेवा सेतु बॉट में आपका स्वागत है - दक्षिण अफ्रीका में भारतीय वाणिज्य दूतावास सेवाओं के लिए आपका विश्वसनीय सहायक।
+सेवा सेतु बॉट में आपका स्वागत है।
 
 आपका खाता सफलतापूर्वक बना दिया गया है।
 
 किसी भी प्रश्न के लिए, हमारे बॉट से चैट करें।
 
 सादर,
-भारतीय वाणिज्य दूतावास, जोहान्सबर्ग""",
+सेवा सेतु""",
         "variables": ["user_name"],
         "language": "hi",
         "is_public": True,
@@ -274,7 +274,7 @@ async def init_default_templates():
                 await db.templates.insert_one(template_doc)
     except Exception as e:
         # Log error but don't crash - templates can be initialized later
-        print(f"Warning: Failed to initialize default templates: {e}")
+        logger.warning("Failed to initialize default templates: %s", e)
 
 
 def render_template(template_body: str, variables: Dict[str, str]) -> str:
@@ -356,17 +356,24 @@ async def list_templates(
 
 
 @router.get("/categories")
-async def get_template_categories():
-    """Get available template categories with counts"""
+async def get_template_categories(tenant_id: str = Depends(get_tenant_id)):
+    """Get available template categories with counts. Counts cover the
+    calling tenant's templates plus global system templates (no company_id)."""
     db = await get_database()
-    
+
     pipeline = [
+        # Same tenant-visibility rule as ``list_templates``: own rows + globals.
+        {"$match": {"$or": [
+            {"company_id": tenant_id},
+            {"company_id": {"$exists": False}},
+            {"company_id": None},
+        ]}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ]
-    
+
     categories = await db.templates.aggregate(pipeline).to_list(10)
-    
+
     return {
         "categories": [
             {"name": c["_id"], "count": c["count"]}
@@ -376,18 +383,32 @@ async def get_template_categories():
 
 
 @router.get("/{template_id}")
-async def get_template(template_id: str):
-    """Get a specific template by ID"""
+async def get_template(
+    template_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Get a specific template by ID. Returns 404 for cross-tenant lookups
+    to avoid leaking existence of another tenant's templates."""
     db = await get_database()
-    
-    template = await db.templates.find_one({"id": template_id}, {"_id": 0})
-    
+
+    template = await db.templates.find_one(
+        {
+            "id": template_id,
+            "$or": [
+                {"company_id": tenant_id},
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+            ],
+        },
+        {"_id": 0},
+    )
+
     if not template:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found"
         )
-    
+
     return template
 
 
@@ -447,25 +468,31 @@ async def update_template(
     """
     db = await get_database()
 
-    template = await db.templates.find_one({"id": template_id})
+    # Tenant-scoped read — returns None for cross-tenant or global rows so
+    # the next branch can distinguish "not found" from "exists elsewhere".
+    template = await db.templates.find_one(
+        {"id": template_id, "company_id": tenant_id}
+    )
 
     if not template:
+        # Either truly missing or it's a global system template (no
+        # company_id). Disambiguate with a second lookup so we return 403
+        # for the system-template case (more accurate than 404).
+        global_row = await db.templates.find_one(
+            {"id": template_id, "$or": [
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+            ]},
+            {"_id": 0, "id": 1},
+        )
+        if global_row:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot edit global system template via this endpoint"
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found"
-        )
-
-    # Tenant ownership check first — return 404 (not 403) for cross-tenant
-    # to avoid leaking existence of foreign templates.
-    if template.get("company_id") and template["company_id"] != tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Template not found"
-        )
-    if not template.get("company_id"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot edit global system template via this endpoint"
         )
 
     # Only allow owner or admin to update
@@ -474,16 +501,18 @@ async def update_template(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this template"
         )
-    
+
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.templates.update_one(
-        {"id": template_id},
+        {"id": template_id, "company_id": tenant_id},
         {"$set": update_data}
     )
-    
-    updated = await db.templates.find_one({"id": template_id}, {"_id": 0})
+
+    updated = await db.templates.find_one(
+        {"id": template_id, "company_id": tenant_id}, {"_id": 0}
+    )
     return updated
 
 
@@ -496,16 +525,11 @@ async def delete_template(
     """Delete a template. Tenant ownership enforced."""
     db = await get_database()
 
-    template = await db.templates.find_one({"id": template_id})
+    template = await db.templates.find_one(
+        {"id": template_id, "company_id": tenant_id}
+    )
 
     if not template:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Template not found"
-        )
-
-    # Cross-tenant → 404 to avoid leaking existence.
-    if template.get("company_id") and template["company_id"] != tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found"
@@ -524,20 +548,32 @@ async def delete_template(
             detail="Not authorized to delete this template"
         )
     
-    await db.templates.delete_one({"id": template_id})
-    
+    await db.templates.delete_one({"id": template_id, "company_id": tenant_id})
+
     return {"message": "Template deleted successfully"}
 
 
 @router.post("/render")
 async def render_template_endpoint(
     template_id: str,
-    variables: Dict[str, str]
+    variables: Dict[str, str],
+    tenant_id: str = Depends(get_tenant_id),
 ):
-    """Render a template with provided variables"""
+    """Render a template with provided variables. Tenants can only render
+    their own templates or global system templates."""
     db = await get_database()
-    
-    template = await db.templates.find_one({"id": template_id}, {"_id": 0})
+
+    template = await db.templates.find_one(
+        {
+            "id": template_id,
+            "$or": [
+                {"company_id": tenant_id},
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+            ],
+        },
+        {"_id": 0},
+    )
     
     if not template:
         raise HTTPException(

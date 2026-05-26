@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from datetime import datetime, timezone
 import time
+import os
 
 from monitoring_service import monitoring_service, MONITORING_CONFIG
 from security.guardrail import guardrail_service
@@ -73,7 +74,7 @@ async def get_metrics() -> Dict[str, Any]:
     minutes = int((uptime_seconds % 3600) // 60)
     
     return {
-        "service_name": "Seva Setu Bot",
+        "service_name": os.environ.get('PLATFORM_NAME', 'Bot'),
         "version": "1.0.0",
         "environment": "production",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -174,7 +175,7 @@ async def test_alert() -> Dict[str, str]:
     test_alert = {
         "type": "TEST_ALERT",
         "severity": "info",
-        "message": "This is a test alert from Seva Setu Bot monitoring system."
+        "message": f"This is a test alert from {os.environ.get('PLATFORM_NAME', 'Bot')} monitoring system."
     }
     
     await monitoring_service.send_alert(test_alert)

@@ -165,12 +165,25 @@ async def generate_fb_ai_response(user_message: str, session_id: str, company_id
         return cfg.fallback("error") or "Thank you for your message. For detailed assistance, visit our web portal."
 
     try:
-        system_prompt = create_safe_system_prompt(cfg.system_prompt())
+        system_prompt = create_safe_system_prompt(
+            cfg.system_prompt(),
+            bot_name=cfg.bot_name,
+        )
+        # Resolve LLM model: env default → tenant company.llm_model override
+        # (parity with whatsapp_routes / consular_routes).
+        from database import get_database as _gdb
+        _llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        if company_id:
+            _co = await (await _gdb()).companies.find_one(
+                {"id": company_id}, {"_id": 0, "llm_model": 1}
+            )
+            if _co and _co.get("llm_model"):
+                _llm_model = _co["llm_model"]
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=session_id,
             system_message=system_prompt
-        ).with_model("openai", "gpt-5.2")
+        ).with_model("openai", _llm_model)
 
         response = await chat.send_message(UserMessage(text=user_message))
         return response

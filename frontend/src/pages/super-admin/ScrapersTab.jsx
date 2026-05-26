@@ -19,6 +19,9 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Section } from "@/components/admin/Section";
+import { EmptyState } from "@/components/admin/EmptyState";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -49,6 +52,7 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
   const [saving, setSaving]   = useState(false);
   const [running, setRunning] = useState(false);
   const [noRow, setNoRow]     = useState(false);
+  const [confirmRun, setConfirmRun] = useState(false);
 
   useEffect(() => {
     if (!tenantId && companies.length > 0) setTenantId(companies[0].id);
@@ -131,8 +135,7 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
     }
   };
 
-  const handleRunNow = async () => {
-    if (!window.confirm("Trigger a crawl now? It runs in the background; progress shows in the runs list below.")) return;
+  const handleRunNowConfirmed = async () => {
     setRunning(true);
     try {
       const res = await fetch(`${API}/super-admin/scrapers/${tenantId}/run`, {
@@ -142,6 +145,7 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Trigger failed");
       toast.success(data.message || "Crawl triggered");
+      setConfirmRun(false);
       // Refresh runs list shortly after to pick up the new run record
       setTimeout(fetchAll, 1500);
     } catch (err) {
@@ -162,48 +166,39 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-xl font-semibold">Scrapers</h2>
-          <p className="text-sm text-slate-500">
-            {singleTenant
-              ? "Crawler config + run-now trigger + recent runs for your knowledge base."
-              : "Per-tenant crawler config + run-now trigger + recent runs."}
-          </p>
-        </div>
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        {!singleTenant ? (
+          <div className="w-72">
+            <Label className="text-xs text-muted-foreground">Tenant</Label>
+            <Select value={tenantId} onValueChange={setTenantId}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Pick a tenant" /></SelectTrigger>
+              <SelectContent>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : <div />}
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll} disabled={loading}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button variant="outline" onClick={handleRunNow} disabled={running || noRow || !cfg.enabled}>
-            <Play className={`mr-2 h-4 w-4 ${running ? "animate-pulse" : ""}`} />
+          <Button variant="outline" size="sm" onClick={() => setConfirmRun(true)} disabled={running || noRow || !cfg.enabled}>
+            <Play className={`mr-1.5 h-3.5 w-3.5 ${running ? "animate-pulse" : ""}`} />
             Run now
           </Button>
-          <Button onClick={handleSave} disabled={saving || !tenantId}>
-            <Save className="mr-2 h-4 w-4" />
+          <Button size="sm" onClick={handleSave} disabled={saving || !tenantId}>
+            <Save className="mr-1.5 h-3.5 w-3.5" />
             {saving ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>
 
-      {!singleTenant && (
-        <div className="w-96">
-          <Label className="text-xs">Tenant</Label>
-          <Select value={tenantId} onValueChange={setTenantId}>
-            <SelectTrigger><SelectValue placeholder="Pick a tenant" /></SelectTrigger>
-            <SelectContent>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
       {noRow && (
-        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+        <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-foreground flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-warning" />
           <div>
-            <strong>No scraper config for this tenant yet.</strong> Fill in seeds + domains and click Save to create one.
+            <strong className="font-medium">No scraper config for this tenant yet.</strong> Fill in seeds + domains and click Save to create one.
           </div>
         </div>
       )}
@@ -217,7 +212,7 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
             <Switch checked={!!cfg.enabled} onCheckedChange={(v) => update({ enabled: v })} />
             <span className="text-sm">Crawler enabled (also gates the Run-now button)</span>
           </label>
-          <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+          <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
             When off, scheduled runs are skipped and the manual trigger button is disabled.
             Existing entries already in the knowledge base are kept.
           </p>
@@ -335,59 +330,65 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
       <Section
         title="Recent runs"
         description="Last 20 runs, newest first. Status flips to done/failed when the background task finishes — hit Refresh to update."
+        bodyClassName={runs.length === 0 ? "p-0" : "p-0"}
       >
         {runs.length === 0 ? (
-          <div className="text-sm text-slate-400">No runs yet.</div>
+          <EmptyState
+            icon={Clock}
+            title="No runs yet"
+            description="Crawls appear here once you click Run now or the scheduled cron fires."
+          />
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600 text-left">
+            <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
               <tr>
-                <th className="px-2 py-1">Started</th>
-                <th className="px-2 py-1">Status</th>
-                <th className="px-2 py-1">Trigger</th>
-                <th className="px-2 py-1 text-right">Pages</th>
-                <th className="px-2 py-1 text-right">Stored</th>
-                <th className="px-2 py-1 text-right">Errors</th>
+                <th className="px-4 py-2.5">Started</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5">Trigger</th>
+                <th className="px-4 py-2.5 text-right">Pages</th>
+                <th className="px-4 py-2.5 text-right">Stored</th>
+                <th className="px-4 py-2.5 text-right">Errors</th>
               </tr>
             </thead>
             <tbody>
               {runs.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-2 py-1 text-slate-600">{formatDate(r.started_at)}</td>
-                  <td className="px-2 py-1"><RunStatusBadge status={r.status} /></td>
-                  <td className="px-2 py-1 text-xs">{r.trigger}</td>
-                  <td className="px-2 py-1 text-right font-mono">{r.pages_crawled ?? "—"}</td>
-                  <td className="px-2 py-1 text-right font-mono">{r.entries_stored ?? "—"}</td>
-                  <td className="px-2 py-1 text-right font-mono">{r.errors ?? "—"}</td>
+                <tr key={r.id} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-4 py-2.5 text-muted-foreground">{formatDate(r.started_at)}</td>
+                  <td className="px-4 py-2.5"><RunStatusBadge status={r.status} /></td>
+                  <td className="px-4 py-2.5 text-xs">{r.trigger}</td>
+                  <td className="px-4 py-2.5 text-right font-mono">{r.pages_crawled ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-right font-mono">{r.entries_stored ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-right font-mono">{r.errors ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </Section>
+
+      <ConfirmDialog
+        open={confirmRun}
+        onOpenChange={setConfirmRun}
+        title="Run a crawl now?"
+        description="The crawler runs in the background; progress shows in the runs list below. Existing knowledge entries are not deleted — new pages are upserted on top."
+        confirmLabel="Trigger crawl"
+        loading={running}
+        onConfirm={handleRunNowConfirmed}
+      />
     </div>
   );
 }
 
 /* ─── helpers ─────────────────────────────────────────────────────────── */
 
-function Section({ title, description, children }) {
-  return (
-    <div className="rounded-lg border bg-white p-4 space-y-3">
-      <div>
-        <h3 className="font-medium text-sm text-slate-700">{title}</h3>
-        {description && <p className="text-xs text-slate-500 mt-0.5 leading-snug">{description}</p>}
-      </div>
-      {children}
-    </div>
-  );
-}
+// `Section` is imported from `@/components/admin/Section`. Remaining helpers
+// here are tab-specific (grid + typed field wrappers + run-status badge).
 
 function Grid2({ children }) { return <div className="grid grid-cols-2 gap-3">{children}</div>; }
 
 function FieldHint({ hint }) {
   if (!hint) return null;
-  return <p className="text-[11px] text-slate-500 mt-1 leading-snug">{hint}</p>;
+  return <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{hint}</p>;
 }
 
 function TextField({ label, value, onChange, placeholder, mono, hint }) {
@@ -437,7 +438,7 @@ function StringList({ label, values, onChange, onAdd, onDel, placeholder, mono, 
         <Label className="text-xs">{label}</Label>
         <Button size="sm" variant="outline" onClick={onAdd}><Plus className="h-3 w-3 mr-1" /> Add</Button>
       </div>
-      {hint && <p className="text-[11px] text-slate-500 mb-1 leading-snug">{hint}</p>}
+      {hint && <p className="text-[11px] text-muted-foreground mb-1 leading-snug">{hint}</p>}
       <div className="space-y-1">
         {(values || []).map((v, i) => (
           <div key={i} className="flex gap-1">
@@ -448,12 +449,12 @@ function StringList({ label, values, onChange, onAdd, onDel, placeholder, mono, 
               className={mono ? "font-mono text-xs" : ""}
             />
             <Button size="sm" variant="ghost" onClick={() => onDel(i)}>
-              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
             </Button>
           </div>
         ))}
         {(!values || values.length === 0) && (
-          <div className="text-xs text-slate-400">(none)</div>
+          <div className="text-xs text-muted-foreground">(none)</div>
         )}
       </div>
     </div>
@@ -461,9 +462,9 @@ function StringList({ label, values, onChange, onAdd, onDel, placeholder, mono, 
 }
 
 function RunStatusBadge({ status }) {
-  if (status === "completed") return <Badge className="bg-emerald-100 text-emerald-700 gap-1"><CheckCircle2 className="h-3 w-3" />done</Badge>;
-  if (status === "failed")    return <Badge className="bg-red-100 text-red-700 gap-1"><XCircle className="h-3 w-3" />failed</Badge>;
-  if (status === "running")   return <Badge className="bg-blue-100 text-blue-700 gap-1"><Clock className="h-3 w-3 animate-pulse" />running</Badge>;
+  if (status === "completed") return <Badge className="bg-success/10 text-success border-success/20 gap-1"><CheckCircle2 className="h-3 w-3" />done</Badge>;
+  if (status === "failed")    return <Badge className="bg-destructive/10 text-destructive border-destructive/20 gap-1"><XCircle className="h-3 w-3" />failed</Badge>;
+  if (status === "running")   return <Badge className="bg-primary/10 text-primary border-primary/20 gap-1"><Clock className="h-3 w-3 animate-pulse" />running</Badge>;
   return <Badge variant="secondary">{status || "—"}</Badge>;
 }
 

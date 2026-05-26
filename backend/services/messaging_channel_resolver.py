@@ -39,8 +39,16 @@ CHANNEL_FACEBOOK = "facebook"
 # both hits AND misses (fallback to default tenant) so an unmapped flood
 # doesn't repeatedly DB-query + log-warn. invalidate_cache() drops a key
 # when the super-admin CRUD writes — same contract as bot_config.
-_CACHE_TTL_SECONDS = 60
+# TTL is platform-config driven (cache_messaging_channel_ttl_seconds).
 _resolver_cache: Dict[Tuple[str, str], Tuple[float, str]] = {}
+
+
+def _cache_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("cache_messaging_channel_ttl_seconds", 60))
+    except Exception:
+        return 60
 
 
 def _cache_key(channel_type: str, external_id: str) -> Tuple[str, str]:
@@ -52,7 +60,7 @@ def invalidate_cache(channel_type: Optional[str] = None, external_id: Optional[s
 
     Called by the channel-mapping CRUD writes so the next inbound message
     sees the change immediately (otherwise the cached value lingers for
-    up to ``_CACHE_TTL_SECONDS``)."""
+    up to ``_cache_ttl()``)."""
     if channel_type is None and external_id is None:
         _resolver_cache.clear()
     elif channel_type is not None and external_id is not None:
@@ -103,7 +111,7 @@ async def resolve_company_from_channel(channel_type: str, external_id: str) -> s
     )
     if row and row.get("company_id"):
         resolved = row["company_id"]
-        _resolver_cache[key] = (now + _CACHE_TTL_SECONDS, resolved)
+        _resolver_cache[key] = (now + _cache_ttl(), resolved)
         logger.debug(
             "channel resolver: %s:%s → %s (mapped)",
             channel_type, external_id, resolved,
@@ -116,7 +124,7 @@ async def resolve_company_from_channel(channel_type: str, external_id: str) -> s
         "Create a mapping via the super-admin channel-mapping endpoint to silence this.",
         channel_type, external_id, config.COMPANY_ID,
     )
-    _resolver_cache[key] = (now + _CACHE_TTL_SECONDS, config.COMPANY_ID)
+    _resolver_cache[key] = (now + _cache_ttl(), config.COMPANY_ID)
     return config.COMPANY_ID
 
 

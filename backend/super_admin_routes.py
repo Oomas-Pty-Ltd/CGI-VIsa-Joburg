@@ -1746,26 +1746,123 @@ class _BrandingUpdate(BaseModel):
     favicon_url:     Optional[str] = None
 
 
+class _KnowledgeSourcesUpdate(BaseModel):
+    """Per-tenant scrape sources used by ``knowledge_scraper``."""
+    primary_url:    Optional[str]       = None
+    sub_pages:      Optional[List[str]] = None
+    secondary_urls: Optional[List[str]] = None
+
+
+class _SecurityConfigUpdate(BaseModel):
+    """Per-tenant security & limits — OTP, session, upload caps.
+
+    Use 0 / empty string / empty list to revert to platform defaults
+    (see :py:meth:`services.bot_config.BotConfig.security` for resolution).
+    """
+    otp_ttl_minutes:            Optional[int]       = None
+    otp_max_attempts:           Optional[int]       = None
+    otp_lockout_minutes:        Optional[int]       = None
+    otp_dev_value:              Optional[str]       = None
+    session_inactivity_minutes: Optional[int]       = None
+    client_inactivity_minutes:  Optional[int]       = None
+    upload_max_bytes:           Optional[int]       = None
+    upload_max_pdf_pages:       Optional[int]       = None
+    upload_allowed_mime_types:  Optional[List[str]] = None
+
+
+class _PdfBrandingUpdate(BaseModel):
+    """PDF-specific colours/strings used by services.pdf_service.
+
+    All fields optional — missing keys fall back to neutral defaults inside
+    pdf_service. ``stripe_colors`` is the optional top-of-page accent stripes
+    (e.g. a flag tricolour); leave empty for a single-colour brand.
+    """
+    header_color:    Optional[str] = None
+    accent_color:    Optional[str] = None
+    highlight_color: Optional[str] = None
+    stripe_colors:   Optional[List[str]] = None
+    notice_bg:       Optional[str] = None
+    muted_text:      Optional[str] = None
+    border:          Optional[str] = None
+    footer_text:     Optional[str] = None
+    notice_text:     Optional[str] = None
+
+
 class _LanguageEntry(BaseModel):
+    """One supported-language row on bot_config.supported_languages.
+
+    ``code`` is the language ID used internally (``en``, ``hi``, ``zu`` etc.).
+    ``name`` is the display label shown in the language picker — supply it
+    in the target language if you want a native-script label.
+    ``native_name`` (optional) is the script-native label used by the
+    WhatsApp menu when different from the English display name
+    (e.g. ``Hindi`` vs ``हिंदी``).
+    ``aliases`` (optional) is extra phrases the language-switch detector
+    should recognise ("hindi", "हिन्दी", "हिंदी" → ``hi``).
+    ``bcp47_code`` (optional) is the BCP-47 code passed to browser TTS /
+    Whisper (e.g. ``en-GB``, ``hi-IN``). Defaults to ``code`` if blank.
+    ``flag`` (optional) is a single emoji shown in the picker.
+    ``tts_voice_preference`` (optional) is one of ``female``, ``male``,
+    ``neutral`` — used by browser TTS voice selection.
+    ``tts_voice`` (optional) is the explicit voice ID for backend TTS
+    (e.g. OpenAI ``nova`` / ``shimmer`` / ``alloy``).
+    ``script_hint`` (optional) is appended to the WhatsApp / web system
+    prompt to force a specific script (e.g. "MUST write in Devanagari").
+    """
     code: str
     name: str
+    native_name:           Optional[str]       = ""
+    aliases:               Optional[List[str]] = None
+    bcp47_code:            Optional[str]       = ""
+    flag:                  Optional[str]       = ""
+    tts_voice_preference:  Optional[str]       = ""
+    tts_voice:             Optional[str]       = ""
+    script_hint:           Optional[str]       = ""
+
+
+class _AdvisoryEntry(BaseModel):
+    """One advisory card shown above the chat. Operators add these via the
+    Bot Config tab; the widget renders them on every fresh session."""
+    model_config = {"extra": "allow"}  # keep room for future fields without a schema change
+
+    id:      Optional[str] = None
+    type:    Optional[str] = "info"   # info | warning | error — drives styling
+    title:   Optional[str] = ""
+    content: Optional[str] = ""
+    active:  Optional[bool] = True
 
 
 class TenantBotConfigUpdate(BaseModel):
     """Partial update — only fields actually sent are persisted. Nested dicts
     (`contact`, `branding`) are deep-merged with the stored values so a PUT
     with just `{"contact": {"phone": "..."}}` doesn't blank out the email.
-    Lists (`supported_languages`) and `fallback_responses` are replaced
-    wholesale when provided."""
+    Lists (`supported_languages`, `advisories`) and `fallback_responses`
+    are replaced wholesale when provided."""
     bot_name:                Optional[str] = None
     bot_avatar_url:          Optional[str] = None
     org_name:                Optional[str] = None
     org_short_name:          Optional[str] = None
+    header_tagline:          Optional[str] = None
+    footer_copy:             Optional[str] = None
+    advisories:              Optional[List[_AdvisoryEntry]] = None
     contact:                 Optional[_ContactUpdate] = None
+    phone_country_code:      Optional[str] = None
     system_prompt_template:  Optional[str] = None
     supported_languages:     Optional[List[_LanguageEntry]] = None
     default_language:        Optional[str] = None
     branding:                Optional[_BrandingUpdate] = None
+    pdf_branding:            Optional[_PdfBrandingUpdate] = None
+    knowledge_sources:       Optional[_KnowledgeSourcesUpdate] = None
+    # Phase-5 additions: tenant KB taxonomy + OCR heuristics. Loose dict
+    # types because both have small free-form schemas; the backend reader
+    # in services.bot_config + services.knowledge_service does the
+    # validation and platform-default fallback at consumption time.
+    knowledge_categories:    Optional[List[str]] = None
+    ocr_patterns:            Optional[Dict[str, Any]] = None
+    intent_keywords:         Optional[Dict[str, List[str]]] = None
+    flow_keywords:           Optional[Dict[str, List[str]]] = None
+    escalation_rules:        Optional[Dict[str, Any]] = None
+    security_config:         Optional[_SecurityConfigUpdate] = None
     fallback_responses:      Optional[Dict[str, str]] = None
 
 
@@ -1866,7 +1963,7 @@ async def upsert_bot_config(
     # Deep-merge nested dicts so PUT-ing one nested field doesn't blank peers.
     set_fields: Dict[str, Any] = {}
     for key, val in incoming.items():
-        if key in ("contact", "branding") and isinstance(val, dict):
+        if key in ("contact", "branding", "pdf_branding", "knowledge_sources", "ocr_patterns", "security_config", "intent_keywords", "flow_keywords", "escalation_rules") and isinstance(val, dict):
             merged = {**(existing.get(key) or {}), **_strip_none(val)}
             set_fields[key] = merged
         else:
@@ -1934,6 +2031,20 @@ class _ServiceField(BaseModel):
     key:        str
     type:       Optional[str]              = "input"
     question:   Optional[str]              = None
+    # Display + matching metadata used by PDF rendering and the
+    # ``correct <field>:`` command. All optional.
+    display_label: Optional[str]           = None    # PDF / review label override
+    aliases:       Optional[List[str]]     = None    # user-phrase synonyms for this key
+    # Validation rules — applied by services.application_flow._validate_field.
+    # Use ``validation_type`` (one of ``name|date|email|phone|passport|free_text``)
+    # for the common patterns, or pass a custom ``validation_regex`` for
+    # tenant-specific formats. ``error_message`` is shown when validation fails.
+    validation_type:    Optional[str]      = None
+    validation_regex:   Optional[str]      = None
+    validation_min:     Optional[int]      = None
+    validation_max:     Optional[int]      = None
+    error_message:      Optional[str]      = None
+    required:           Optional[bool]     = True
     # conditional config (only used when type == "conditional")
     condition:  Optional[Dict[str, Any]]   = None
     on_match:   Optional[str]              = None  # "continue" | "skip_to_docs"
@@ -1944,6 +2055,20 @@ class _ServiceField(BaseModel):
     model_config = {"extra": "allow"}  # don't reject forward-compatible extras
 
 
+class _ServiceSubtype(BaseModel):
+    """One ramification of a service — e.g. for a ``passport`` service the
+    subtypes might be ``lost / damaged / emergency / urgent``. When the
+    user's query matches any of ``keywords``, the subtype's description
+    + extra_docs are prepended to the service info card. Used by
+    :py:func:`services.application_flow._detect_subtype`."""
+    key:         str
+    label:       Optional[str]       = None
+    description: Optional[str]       = None
+    extra_docs:  Optional[List[str]] = None
+    keywords:    Optional[List[str]] = None
+    model_config = {"extra": "allow"}
+
+
 class TenantServiceCreate(BaseModel):
     """Required fields to register a new service on a tenant."""
     service_key:   str
@@ -1951,24 +2076,41 @@ class TenantServiceCreate(BaseModel):
     description:   Optional[str]              = ""
     documents:     Optional[List[str]]        = None
     fields:        Optional[List[_ServiceField]] = None
+    subtypes:      Optional[List[_ServiceSubtype]] = None
     category:      Optional[str]              = "TYPE_A"
     external_url:  Optional[str]              = None
+    emoji:         Optional[str]              = ""
+    keywords:      Optional[List[str]]        = None
     enabled:       Optional[bool]             = True
     display_order: Optional[int]              = None
+    # Optional reminder shown to the user after they confirm an application.
+    # Empty/omitted → no extra bot message. Use this for service-specific
+    # post-submit instructions (e.g. "visit in person to surrender passport").
+    post_confirm_message: Optional[str] = ""
+    # Optional workflow hooks. See `services.service_hooks` for the
+    # rule schema. Loose typing because the rule format is free-form
+    # JSON; validation happens at evaluation time.
+    hooks: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
 
 class TenantServiceUpdate(BaseModel):
     """Partial update — only fields actually sent are persisted. Lists
-    (`documents`, `fields`) are replaced wholesale when provided so the
-    operator has a clear "set this exact list" semantic."""
+    (`documents`, `fields`, `subtypes`, `keywords`) are replaced wholesale
+    when provided so the operator has a clear "set this exact list"
+    semantic."""
     name:          Optional[str]              = None
     description:   Optional[str]              = None
     documents:     Optional[List[str]]        = None
     fields:        Optional[List[_ServiceField]] = None
+    subtypes:      Optional[List[_ServiceSubtype]] = None
     category:      Optional[str]              = None
     external_url:  Optional[str]              = None
+    emoji:         Optional[str]              = None
+    keywords:      Optional[List[str]]        = None
     enabled:       Optional[bool]             = None
     display_order: Optional[int]              = None
+    post_confirm_message: Optional[str]       = None
+    hooks:                Optional[Dict[str, List[Dict[str, Any]]]] = None
 
 
 def _validate_service_payload(payload: Dict[str, Any]) -> None:
@@ -2125,10 +2267,15 @@ async def create_tenant_service(
         "description":   incoming.get("description") or "",
         "documents":     list(incoming.get("documents") or []),
         "fields":        list(incoming.get("fields") or []),
+        "subtypes":      list(incoming.get("subtypes") or []),
         "category":      incoming.get("category") or "TYPE_A",
         "external_url":  incoming.get("external_url"),
+        "emoji":         (incoming.get("emoji") or "").strip(),
+        "keywords":      list(incoming.get("keywords") or []),
         "enabled":       bool(incoming.get("enabled", True)),
         "display_order": int(incoming["display_order"]),
+        "post_confirm_message": (incoming.get("post_confirm_message") or "").strip(),
+        "hooks":         dict(incoming.get("hooks") or {}),
         "created_at":    now,
         "updated_at":    now,
         "created_by":    payload.get("sub") or payload.get("user_type") or "admin",
@@ -2403,3 +2550,72 @@ async def delete_channel_mapping_endpoint(
         severity=AuditSeverity.WARNING,
     )
     return {"deleted": True, "channel_type": channel_type, "external_id": external_id}
+
+
+# =====================================================================
+# PLATFORM CONFIG (Sprint 4 — Phase 4)
+# Singleton ops-level tuning: cache TTLs, crawler interval, WhatsApp
+# channel limits, frontend HTTP timeouts. Edited via the "Platform
+# Settings" tab in the super-admin UI; consumed across the backend via
+# services.platform_config.get().
+# =====================================================================
+
+
+@router.get("/platform-config")
+async def get_platform_config(payload: dict = Depends(verify_super_admin)):
+    """Return the resolved platform_config dict — DB → env → defaults
+    merged. Also returns `defaults` and `env_overrides` so the UI can
+    show "currently using default" hints to the operator."""
+    from services.platform_config import ensure_loaded, DEFAULTS, _ENV_OVERRIDES
+    resolved = await ensure_loaded()
+    return {
+        "config":        resolved,
+        "defaults":      DEFAULTS,
+        "env_overrides": dict(_ENV_OVERRIDES),
+    }
+
+
+@router.put("/platform-config")
+async def put_platform_config(
+    body: Dict[str, Any],
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Upsert platform_config. ``body`` is a shallow patch of the keys
+    in :py:attr:`services.platform_config.DEFAULTS`. Unknown keys are
+    persisted as-is (forward-compatibility). Invalidates the in-process
+    cache after the write."""
+    from services.platform_config import save, DEFAULTS
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    # Light validation: numeric fields stay numeric, lists stay lists.
+    # Type errors here yield a clear 400 instead of a confusing runtime
+    # surprise downstream.
+    patch: Dict[str, Any] = {}
+    for k, v in body.items():
+        if k in DEFAULTS:
+            dflt = DEFAULTS[k]
+            if isinstance(dflt, bool) and not isinstance(v, bool):
+                raise HTTPException(status_code=400, detail=f"{k} must be a boolean")
+            if isinstance(dflt, int) and not isinstance(dflt, bool) and not isinstance(v, int):
+                raise HTTPException(status_code=400, detail=f"{k} must be an integer")
+            if isinstance(dflt, list) and not isinstance(v, list):
+                raise HTTPException(status_code=400, detail=f"{k} must be a list")
+        patch[k] = v
+
+    resolved = await save(patch)
+    db = await get_database()
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="update_platform_config",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="platform_config",
+        resource_id="platform",
+        new_value={k: v for k, v in patch.items() if not k.endswith("_value")},
+        ip_address=http_request.client.host if http_request.client else None,
+        severity=AuditSeverity.WARNING,
+    )
+    return {"config": resolved}

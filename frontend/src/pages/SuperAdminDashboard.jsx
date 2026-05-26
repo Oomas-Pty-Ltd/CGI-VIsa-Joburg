@@ -5,12 +5,16 @@ import {
   MessageSquare, Shield, Download, ChevronLeft, ChevronRight,
   X, RefreshCw, Copy, Check, BookOpen, Upload, Trash2, FileText,
   Calendar, Clock, AlertCircle, Files, Search, Ban, Unlock,
-  Workflow, Smartphone, Bot, Globe, UserPlus, KeyRound,
+  Workflow, Smartphone, Bot, Globe, UserPlus, KeyRound, Settings,
 } from "lucide-react";
 import ChannelMappingsTab from "./super-admin/ChannelMappingsTab";
 import TenantServicesTab from "./super-admin/TenantServicesTab";
 import BotConfigTab from "./super-admin/BotConfigTab";
 import ScrapersTab from "./super-admin/ScrapersTab";
+import PlatformSettingsTab from "./super-admin/PlatformSettingsTab";
+import AdminShell from "@/components/AdminShell";
+import { Section } from "@/components/admin/Section";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -45,16 +49,20 @@ function CopyId({ id }) {
   );
 }
 
+// Tabs grouped semantically. AdminShell renders the group label above
+// each cluster so super-admins can find the right section faster than
+// scanning 10 unstructured items.
 const TABS = [
-  { key: "dashboard", label: "Dashboard", icon: TrendingUp },
-  { key: "conversations", label: "Conversations", icon: MessageSquare },
-  { key: "audit-logs", label: "Audit Logs", icon: Shield },
-  { key: "seva-applications", label: "Seva Applications", icon: Files },
-  { key: "knowledge", label: "Knowledge Base", icon: BookOpen },
-  { key: "tenant-services", label: "Services", icon: Workflow },
-  { key: "channel-mappings", label: "Channels", icon: Smartphone },
-  { key: "bot-config", label: "Bot Config", icon: Bot },
-  { key: "scrapers", label: "Scrapers", icon: Globe },
+  { key: "dashboard",         label: "Overview",        icon: TrendingUp,   group: "Overview" },
+  { key: "conversations",     label: "Conversations",   icon: MessageSquare, group: "Activity" },
+  { key: "audit-logs",        label: "Audit logs",      icon: Shield,        group: "Activity" },
+  { key: "seva-applications", label: "Applications",    icon: Files,         group: "Activity" },
+  { key: "tenant-services",   label: "Services",        icon: Workflow,      group: "Content" },
+  { key: "knowledge",         label: "Knowledge base",  icon: BookOpen,      group: "Content" },
+  { key: "bot-config",        label: "Bot config",      icon: Bot,           group: "Configuration" },
+  { key: "channel-mappings",  label: "Channels",        icon: Smartphone,    group: "Configuration" },
+  { key: "scrapers",          label: "Scrapers",        icon: Globe,         group: "Configuration" },
+  { key: "platform-settings", label: "Platform",        icon: Settings,      group: "Configuration" },
 ];
 
 const CHANNEL_COLORS = {
@@ -138,7 +146,7 @@ function SessionDetailModal({ sessionId, onClose, token }) {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
-            <h3 className="font-bold text-[#1A2E40] text-lg">Conversation Detail</h3>
+            <h3 className="font-bold text-foreground text-lg">Conversation Detail</h3>
             {session && (
               <p className="text-xs text-gray-500 mt-0.5">
                 {session.id} · {session.channel} · {formatDate(session.created_at)}
@@ -163,7 +171,7 @@ function SessionDetailModal({ sessionId, onClose, token }) {
                 <div
                   className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
                     msg.role === "user"
-                      ? "bg-[#E06F2C] text-white rounded-br-sm"
+                      ? "bg-primary text-white rounded-br-sm"
                       : "bg-gray-100 text-gray-800 rounded-bl-sm"
                   }`}
                 >
@@ -281,7 +289,7 @@ function ConversationsTab({ companies, token }) {
         <Button variant="outline" size="sm" onClick={fetchSessions} className="h-9">
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-[#2E8B57] hover:bg-[#246b43] text-white ml-auto">
+        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
           <Download className="w-4 h-4 mr-1" /> Export CSV
         </Button>
       </div>
@@ -322,7 +330,7 @@ function ConversationsTab({ companies, token }) {
                 </td>
                 <td className="px-4 py-3 text-gray-700 max-w-[120px] truncate">{s.user_identifier}</td>
                 <td className="px-4 py-3 text-gray-600 max-w-[240px] truncate">{s.first_message}</td>
-                <td className="px-4 py-3 text-center font-semibold text-[#1A2E40]">{s.message_count}</td>
+                <td className="px-4 py-3 text-center font-semibold text-foreground">{s.message_count}</td>
                 <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(s.created_at)}</td>
                 <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(s.last_activity)}</td>
                 <td className="px-4 py-3 text-center">
@@ -444,7 +452,7 @@ function AuditLogsTab({ companies, token }) {
         <Button variant="outline" size="sm" onClick={fetchLogs} className="h-9">
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-[#2E8B57] hover:bg-[#246b43] text-white ml-auto">
+        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
           <Download className="w-4 h-4 mr-1" /> Export CSV
         </Button>
       </div>
@@ -478,7 +486,7 @@ function AuditLogsTab({ companies, token }) {
                     {(log.category || "—").replace(/_/g," ")}
                   </span>
                 </td>
-                <td className="px-4 py-3 font-medium text-[#1A2E40]">{log.action || "—"}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{log.action || "—"}</td>
                 <td className="px-4 py-3 text-gray-600 text-xs">
                   <div>{log.user_id ? shortId(log.user_id) : "—"}</div>
                   {log.user_type && <div className="text-gray-400">{log.user_type}</div>}
@@ -553,10 +561,18 @@ function KnowledgeTab({ token, companies = [] }) {
   /* ── entry preview ── */
   const [preview, setPreview] = useState(null);
 
+  /* ── delete confirmation ── */
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, title } | null
+  const [deleting, setDeleting] = useState(false);
+
   const limit = 50;
 
+  // Neutral platform-default — mirrors backend
+  // `services.knowledge_service.DEFAULT_KNOWLEDGE_CATEGORIES`. Tenants that
+  // configure their own list in `tenant_bot_config.knowledge_categories` can
+  // POST any string from that list; this dropdown is a sensible UI default.
   const CATEGORIES = [
-    "general","visa","passport","oci","pcc","fees","emergency","services","event","announcement","other"
+    "general","fees","emergency","office","announcement","event","other"
   ];
 
   const companyName = (id) => companies.find((c) => c.id === id)?.name ?? id;
@@ -658,19 +674,26 @@ function KnowledgeTab({ token, companies = [] }) {
     }
   };
 
-  /* ── delete handler ── */
-  const handleDelete = async (entryId, entryTitle) => {
-    if (!window.confirm(`Delete entry: "${entryTitle}"?`)) return;
+  /* ── delete handler — opens the styled confirm dialog ── */
+  const handleDelete = (entryId, entryTitle) => {
+    setConfirmDelete({ id: entryId, title: entryTitle });
+  };
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`${API}/super-admin/knowledge/entries/${entryId}`, {
+      const res = await fetch(`${API}/super-admin/knowledge/entries/${confirmDelete.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error();
       toast.success("Entry deleted.");
+      setConfirmDelete(null);
       fetchEntries();
     } catch {
       toast.error("Failed to delete entry.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -692,8 +715,8 @@ function KnowledgeTab({ token, companies = [] }) {
 
       {/* ── Upload card ── */}
       <div className="bg-white rounded-xl shadow-md p-6">
-        <h2 className="text-xl font-bold text-[#1A2E40] mb-4 flex items-center gap-2">
-          <Upload className="w-5 h-5 text-[#E06F2C]" />
+        <h2 className="text-xl font-bold text-foreground mb-4 flex items-center gap-2">
+          <Upload className="w-5 h-5 text-primary" />
           Upload PDF to Knowledge Base
         </h2>
 
@@ -706,10 +729,10 @@ function KnowledgeTab({ token, companies = [] }) {
             onClick={() => fileInputRef.current?.click()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
               dragOver
-                ? "border-[#E06F2C] bg-orange-50"
+                ? "border-primary bg-orange-50"
                 : file
                 ? "border-green-400 bg-green-50"
-                : "border-gray-300 hover:border-[#E06F2C] hover:bg-orange-50"
+                : "border-gray-300 hover:border-primary hover:bg-orange-50"
             }`}
           >
             <input
@@ -781,7 +804,7 @@ function KnowledgeTab({ token, companies = [] }) {
             <Button
               type="submit"
               disabled={uploading || !file}
-              className="bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+              className="bg-primary hover:bg-primary/90 text-white"
             >
               {uploading ? (
                 <>
@@ -824,8 +847,8 @@ function KnowledgeTab({ token, companies = [] }) {
       {/* ── Entries list ── */}
       <div className="bg-white rounded-xl shadow-md p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-[#1A2E40] flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-[#E06F2C]" />
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-primary" />
             Uploaded Knowledge Entries
             {total > 0 && <span className="text-sm font-normal text-gray-500">({total} total)</span>}
           </h2>
@@ -913,7 +936,7 @@ function KnowledgeTab({ token, companies = [] }) {
                 <tr key={entry.id} className="border-t border-gray-100 hover:bg-orange-50 transition-colors">
                   <td className="px-4 py-3 max-w-[220px]">
                     <button
-                      className="text-left font-medium text-[#1A2E40] hover:text-[#E06F2C] hover:underline truncate block max-w-full"
+                      className="text-left font-medium text-foreground hover:text-primary hover:underline truncate block max-w-full"
                       title={entry.title}
                       onClick={() => setPreview(entry)}
                     >
@@ -970,7 +993,7 @@ function KnowledgeTab({ token, companies = [] }) {
           >
             <div className="flex items-start justify-between p-5 border-b gap-4">
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-[#1A2E40] text-lg leading-tight">{preview.title}</h3>
+                <h3 className="font-bold text-foreground text-lg leading-tight">{preview.title}</h3>
                 <div className="flex items-center gap-2 mt-2">
                   <EventBadge status={preview.event_status} />
                   <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
@@ -1001,6 +1024,17 @@ function KnowledgeTab({ token, companies = [] }) {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => !o && setConfirmDelete(null)}
+        title="Delete knowledge entry?"
+        description={confirmDelete && `This removes "${confirmDelete.title}" from the knowledge base. The bot will stop using it on the next chat request.`}
+        confirmLabel="Delete entry"
+        destructive
+        loading={deleting}
+        onConfirm={handleDeleteConfirmed}
+      />
     </div>
   );
 }
@@ -1086,7 +1120,7 @@ function BlockedKeywordsPanel({ token }) {
 
   return (
     <div className="bg-white rounded-xl shadow-md p-6 space-y-6">
-      <h2 className="text-xl font-bold text-[#1A2E40] flex items-center gap-2">
+      <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
         <Ban className="w-5 h-5 text-red-500" />
         Keyword Blocker
       </h2>
@@ -1103,7 +1137,7 @@ function BlockedKeywordsPanel({ token }) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSearchResults(null); }}
             placeholder="Type a keyword to search (e.g. visa fee, oci, passport)"
-            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+            className="w-full pl-9 pr-4 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
         <Button type="submit" disabled={searching || !query.trim()} variant="outline" className="h-[38px]">
@@ -1157,7 +1191,7 @@ function BlockedKeywordsPanel({ token }) {
                 )}
                 {searchResults.matches.map((entry) => (
                   <tr key={entry.id} className="border-t border-gray-100 hover:bg-red-50 transition-colors">
-                    <td className="px-4 py-3 text-[#1A2E40] font-medium max-w-[220px] truncate" title={entry.title}>
+                    <td className="px-4 py-3 text-foreground font-medium max-w-[220px] truncate" title={entry.title}>
                       {entry.title}
                     </td>
                     <td className="px-4 py-3">
@@ -1461,7 +1495,7 @@ function SevaApplicationsTab({ token, companies = [] }) {
         <Button variant="outline" size="sm" onClick={fetchApplications} className="h-9">
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-[#2E8B57] hover:bg-[#246b43] text-white ml-auto">
+        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
           <Download className="w-4 h-4 mr-1" /> Export CSV
         </Button>
       </div>
@@ -1548,7 +1582,7 @@ function SevaApplicationsTab({ token, companies = [] }) {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b">
               <div>
-                <h3 className="font-bold text-[#1A2E40] text-lg">Application Details</h3>
+                <h3 className="font-bold text-foreground text-lg">Application Details</h3>
                 <p className="text-xs text-gray-500 mt-0.5">{selectedApp.reference_id}</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setSelectedApp(null)}><X className="w-5 h-5" /></Button>
@@ -1642,7 +1676,7 @@ function SevaApplicationsTab({ token, companies = [] }) {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b">
               <div>
-                <h3 className="font-bold text-[#1A2E40] text-lg">Document Preview</h3>
+                <h3 className="font-bold text-foreground text-lg">Document Preview</h3>
                 <p className="text-xs text-gray-500 mt-0.5">{documentPreview.name}</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setDocumentPreview(null)}><X className="w-5 h-5" /></Button>
@@ -1755,137 +1789,139 @@ export default function SuperAdminDashboard() {
     return <div className="flex items-center justify-center min-h-screen text-gray-500">Loading…</div>;
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <div className="admin-sidebar fixed left-0 top-0 h-full w-64 text-white p-6 flex flex-col">
-        <div className="flex items-center gap-3 mb-10">
-          <Building2 className="w-8 h-8" />
-          <h2 className="text-xl font-bold">Super Admin</h2>
-        </div>
-        <nav className="space-y-1 flex-1">
-          {TABS.map(({ key, label, icon: Icon }) => (
-            <Button
-              key={key}
-              variant="ghost"
-              className={`w-full justify-start text-white hover:bg-white/10 ${activeTab === key ? "bg-white/20" : ""}`}
-              onClick={() => setActiveTab(key)}
-              data-testid={`nav-${key}`}
-            >
-              <Icon className="w-5 h-5 mr-3" />
-              {label}
-            </Button>
-          ))}
-        </nav>
-        <Button
-          variant="ghost"
-          className="w-full justify-start text-white hover:bg-white/10"
-          onClick={handleLogout}
-          data-testid="logout-btn"
-        >
-          <LogOut className="w-5 h-5 mr-3" />
-          Logout
-        </Button>
-      </div>
+  // Decode the JWT sub claim for the sidebar user row. Super-admin tokens
+  // carry the admin's email in `sub`; the manual base64 parse keeps us off
+  // a `jwt-decode` dependency for one field.
+  const userEmail = (() => {
+    try {
+      const payload = (token || "").split(".")[1] || "";
+      // base64url → base64
+      const b64 = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(
+        Math.ceil(payload.length / 4) * 4, "="
+      );
+      return JSON.parse(atob(b64))?.sub || "";
+    } catch { return ""; }
+  })();
 
-      {/* Main content */}
-      <div className="ml-64 p-8">
+  // Per-tab metadata fed into AdminShell's pageTitle / pageDescription /
+  // pageActions slots. Keeping it next to the rest of the tab logic so
+  // adding a tab means touching one place, not three.
+  const createCompanyButton = (
+    <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <DialogTrigger asChild>
+        <Button size="sm" data-testid="create-company-btn">
+          <Plus className="mr-1.5 h-3.5 w-3.5" /> Create company
+        </Button>
+      </DialogTrigger>
+      <DialogContent data-testid="create-company-dialog">
+        <DialogHeader><DialogTitle>Create new company</DialogTitle></DialogHeader>
+        <form onSubmit={handleCreateCompany} className="space-y-4">
+          <div>
+            <Label htmlFor="name">Company name</Label>
+            <Input id="name" value={newCompany.name}
+              onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
+              required data-testid="company-name-input" className="mt-1" />
+          </div>
+          <div>
+            <Label htmlFor="email">Admin email</Label>
+            <Input id="email" type="email" value={newCompany.email}
+              onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
+              required data-testid="company-email-input" className="mt-1" />
+          </div>
+          <div>
+            <Label htmlFor="password">Admin password</Label>
+            <Input id="password" type="password" value={newCompany.admin_password}
+              onChange={(e) => setNewCompany({ ...newCompany, admin_password: e.target.value })}
+              required data-testid="company-password-input" className="mt-1" />
+          </div>
+          <div>
+            <Label htmlFor="model">LLM model</Label>
+            <Select value={newCompany.llm_model}
+              onValueChange={(v) => setNewCompany({ ...newCompany, llm_model: v })}>
+              <SelectTrigger data-testid="llm-model-select" className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gpt-5.2">GPT-5.2 (OpenAI)</SelectItem>
+                <SelectItem value="gpt-5.1">GPT-5.1 (OpenAI)</SelectItem>
+                <SelectItem value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</SelectItem>
+                <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button type="submit" className="w-full" data-testid="submit-create-company">
+            Create company
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const PAGE_META = {
+    "dashboard":         { title: "Overview",       description: "Platform-wide activity across all tenants.",                          actions: createCompanyButton },
+    "conversations":     { title: "Conversations",  description: "User conversations from chat, WhatsApp, and Facebook channels." },
+    "audit-logs":        { title: "Audit logs",     description: "Authentication, admin actions, and data-access events." },
+    "seva-applications": { title: "Applications",   description: "Submitted applications across all tenants." },
+    "knowledge":         { title: "Knowledge base", description: "Q&A entries and uploaded PDFs the bot draws from." },
+    "tenant-services":   { title: "Services",       description: "The catalogue each tenant's chatbot offers." },
+    "channel-mappings":  { title: "Channels",       description: "Map inbound WhatsApp / Facebook webhook identities to tenants." },
+    "bot-config":        { title: "Bot config",     description: "Per-tenant identity, branding, languages, contact, and security." },
+    "scrapers":          { title: "Scrapers",       description: "Site crawler per tenant — keeps the knowledge base fresh." },
+    "platform-settings": { title: "Platform",       description: "Global tuning that applies to every tenant. Leave a field blank to inherit the platform default." },
+  };
+  const meta = PAGE_META[activeTab] || {};
+
+  return (
+    <AdminShell
+      title="Super Admin"
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      user={{ email: userEmail, type: "super_admin" }}
+      onLogout={handleLogout}
+      pageTitle={meta.title}
+      pageDescription={meta.description}
+      pageActions={meta.actions}
+    >
 
         {/* ── Dashboard tab ── */}
         {activeTab === "dashboard" && (
           <>
-            <div className="flex justify-between items-center mb-8">
-              <h1 className="text-4xl font-bold text-[#1A2E40]">Dashboard</h1>
-              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogTrigger asChild>
-                  <Button className="bg-[#E06F2C] hover:bg-[#C55D20] text-white" data-testid="create-company-btn">
-                    <Plus className="w-5 h-5 mr-2" /> Create Company
-                  </Button>
-                </DialogTrigger>
-                <DialogContent data-testid="create-company-dialog">
-                  <DialogHeader><DialogTitle>Create New Company</DialogTitle></DialogHeader>
-                  <form onSubmit={handleCreateCompany} className="space-y-4">
-                    <div>
-                      <Label htmlFor="name">Company Name</Label>
-                      <Input id="name" value={newCompany.name}
-                        onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
-                        required data-testid="company-name-input" />
-                    </div>
-                    <div>
-                      <Label htmlFor="email">Admin Email</Label>
-                      <Input id="email" type="email" value={newCompany.email}
-                        onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
-                        required data-testid="company-email-input" />
-                    </div>
-                    <div>
-                      <Label htmlFor="password">Admin Password</Label>
-                      <Input id="password" type="password" value={newCompany.admin_password}
-                        onChange={(e) => setNewCompany({ ...newCompany, admin_password: e.target.value })}
-                        required data-testid="company-password-input" />
-                    </div>
-                    <div>
-                      <Label htmlFor="model">LLM Model</Label>
-                      <Select value={newCompany.llm_model}
-                        onValueChange={(v) => setNewCompany({ ...newCompany, llm_model: v })}>
-                        <SelectTrigger data-testid="llm-model-select"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="gpt-5.2">GPT-5.2 (OpenAI)</SelectItem>
-                          <SelectItem value="gpt-5.1">GPT-5.1 (OpenAI)</SelectItem>
-                          <SelectItem value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</SelectItem>
-                          <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button type="submit" className="w-full bg-[#E06F2C] hover:bg-[#C55D20]"
-                      data-testid="submit-create-company">
-                      Create Company
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <StatCard label="Total companies" value={analytics.total_companies ?? 0} testId="stats-companies" />
+              <StatCard label="Total sessions"  value={analytics.total_sessions  ?? 0} testId="stats-sessions" />
+              <StatCard label="Total documents" value={analytics.total_documents ?? 0} testId="stats-documents" />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white rounded-xl p-6 shadow-md" data-testid="stats-companies">
-                <h3 className="text-gray-500 text-sm mb-1">Total Companies</h3>
-                <p className="text-4xl font-bold text-[#E06F2C]">{analytics.total_companies ?? 0}</p>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-md" data-testid="stats-sessions">
-                <h3 className="text-gray-500 text-sm mb-1">Total Sessions</h3>
-                <p className="text-4xl font-bold text-[#2E8B57]">{analytics.total_sessions ?? 0}</p>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-md" data-testid="stats-documents">
-                <h3 className="text-gray-500 text-sm mb-1">Total Documents</h3>
-                <p className="text-4xl font-bold text-[#1A2E40]">{analytics.total_documents ?? 0}</p>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-2xl font-bold text-[#1A2E40] mb-6">Companies</h2>
-              <div className="space-y-3">
+            <Section
+              title="Companies"
+              description="Every tenant in the platform. Click Admins on a row to manage that tenant's local-admin accounts."
+              bodyClassName="p-0"
+            >
+              <ul className="divide-y divide-border">
                 {companies.map((company) => (
-                  <div key={company.id}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-[#E06F2C] transition-colors"
+                  <li key={company.id}
+                    className="px-5 py-4 hover:bg-muted/30 transition-colors"
                     data-testid={`company-card-${company.id}`}>
                     <div className="flex justify-between items-start gap-4">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-lg font-semibold text-[#1A2E40]">{company.name}</h3>
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            company.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                        <div className="flex items-center gap-2.5 mb-1 flex-wrap">
+                          <h3 className="text-sm font-medium text-foreground">{company.name}</h3>
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            company.status === "active"
+                              ? "bg-success/10 text-success border border-success/20"
+                              : "bg-muted text-muted-foreground border border-border"
                           }`}>{company.status}</span>
                         </div>
-                        <p className="text-gray-500 text-sm mb-2">{company.email}</p>
+                        <p className="text-xs text-muted-foreground mb-2">{company.email}</p>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">Company ID</span>
+                          <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">ID</span>
                           <CopyId id={company.id} />
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">LLM Model</p>
-                        <p className="text-sm font-medium text-[#1A2E40]">{company.llm_model}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">LLM</p>
+                        <p className="text-xs font-mono text-foreground">{company.llm_model}</p>
                         {company.created_at && (
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-[11px] text-muted-foreground mt-1">
                             Created {formatDate(company.created_at)}
                           </p>
                         )}
@@ -1898,95 +1934,29 @@ export default function SuperAdminDashboard() {
                         </Button>
                       </div>
                     </div>
-                  </div>
+                  </li>
                 ))}
-              </div>
-            </div>
+              </ul>
+            </Section>
           </>
         )}
 
-        {/* ── Conversations tab ── */}
-        {activeTab === "conversations" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Conversations</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ConversationsTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-        {/* ── Audit Logs tab ── */}
-        {activeTab === "audit-logs" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Audit Logs</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <AuditLogsTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-        {/* ── Seva Setu Applications tab ── */}
-        {activeTab === "seva-applications" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Seva Setu Applications</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <SevaApplicationsTab token={token} companies={companies} />
-            </div>
-          </>
-        )}
-
-        {/* ── Knowledge Base tab ── */}
+        {/* ── Per-tab content. Headers and wrappers come from AdminShell now;
+            each tab just renders its own component. ── */}
+        {activeTab === "conversations"     && <ConversationsTab     companies={companies} token={token} />}
+        {activeTab === "audit-logs"        && <AuditLogsTab         companies={companies} token={token} />}
+        {activeTab === "seva-applications" && <SevaApplicationsTab  token={token} companies={companies} />}
         {activeTab === "knowledge" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Knowledge Base</h1>
+          <div className="space-y-6">
             <KnowledgeTab token={token} companies={companies} />
-            <div className="mt-8">
-              <BlockedKeywordsPanel token={token} />
-            </div>
-          </>
+            <BlockedKeywordsPanel token={token} />
+          </div>
         )}
-
-        {/* ── Tenant Services tab (Sprint 4D/4E) ── */}
-        {activeTab === "tenant-services" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Services</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <TenantServicesTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-        {/* ── Channel Mappings tab (Sprint 5) ── */}
-        {activeTab === "channel-mappings" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Channel Mappings</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ChannelMappingsTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-        {/* ── Bot Config tab (Sprint 3D) ── */}
-        {activeTab === "bot-config" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Bot Config</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <BotConfigTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-        {/* ── Scrapers tab (Sprint 2F) ── */}
-        {activeTab === "scrapers" && (
-          <>
-            <h1 className="text-4xl font-bold text-[#1A2E40] mb-8">Scrapers</h1>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <ScrapersTab companies={companies} token={token} />
-            </div>
-          </>
-        )}
-
-      </div>
+        {activeTab === "tenant-services"   && <TenantServicesTab    companies={companies} token={token} />}
+        {activeTab === "channel-mappings"  && <ChannelMappingsTab   companies={companies} token={token} />}
+        {activeTab === "bot-config"        && <BotConfigTab         companies={companies} token={token} />}
+        {activeTab === "scrapers"          && <ScrapersTab          companies={companies} token={token} />}
+        {activeTab === "platform-settings" && <PlatformSettingsTab  token={token} />}
 
       {/* Sprint 11 — admins manager modal */}
       {adminsForCompany && (
@@ -1996,6 +1966,15 @@ export default function SuperAdminDashboard() {
           onClose={() => setAdminsForCompany(null)}
         />
       )}
+    </AdminShell>
+  );
+}
+
+function StatCard({ label, value, testId }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-5" data-testid={testId}>
+      <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-2xl font-semibold text-foreground tabular-nums">{value}</div>
     </div>
   );
 }
@@ -2010,6 +1989,8 @@ function AdminsModal({ company, token, onClose }) {
   const [newPass, setNewPass]   = useState("");
   const [resetting, setResetting] = useState(null); // admin row when reset prompt open
   const [resetPass, setResetPass] = useState("");
+  const [confirmDeleteAdmin, setConfirmDeleteAdmin] = useState(null);
+  const [deletingAdmin, setDeletingAdmin] = useState(false);
 
   const fetchAdmins = useCallback(async () => {
     setLoading(true);
@@ -2051,19 +2032,24 @@ function AdminsModal({ company, token, onClose }) {
     }
   };
 
-  const handleDelete = async (admin) => {
-    if (!window.confirm(`Remove admin ${admin.email}? They'll lose access immediately.`)) return;
+  const handleDelete = (admin) => setConfirmDeleteAdmin(admin);
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDeleteAdmin) return;
+    setDeletingAdmin(true);
     try {
-      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${admin.id}`, {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${confirmDeleteAdmin.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || "Failed");
       toast.success("Admin removed");
+      setConfirmDeleteAdmin(null);
       fetchAdmins();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setDeletingAdmin(false);
     }
   };
 
@@ -2091,16 +2077,16 @@ function AdminsModal({ company, token, onClose }) {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-lg font-semibold">Admins — {company.name}</h3>
-            <p className="text-xs text-slate-400">Tenant {company.id.slice(0, 8)}…</p>
+            <p className="text-xs text-muted-foreground">Tenant {company.id.slice(0, 8)}…</p>
           </div>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
 
         {loading ? (
-          <div className="text-center text-slate-400 py-4">Loading…</div>
+          <div className="text-center text-muted-foreground py-4">Loading…</div>
         ) : (
           <table className="w-full text-sm mb-6">
-            <thead className="bg-slate-50 text-left text-slate-600">
+            <thead className="bg-muted/40 text-left text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">Created</th>
@@ -2112,7 +2098,7 @@ function AdminsModal({ company, token, onClose }) {
               {admins.map((a) => (
                 <tr key={a.id} className="border-t">
                   <td className="px-3 py-2 font-mono text-xs">{a.email}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500">{(a.created_at || "").slice(0, 10)}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{(a.created_at || "").slice(0, 10)}</td>
                   <td className="px-3 py-2 text-xs">
                     {a.password_change_required ? <span className="text-amber-600">forced change pending</span> : "—"}
                   </td>
@@ -2127,7 +2113,7 @@ function AdminsModal({ company, token, onClose }) {
                 </tr>
               ))}
               {admins.length === 0 && (
-                <tr><td colSpan={4} className="text-center py-4 text-slate-400">No admins yet</td></tr>
+                <tr><td colSpan={4} className="text-center py-4 text-muted-foreground">No admins yet</td></tr>
               )}
             </tbody>
           </table>
@@ -2135,7 +2121,7 @@ function AdminsModal({ company, token, onClose }) {
 
         {/* Add admin form */}
         <form onSubmit={handleAdd} className="border-t pt-4 space-y-3">
-          <div className="text-sm font-medium text-[#1A2E40]">Add admin</div>
+          <div className="text-sm font-medium text-foreground">Add admin</div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs">Email</Label>
@@ -2148,7 +2134,7 @@ function AdminsModal({ company, token, onClose }) {
                      type="text" required placeholder="They'll be forced to change it" />
             </div>
           </div>
-          <Button type="submit" disabled={adding} className="bg-[#E06F2C] hover:bg-[#C55D20] text-white">
+          <Button type="submit" disabled={adding} className="bg-primary hover:bg-primary/90 text-white">
             <UserPlus className="w-4 h-4 mr-2" /> {adding ? "Adding…" : "Add admin"}
           </Button>
         </form>
@@ -2158,7 +2144,7 @@ function AdminsModal({ company, token, onClose }) {
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setResetting(null)}>
             <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
               <h4 className="font-semibold mb-2">Reset password</h4>
-              <p className="text-sm text-slate-500 mb-3">
+              <p className="text-sm text-muted-foreground mb-3">
                 Set a new bootstrap password for <strong>{resetting.email}</strong>. They'll be forced
                 to change it on next login.
               </p>
@@ -2176,6 +2162,17 @@ function AdminsModal({ company, token, onClose }) {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteAdmin}
+        onOpenChange={(o) => !o && setConfirmDeleteAdmin(null)}
+        title="Remove admin?"
+        description={confirmDeleteAdmin && `${confirmDeleteAdmin.email} will lose access to this tenant immediately. Their JWT will be rejected on the next request.`}
+        confirmLabel="Remove admin"
+        destructive
+        loading={deletingAdmin}
+        onConfirm={handleDeleteConfirmed}
+      />
     </div>
   );
 }

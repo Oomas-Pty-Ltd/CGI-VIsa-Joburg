@@ -158,8 +158,23 @@ class ComplianceService:
                     json.dumps(metadata, indent=2)
                 )
                 
-                # Add README
-                readme = """SEVA SETU BOT - DATA EXPORT
+                # Add README — branding + contact pulled from the tenant's
+                # bot_config so the export reflects the operator, not the
+                # platform.
+                try:
+                    from services.bot_config import get_bot_config
+                    cfg = await get_bot_config(company_id)
+                    brand = cfg.org_name or cfg.bot_name or "Service"
+                    contact_email = (cfg.contact or {}).get("email") or ""
+                except Exception:
+                    brand = "Service"
+                    contact_email = ""
+                contact_line = (
+                    f"For questions, contact: {contact_email}"
+                    if contact_email else
+                    "For questions, contact your service administrator."
+                )
+                readme = f"""{brand.upper()} - DATA EXPORT
 ========================
 
 This archive contains all personal data associated with your account.
@@ -173,7 +188,7 @@ This export was generated in compliance with:
 - POPIA (Protection of Personal Information Act)
 - DPDA (Digital Personal Data Protection Act)
 
-For questions, contact: privacy@sevasetu.gov.in
+{contact_line}
 """
                 zip_file.writestr('README.txt', readme)
             

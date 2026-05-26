@@ -21,6 +21,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Section } from "@/components/admin/Section";
+import { EmptyState } from "@/components/admin/EmptyState";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -43,6 +46,8 @@ export default function ChannelMappingsTab({ companies, token }) {
   const [filterChannel, setFilterChannel] = useState("");
   const [filterCompany, setFilterCompany] = useState("");
   const [editing, setEditing]   = useState(null); // null | row | "new"
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const companyName = (id) => companies.find((c) => c.id === id)?.name ?? id;
 
@@ -67,9 +72,11 @@ export default function ChannelMappingsTab({ companies, token }) {
 
   useEffect(() => { fetchMappings(); }, [fetchMappings]);
 
-  const handleDelete = async (row) => {
-    if (!window.confirm(`Delete mapping ${channelLabel(row.channel_type)}: ${row.external_id}? Inbound messages will fall back to the default tenant.`)) return;
+  const handleDeleteConfirmed = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
     try {
+      const row = confirmDelete;
       const path = `${API}/super-admin/channel-mappings/${row.channel_type}/${encodeURIComponent(row.external_id)}`;
       const res = await fetch(path, {
         method: "DELETE",
@@ -80,103 +87,106 @@ export default function ChannelMappingsTab({ companies, token }) {
         throw new Error(data.detail || "Delete failed");
       }
       toast.success("Mapping deleted");
+      setConfirmDelete(null);
       fetchMappings();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      {/* Header + actions */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Channel Mappings</h2>
-          <p className="text-sm text-slate-500">
-            Route inbound WhatsApp / Facebook webhook traffic to the right tenant.
-          </p>
+      {/* Top bar: filters + actions */}
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-end">
+          <div className="w-56">
+            <Label className="text-xs text-muted-foreground">Channel type</Label>
+            <Select value={filterChannel || "all"} onValueChange={(v) => setFilterChannel(v === "all" ? "" : v)}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All channels" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All channels</SelectItem>
+                {CHANNELS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-72">
+            <Label className="text-xs text-muted-foreground">Tenant</Label>
+            <Select value={filterCompany || "all"} onValueChange={(v) => setFilterCompany(v === "all" ? "" : v)}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All tenants" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All tenants</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchMappings} disabled={loading}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <Button variant="outline" size="sm" onClick={fetchMappings} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button onClick={() => setEditing("new")}>
-            <Plus className="mr-2 h-4 w-4" /> New mapping
+          <Button size="sm" onClick={() => setEditing("new")}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> New mapping
           </Button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap items-end">
-        <div className="w-56">
-          <Label className="text-xs">Channel type</Label>
-          <Select value={filterChannel || "all"} onValueChange={(v) => setFilterChannel(v === "all" ? "" : v)}>
-            <SelectTrigger><SelectValue placeholder="All channels" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All channels</SelectItem>
-              {CHANNELS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-72">
-          <Label className="text-xs">Tenant</Label>
-          <Select value={filterCompany || "all"} onValueChange={(v) => setFilterCompany(v === "all" ? "" : v)}>
-            <SelectTrigger><SelectValue placeholder="All tenants" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All tenants</SelectItem>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="rounded-lg border bg-white overflow-hidden">
+      <Section
+        title="Channel mappings"
+        description="Each row maps an inbound webhook identity (channel + external ID) to a tenant. Unmapped channels fall back to the env-var default tenant with a WARNING log on every inbound message."
+        bodyClassName="p-0"
+      >
         {loading ? (
-          <div className="p-8 text-center text-slate-500">Loading…</div>
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">Loading…</div>
         ) : mappings.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 flex flex-col items-center gap-2">
-            <AlertCircle className="h-8 w-8 text-amber-500" />
-            <div>No mappings configured.</div>
-            <div className="text-xs">All inbound traffic falls back to the env-var default tenant. Add a mapping to route a specific channel.</div>
-          </div>
+          <EmptyState
+            icon={AlertCircle}
+            title="No mappings configured"
+            description="All inbound traffic falls back to the env-var default tenant. Add a mapping to route a specific WhatsApp number or Facebook page to its tenant."
+            action={
+              <Button size="sm" onClick={() => setEditing("new")}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" /> New mapping
+              </Button>
+            }
+          />
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600 text-left">
+            <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-2">Channel</th>
-                <th className="px-3 py-2">External ID</th>
-                <th className="px-3 py-2">Tenant</th>
-                <th className="px-3 py-2">Metadata</th>
-                <th className="px-3 py-2 text-right">Actions</th>
+                <th className="px-4 py-2.5">Channel</th>
+                <th className="px-4 py-2.5">External ID</th>
+                <th className="px-4 py-2.5">Tenant</th>
+                <th className="px-4 py-2.5">Metadata</th>
+                <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {mappings.map((row) => (
-                <tr key={`${row.channel_type}::${row.external_id}`} className="border-t hover:bg-slate-50">
-                  <td className="px-3 py-2">
+                <tr key={`${row.channel_type}::${row.external_id}`} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-4 py-3">
                     <Badge variant="secondary" className="gap-1">
                       <ChannelIcon type={row.channel_type} className="h-3 w-3" />
                       {channelLabel(row.channel_type)}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs">{row.external_id}</td>
-                  <td className="px-3 py-2">
-                    <div>{row.company_name || companyName(row.company_id)}</div>
-                    <div className="text-xs text-slate-400 font-mono">{row.company_id?.slice(0, 8)}…</div>
+                  <td className="px-4 py-3 font-mono text-xs">{row.external_id}</td>
+                  <td className="px-4 py-3">
+                    <div className="text-foreground">{row.company_name || companyName(row.company_id)}</div>
+                    <div className="text-xs text-muted-foreground font-mono">{row.company_id?.slice(0, 8)}…</div>
                   </td>
-                  <td className="px-3 py-2 text-xs text-slate-500">
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
                     {row.metadata && Object.keys(row.metadata).length > 0
                       ? JSON.stringify(row.metadata)
-                      : <span className="text-slate-300">—</span>}
+                      : <span>—</span>}
                   </td>
-                  <td className="px-3 py-2 text-right space-x-1">
+                  <td className="px-4 py-3 text-right space-x-1">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
                       <Edit2 className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => handleDelete(row)}>
-                      <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(row)}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   </td>
                 </tr>
@@ -184,7 +194,7 @@ export default function ChannelMappingsTab({ companies, token }) {
             </tbody>
           </table>
         )}
-      </div>
+      </Section>
 
       {editing && (
         <MappingDialog
@@ -195,6 +205,20 @@ export default function ChannelMappingsTab({ companies, token }) {
           onSaved={() => { setEditing(null); fetchMappings(); }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => !o && setConfirmDelete(null)}
+        title="Delete channel mapping?"
+        description={confirmDelete && (
+          `Removes the mapping ${channelLabel(confirmDelete.channel_type)}: ${confirmDelete.external_id}. ` +
+          "Inbound messages from this channel will fall back to the env-var default tenant."
+        )}
+        confirmLabel="Delete mapping"
+        destructive
+        loading={deleting}
+        onConfirm={handleDeleteConfirmed}
+      />
     </div>
   );
 }
@@ -262,7 +286,7 @@ function MappingDialog({ row, companies, token, onClose, onSaved }) {
           <div>
             <Label className="text-xs">
               External ID
-              <span className="text-slate-400 ml-1">
+              <span className="text-muted-foreground ml-1">
                 ({channelType === "facebook" ? "Page ID" : "phone number incl. country code"})
               </span>
             </Label>

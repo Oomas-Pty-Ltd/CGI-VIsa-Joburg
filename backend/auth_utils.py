@@ -40,9 +40,17 @@ def create_token(user_id: str, user_type: str, company_id: str = None) -> str:
 # here but never read them — so the blacklist was a no-op. We now consult
 # it on every protected request with a 60s TTL cache to keep the hot path
 # fast (one Mongo round-trip per (user_id, company_id) per minute).
-_INVALIDATION_TTL_SECONDS = 60
+# Cache TTL is platform-config driven (cache_token_blacklist_ttl_seconds).
 # (user_id, company_id) -> (cache_expiry_monotonic, invalidated_at_iso or None)
 _invalidation_cache: Dict[Tuple[Optional[str], Optional[str]], Tuple[float, Optional[str]]] = {}
+
+
+def _invalidation_ttl() -> int:
+    try:
+        from services import platform_config
+        return int(platform_config.get("cache_token_blacklist_ttl_seconds", 60))
+    except Exception:
+        return 60
 
 
 def invalidate_token_cache(user_id: Optional[str] = None, company_id: Optional[str] = None) -> None:
@@ -78,7 +86,7 @@ async def _lookup_invalidation(db, user_id: str, company_id: Optional[str]) -> O
         query, {"_id": 0, "invalidated_at": 1}, sort=[("invalidated_at", -1)]
     )
     invalidated_at = row.get("invalidated_at") if row else None
-    _invalidation_cache[key] = (now + _INVALIDATION_TTL_SECONDS, invalidated_at)
+    _invalidation_cache[key] = (now + _invalidation_ttl(), invalidated_at)
     return invalidated_at
 
 

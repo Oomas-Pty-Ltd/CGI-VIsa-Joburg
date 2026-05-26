@@ -1,10 +1,15 @@
 """
 Application-level configuration.
-COMPANY_ID is loaded from the environment and validated against the DB at startup.
-Use `get_company_id()` as a FastAPI dependency to inject it into routes.
+
+``COMPANY_ID`` is the default-tenant env var, loaded and validated against
+``db.companies`` at startup by ``validate_company_id``. Use
+``tenant.get_tenant_id`` (header-aware, validates each request) as the
+FastAPI dependency in route handlers. ``COMPANY_ID`` is only the fallback
+when no ``X-Company-Id`` header is supplied (single-tenant deployments,
+internal services, and webhook helpers that resolve the tenant from the
+inbound channel and fall back to default when channel resolution fails).
 """
 import os
-from fastapi import HTTPException, status
 
 # Set at startup by validate_company_id(); None until then.
 COMPANY_ID: str | None = None
@@ -30,16 +35,3 @@ async def validate_company_id(db) -> str:
 
     COMPANY_ID = company_id
     return company_id
-
-
-def get_company_id() -> str:
-    """
-    FastAPI dependency — returns the validated company ID.
-    Always succeeds after a successful startup.
-    """
-    if not COMPANY_ID:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Company ID not initialised — server may still be starting up."
-        )
-    return COMPANY_ID

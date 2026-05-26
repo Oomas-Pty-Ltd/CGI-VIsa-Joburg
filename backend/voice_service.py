@@ -14,14 +14,16 @@ from emergentintegrations.llm.openai import OpenAITextToSpeech
 import os
 import re
 import logging
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-# Extended language support
-# 22 Indian official languages + 11 South African official languages
+# Platform-default voice mapping used when a tenant hasn't set
+# ``tts_voice`` on its supported_languages entry. Tenants override the
+# voice per language via super-admin → Bot Config → Languages.
 SUPPORTED_LANGUAGES = {
     # Indian Languages (ISO 639-1 codes where available)
     "en": {"name": "English", "voice": "nova", "region": "both"},
@@ -75,10 +77,37 @@ class EnhancedVoiceService:
         self.tts = OpenAITextToSpeech(api_key=self.api_key)
         self.max_chunk_size = 4000  # Characters per chunk
     
-    def get_voice_for_language(self, language: str) -> str:
-        """Get appropriate TTS voice for language"""
+    def get_voice_for_language(self, language: str, tenant_voice: Optional[str] = None) -> str:
+        """Get appropriate TTS voice for a language code.
+
+        ``tenant_voice`` is the explicit voice override from the tenant's
+        ``bot_config.supported_languages[].tts_voice`` (resolved by callers
+        via :py:meth:`resolve_tenant_voice`). When unset, falls back to the
+        platform default in ``SUPPORTED_LANGUAGES``.
+        """
+        if tenant_voice:
+            return tenant_voice
         lang_config = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES.get("en"))
         return lang_config.get("voice", "nova")
+
+    async def resolve_tenant_voice(self, language: str, company_id: Optional[str]) -> Optional[str]:
+        """Look up the tenant's per-language ``tts_voice`` from bot_config.
+
+        Returns the voice ID string when set, otherwise None (signalling
+        the caller should fall back to ``get_voice_for_language``'s
+        platform default).
+        """
+        if not company_id:
+            return None
+        try:
+            from services.bot_config import get_bot_config
+            cfg = await get_bot_config(company_id)
+            for entry in (cfg.supported_languages or []):
+                if isinstance(entry, dict) and entry.get("code") == language:
+                    return (entry.get("tts_voice") or "").strip() or None
+        except Exception:
+            pass
+        return None
     
     def get_supported_languages(self, region: str = None) -> dict:
         """Get list of supported languages, optionally filtered by region"""
@@ -173,15 +202,25 @@ class EnhancedVoiceService:
         
         return helper(num)
     
-    async def text_to_speech(self, text: str, language: str = "en", convert_numbers: bool = True) -> str:
-        """Convert text to speech and return base64 audio"""
-        
+    async def text_to_speech(
+        self,
+        text: str,
+        language: str = "en",
+        convert_numbers: bool = True,
+        company_id: Optional[str] = None,
+    ) -> str:
+        """Convert text to speech and return base64 audio.
+
+        ``company_id`` enables per-tenant voice overrides via
+        ``bot_config.supported_languages[].tts_voice``.
+        """
         # Convert numbers/currency if enabled
         if convert_numbers:
             text = self.convert_numbers_to_spoken(text, language)
-        
-        # Get voice for language
-        voice = self.get_voice_for_language(language)
+
+        # Resolve voice: tenant override → platform default.
+        tenant_voice = await self.resolve_tenant_voice(language, company_id)
+        voice = self.get_voice_for_language(language, tenant_voice=tenant_voice)
         
         try:
             audio_base64 = await self.tts.generate_speech_base64(

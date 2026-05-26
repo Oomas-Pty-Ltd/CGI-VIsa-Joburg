@@ -97,8 +97,8 @@ class NotificationService:
                 "template": "{message}"
             },
             NotificationType.WELCOME: {
-                "title": "Welcome to Seva Setu",
-                "template": "Namaste! Welcome to Seva Setu Bot. We're here to help with your consular needs."
+                "title": "Welcome",
+                "template": "Welcome! We're here to help."
             },
             NotificationType.REMINDER: {
                 "title": "Reminder",

@@ -85,7 +85,6 @@ class _StageTimer:
 from database import get_database
 from auth_utils import verify_token
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-from presidio_service import mask_pii
 from knowledge_scraper import (
     get_realtime_knowledge,
     search_knowledge,
@@ -105,25 +104,18 @@ from security.input_sanitizer import sanitize_user_input, create_safe_system_pro
 from security.guardrail import guardrail_service, sanitize_logs
 from security.rate_limiter import rate_limiter, check_rate_limit
 from security.cost_monitor import cost_monitor, record_llm_usage
-from config import get_company_id
 from tenant import get_tenant_id
 from services.bot_config import get_bot_config
 
 # Services imports
-from services.intent_classifier import (
-    intent_classifier,
-    classify_intent,
-    get_deterministic_response,
-    detect_target_language,
-    IntentCategory,
-)
+from services.intent_classifier import detect_target_language
 from services.escalation_service import (
     escalation_service,
     EscalationReason,
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query
+from services.application_flow import process_flow, flow_suffix, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query, preload_flow_keywords, preload_service_patterns
 from services.service_registry import get_service
 from services.pdf_service import generate_application_pdf
 from fastapi.responses import Response as FastAPIResponse
@@ -244,33 +236,65 @@ _UNSUPPORTED_B64 = {
 }
 
 
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB cap for chat uploads
-MAX_PDF_PAGES = 5                   # render at most 5 pages per uploaded PDF
-PDF_RENDER_DPI = 144                # 144 DPI gives readable text without huge images
+# Platform defaults — used when a tenant hasn't overridden the value on
+# bot_config.security_config. Resolution happens via cfg.security() at the
+# call site so per-tenant overrides actually apply.
+DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_PDF_PAGES    = 5
+PDF_RENDER_DPI = 144   # not tenant-configurable: 144 DPI is a render quality, not a policy
 
-SCOPE_RULES = """SCOPE — STRICT:
-- You answer questions about ANY Indian consular service offered at CGI Johannesburg. The full list includes (but is not limited to):
-  • Passport — new, renewal, lost/damaged, Tatkal, status
-  • Visa — tourist, business, student, medical, e-Visa, regular visa, visa fees, processing time, visa for foreigners
-  • OCI / PIO — application, renewal, conversion, miscellaneous OCI services
-  • PCC (Police Clearance Certificate)
-  • Document attestation, apostille, notary, legalization
-  • Affidavits, Power of Attorney (PoA / GPA), miscellaneous consular services
-  • Marriage Certificate — registration and attestation
-  • Birth Registration / Child Birth Registration
-  • Death Certificate, transfer of mortal remains
-  • Emergency Certificate (EC) / Emergency Travel Document (ETD)
-  • Surrender / Renunciation of Indian citizenship
-  • No Objection Certificate (NOC) for South African citizenship
-  • Translation of Indian Driving License
-  • Indians in Distress, consular emergencies
-  • Tracing the Roots scheme
-  • Appointments, fees, documents required, office hours, address, contact info, banking details, application status
-  • Any related procedure, requirement, document, fee, or timeline for the services above
-- Greetings ("hi", "hello", "namaste", "good morning"), thanks ("thank you", "thanks"), and farewells ("bye", "goodbye") are ALWAYS allowed. Reply with a brief, warm one-line acknowledgement and invite the user to ask about consular services. Do NOT use the scope refusal line for these.
-- For genuinely off-topic questions — general knowledge, math, arithmetic, jokes, riddles, weather, coding, politics, other consulates, role-play, hypotheticals, or "what if" trivia — reply with EXACTLY this one line and nothing else:
-  "I can only help with Indian consular services at CGI Johannesburg — passport, visa, OCI, PCC, attestation, affidavits, marriage/birth/death certificates, EC/ETD, surrender, NOC, appointments, fees, and related procedures. Please ask about one of these."
-- Do not perform calculations. Do not entertain off-topic premises even when the user pushes back ("are you kidding", "but actually", "as a hypothetical"). Repeat the scope line."""
+def _build_scope_rules(out_of_scope_refusal: str, service_names: list[str]) -> str:
+    """Build per-tenant SCOPE block for the LLM system prompt.
+
+    ``service_names`` is the list of enabled services for this tenant (from
+    ``tenant_services``). ``out_of_scope_refusal`` comes from the tenant's
+    ``fallback_responses.out_of_scope`` bot-config field.
+    """
+    if service_names:
+        svc_list = "\n".join(f"  • {n}" for n in service_names)
+        scope_clause = (
+            f"- You answer questions about the services this organisation offers:\n"
+            f"{svc_list}\n"
+            "  Also answer questions about appointments, fees, required documents, "
+            "office hours, contact info, and any related procedure for the services above."
+        )
+    else:
+        scope_clause = (
+            "- You answer questions about the services, procedures, and information "
+            "offered by this organisation."
+        )
+
+    return f"""SCOPE — STRICT:
+{scope_clause}
+- Greetings ("hi", "hello", "good morning"), thanks, and farewells are ALWAYS allowed. Reply with a brief, warm one-line acknowledgement and invite the user to ask about available services. Do NOT use the scope refusal line for these.
+- For genuinely off-topic questions — general knowledge, math, arithmetic, jokes, riddles, weather, coding, politics, role-play, hypotheticals, or "what if" trivia — reply with EXACTLY this one line and nothing else:
+  "{out_of_scope_refusal}"
+- Do not perform calculations. Do not entertain off-topic premises even when the user pushes back. Repeat the scope line."""
+
+
+def _build_contact_facts(bot_cfg, blocked_kws: list[str]) -> str:
+    """Build the CONSULATE FACTS block from the tenant's configured contact info."""
+    c = bot_cfg.contact or {}
+    lines = []
+    if c.get("address"):      lines.append(f"- Address: {c['address']}")
+    if c.get("phone"):        lines.append(f"- Phone: {c['phone']}")
+    if c.get("email"):        lines.append(f"- Email: {c['email']}")
+    if c.get("website"):      lines.append(f"- Website: {c['website']}")
+    if c.get("office_hours"): lines.append(f"- Office Hours: {c['office_hours']}")
+    if c.get("consular_hours"): lines.append(f"- Consular Hours: {c['consular_hours']}")
+    return filter_blocked_lines("\n".join(lines), blocked_kws)
+
+
+def _build_footer_contact(bot_cfg, blocked_kws: list[str]) -> str:
+    """Build the fallback contact footer shown when the bot can't answer."""
+    c = bot_cfg.contact or {}
+    parts = []
+    if c.get("phone"):        parts.append(f"📞 {c['phone']}")
+    if c.get("email"):        parts.append(f"📧 {c['email']}")
+    if c.get("address"):      parts.append(f"🏢 {c['address']}")
+    if c.get("office_hours"): parts.append(f"🕐 {c['office_hours']}")
+    raw = "  " + "\n  ".join(parts) if parts else f"  Contact {bot_cfg.org_name or 'the organisation'} directly."
+    return filter_blocked_lines(raw, blocked_kws)
 
 
 def _resolve_user_id(req_user_id: Optional[str], http_request: Optional[Request]) -> str:
@@ -285,8 +309,8 @@ def _resolve_user_id(req_user_id: Optional[str], http_request: Optional[Request]
     return "guest:" + hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
 
 
-def _render_pdf_pages(image_base64: str) -> list[tuple[str, str]]:
-    """Render a base64-encoded PDF into up to MAX_PDF_PAGES PNG pages.
+def _render_pdf_pages(image_base64: str, max_pages: int = DEFAULT_MAX_PDF_PAGES) -> list[tuple[str, str]]:
+    """Render a base64-encoded PDF into up to ``max_pages`` PNG pages.
     Returns a list of (page_b64, "image/png"). Raises ValueError on failure.
     """
     import fitz  # PyMuPDF — already in requirements.txt
@@ -301,7 +325,7 @@ def _render_pdf_pages(image_base64: str) -> list[tuple[str, str]]:
     try:
         if doc.page_count == 0:
             raise ValueError("PDF has no pages.")
-        page_count = min(doc.page_count, MAX_PDF_PAGES)
+        page_count = min(doc.page_count, max_pages)
         scale = PDF_RENDER_DPI / 72.0
         mat = fitz.Matrix(scale, scale)
         pages: list[tuple[str, str]] = []
@@ -313,25 +337,32 @@ def _render_pdf_pages(image_base64: str) -> list[tuple[str, str]]:
         doc.close()
 
 
-def _validate_and_normalize_upload(image_base64: str) -> list[tuple[str, str]]:
-    """Enforce the 5 MB cap, then expand the upload into one or more
+def _validate_and_normalize_upload(
+    image_base64: str,
+    max_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+    max_pdf_pages: int = DEFAULT_MAX_PDF_PAGES,
+) -> list[tuple[str, str]]:
+    """Enforce the size cap, then expand the upload into one or more
     (b64, media_type) pages ready to attach to a vision-model message.
 
-    - Regular images → single-item list with format normalised.
-    - PDFs           → up to MAX_PDF_PAGES PNG pages rendered via PyMuPDF.
+    Limits come from the tenant's ``bot_config.security_config``; callers
+    that already have a ``BotConfig`` instance should pass the resolved
+    values from ``cfg.security()``. Defaults match the previous platform
+    behaviour so legacy callers keep working unchanged.
 
     Raises ValueError on rejection (oversize, unrecoverable format, etc.).
     """
     approx_bytes = (len(image_base64) * 3) // 4
-    if approx_bytes > MAX_UPLOAD_BYTES:
+    if approx_bytes > max_bytes:
+        max_mb = max_bytes / (1024 * 1024)
         raise ValueError(
-            f"File too large. Maximum upload size is 5 MB "
+            f"File too large. Maximum upload size is {max_mb:.1f} MB "
             f"(your file is approximately {approx_bytes / (1024 * 1024):.1f} MB). "
             f"Please compress the file or send a smaller one."
         )
     # PDF magic bytes — render each page as a PNG so the vision model can read it.
     if image_base64[:10].startswith("JVBER"):
-        return _render_pdf_pages(image_base64)
+        return _render_pdf_pages(image_base64, max_pages=max_pdf_pages)
     b64, mime = _normalize_image(image_base64)
     return [(b64, mime)]
 
@@ -415,6 +446,11 @@ async def chat(
 
     _resolved_user_id = _resolve_user_id(request.user_id, http_request)
 
+    # Preload tenant flow-keywords so sync is_apply_intent / is_yes / etc.
+    # below use per-tenant overrides.
+    await preload_flow_keywords(tenant_id)
+    await preload_service_patterns(tenant_id)
+
     # Sanitize and validate user input
     sanitization_result = sanitize_user_input(request.message, context="web_chat")
 
@@ -434,7 +470,12 @@ async def chat(
     _validated_pages: list[tuple[str, str]] = []
     if request.image_base64:
         try:
-            _validated_pages = _validate_and_normalize_upload(request.image_base64)
+            _sec = _cfg.security()
+            _validated_pages = _validate_and_normalize_upload(
+                request.image_base64,
+                max_bytes=_sec["upload_max_bytes"],
+                max_pdf_pages=_sec["upload_max_pdf_pages"],
+            )
         except ValueError as _ve:
             return ChatResponse(
                 session_id=request.session_id or str(uuid.uuid4()),
@@ -444,99 +485,38 @@ async def chat(
 
     sanitized_message = request.message
 
-    # Intent classification - try rule-based first
-    intent_result = classify_intent(sanitized_message)
-    logger.info(f"[INTENT] Category: {intent_result.category.value}, Confidence: {intent_result.confidence:.2f}, Requires LLM: {intent_result.requires_llm}")
-    
-    # Check for escalation trigger
-    if intent_result.escalation_needed:
+    # Escalation check — keyword-based, no LLM cost. Tenant-scoped so
+    # per-tenant keyword/pattern overrides on bot_config apply.
+    _should_escalate, _esc_reason, _esc_priority = await escalation_service.should_escalate(
+        sanitized_message, company_id=tenant_id
+    )
+    if _should_escalate:
         user_id = _resolved_user_id
         session_id = request.session_id or str(uuid.uuid4())
-        
-        # Get session for conversation history
         session = await session_manager.get_or_create_session(
             channel="web",
             user_identifier=user_id,
             session_id=session_id
         )
-        
-        # Create escalation (tenant-scoped so it shows up under the
-        # right tenant's admin queue, not in a global pool).
         escalation = await escalation_service.create_escalation(
             session_id=session['id'],
             user_identifier=user_id,
             channel="web",
-            reason=EscalationReason.EMERGENCY if intent_result.category == IntentCategory.EMERGENCY else EscalationReason.USER_REQUEST,
-            priority=EscalationPriority.URGENT if intent_result.category == IntentCategory.EMERGENCY else EscalationPriority.MEDIUM,
+            reason=_esc_reason,
+            priority=_esc_priority,
             description=sanitized_message,
             company_id=tenant_id,
             conversation_history=session.get('messages', [])
         )
-        
-        response = escalation_service.get_escalation_response(
-            EscalationPriority.URGENT if intent_result.category == IntentCategory.EMERGENCY else EscalationPriority.MEDIUM
-        )
+        response = await escalation_service.get_escalation_response(_esc_priority, company_id=tenant_id)
         response += f"\n\n**Reference ID:** {escalation.id[:8].upper()}"
-        
         return ChatResponse(
             session_id=session['id'],
             response=response,
             step="escalated"
         )
-    
-    # Map intent categories that have a direct application flow
-    _INTENT_TO_SERVICE = {
-        IntentCategory.PASSPORT: "passport",
-        IntentCategory.VISA:     "visa",
-        IntentCategory.OCI:      "oci",
-        IntentCategory.PIO:      "oci",  # PIO converts to OCI
-    }
 
-    # Try deterministic response first (no LLM cost).
-    # Skip for non-English — deterministic strings are English-only; let LLM translate.
-    deterministic_response = get_deterministic_response(intent_result)
-    if (deterministic_response and not request.image_base64
-            and not is_tracking_query(sanitized_message)
-            and (not request.language or request.language == "en")):
-        user_id = _resolved_user_id
-        session = await session_manager.get_or_create_session(
-            channel="web",
-            user_identifier=user_id,
-            session_id=request.session_id
-        )
-
-        # Add source tag
-        response_data = intent_classifier.get_structured_response(intent_result.suggested_response_key)
-        source_tag = f"\n\n---\n*Source: {response_data.get('source', 'CGI Johannesburg')}*"
-        final_response = deterministic_response + source_tag
-
-        # TC 1.2 — always ask if the information is sufficient
-        final_response += "\n\n---\nIs this sufficient information, or do you need more details?"
-
-        # TC 1.3 — if this is a core service, invite them to start the application
-        if _FLOW_ENABLED:
-            matched_service = _INTENT_TO_SERVICE.get(intent_result.category)
-            matched_svc_obj = await get_service(tenant_id, matched_service) if matched_service else None
-            if matched_svc_obj:
-                final_response += (
-                    f"\n\n**Are you interested in starting the application process for {matched_svc_obj.name}?** "
-                    f"Type **apply** to begin."
-                )
-
-        # Store messages
-        await session_manager.add_message(session['id'], "user", request.message)
-        await session_manager.add_message(session['id'], "assistant", final_response,
-                                          metadata={"intent": intent_result.category.value, "llm_used": False})
-
-        logger.info(f"[INTENT] Served deterministic response for: {intent_result.category.value}")
-
-        return ChatResponse(
-            session_id=session['id'],
-            response=final_response,
-            step="complete"
-        )
-    
-    # Fall through to LLM for complex queries
+    # All other messages → LLM with tenant-specific context
     user_id    = _resolved_user_id
     # tenant_id is the canonical company_id (from X-Company-Id header, falling
     # back to the env var inside get_tenant_id). The request.company_id body
@@ -554,7 +534,7 @@ async def chat(
             session_id=request.session_id,
             metadata={"company_id": company_id, "language": request.language}
         ),
-        get_realtime_knowledge(),
+        get_realtime_knowledge(company_id),
     )
     session_id = session['id']
 
@@ -572,7 +552,9 @@ async def chat(
 
     # ── Blocked keyword: return immediately without calling LLM ────────
     if context_info == BLOCKED_SENTINEL:
-        bot_response = "I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+        _blk_cfg = await get_bot_config(company_id)
+        _blk_footer = _build_footer_contact(_blk_cfg, [])
+        bot_response = f"I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n{_blk_footer}"
         await session_manager.add_message(session_id, "user", sanitized_message)
         await session_manager.add_message(session_id, "assistant", bot_response)
         return JSONResponse({"response": bot_response, "session_id": session_id})
@@ -654,33 +636,23 @@ async def chat(
         _clean_svc_hint = filter_blocked_lines(svc_docs_hint, _blocked_kws)
         _prohibition = blocked_prohibition(_blocked_kws)
 
-        _consulate_facts = filter_blocked_lines(
-            "- Acting Consul General: Mr. Harish Kumar\n"
-            "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-            "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
-            "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
-            "- Website: www.cgijoburg.gov.in\n"
-            "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-            "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces\n"
-            "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
-            "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
-            "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
-            _blocked_kws,
-        )
-        _footer_contact = filter_blocked_lines(
-            "  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in\n"
-            "  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-            "  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-            "  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/",
-            _blocked_kws,
-        )
-
         _bot_cfg = await get_bot_config(company_id)
-        _base_system_message = f"""You are {_bot_cfg.bot_name}, the official consular assistant for {_bot_cfg.org_name}.
+        _ns_svc_rows = await db.tenant_services.find(
+            {"company_id": company_id, "enabled": True}, {"_id": 0, "name": 1}
+        ).sort("display_order", 1).to_list(50)
+        _ns_svc_names = [r["name"] for r in _ns_svc_rows if r.get("name")]
+
+        _consulate_facts = _build_contact_facts(_bot_cfg, _blocked_kws)
+        _footer_contact  = _build_footer_contact(_bot_cfg, _blocked_kws)
+        _ns_scope        = _build_scope_rules(
+            _bot_cfg.fallback("out_of_scope"), _ns_svc_names
+        )
+        _org_label_ns = _bot_cfg.org_name or _bot_cfg.bot_name
+        _base_system_message = f"""You are {_bot_cfg.bot_name}, the official assistant for {_org_label_ns}.
 {_prohibition}
 {_lang_instruction(request.language or "en")}
 
-{SCOPE_RULES}
+{_ns_scope}
 
 RESPONSE STYLE:
 - Be concise, accurate, and helpful.
@@ -690,13 +662,14 @@ RESPONSE STYLE:
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
 - When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
-
+{f'''
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
-CONSULATE FACTS:
+ORGANISATION FACTS:
 {_consulate_facts}
+''' if _consulate_facts else ''}
 {_clean_svc_hint}
-ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):
+ADDITIONAL KNOWLEDGE (from uploaded documents, knowledge base, and web sources):
 {_clean_ctx}
 
 IF the answer is not in any of the data above, say so briefly and direct the user to:
@@ -747,7 +720,7 @@ IF the answer is not in any of the data above, say so briefly and direct the use
         try:
             # Detect language from message
             lang_code = request.language or "en"
-            audio_base64 = await voice_service.text_to_speech(bot_response, lang_code)
+            audio_base64 = await voice_service.text_to_speech(bot_response, lang_code, company_id=tenant_id)
         except Exception as e:
             logger.warning(f"Voice generation failed: {sanitize_logs(str(e))}")
     
@@ -789,6 +762,10 @@ async def chat_stream(
 
     _resolved_user_id = _resolve_user_id(request.user_id, http_request)
 
+    # Preload tenant flow keywords for sync apply/yes/no/discard helpers.
+    await preload_flow_keywords(tenant_id)
+    await preload_service_patterns(tenant_id)
+
     _san = sanitize_user_input(request.message or "", context="web_chat")
     _t.mark("sanitize")
     if not _san.is_safe:
@@ -811,7 +788,13 @@ async def chat_stream(
     _validated_pages: list[tuple[str, str]] = []
     if request.image_base64:
         try:
-            _validated_pages = _validate_and_normalize_upload(request.image_base64)
+            _stream_cfg = await get_bot_config(tenant_id)
+            _stream_sec = _stream_cfg.security()
+            _validated_pages = _validate_and_normalize_upload(
+                request.image_base64,
+                max_bytes=_stream_sec["upload_max_bytes"],
+                max_pdf_pages=_stream_sec["upload_max_pdf_pages"],
+            )
         except ValueError as _ve:
             _t.flush(extra="path=upload_rejected")
             _err_msg = str(_ve)
@@ -819,10 +802,8 @@ async def chat_stream(
                 yield f"data: {json.dumps({'error': _err_msg})}\n\n"
             return _sse(_bad_upload())
 
-    # ── Intent classification (fast, no I/O) ─────────────────────────
-    intent_result  = classify_intent(sanitized_message)
-    deterministic  = get_deterministic_response(intent_result)
-    _t.mark("intent")
+    # ── Language-switch: detect target language, return signal to frontend ──
+    _lang_switch_code = await detect_target_language(sanitized_message, company_id=tenant_id)
 
     async def _stream_deterministic(text: str, sid: str, step: str, pdf_url: str = None, lang_switch: str = None) -> AsyncGenerator:
         yield f"data: {json.dumps({'chunk': text})}\n\n"
@@ -833,33 +814,18 @@ async def chat_stream(
             done_event['lang_switch'] = lang_switch
         yield f"data: {json.dumps(done_event)}\n\n"
 
-    # ── Language-switch intent: detect target language, return signal ──
-    _lang_switch_code = None
-    if intent_result.category == IntentCategory.LANGUAGE_SWITCH and not intent_result.requires_llm:
-        _lang_switch_code = detect_target_language(sanitized_message)
-
-    # Only use deterministic shortcut for pure greetings / FAQs with NO active
-    # flow and NO apply intent.  "apply visa", "yes", "no" etc. must always
-    # reach process_flow so the application state-machine runs correctly.
-    # Language-switch is always handled deterministically regardless of UI language.
-    # Other deterministic responses skip for non-English — let LLM translate.
-    _is_lang_switch = intent_result.category == IntentCategory.LANGUAGE_SWITCH and not intent_result.requires_llm
-    if (deterministic and not is_apply_intent(sanitized_message) and not is_tracking_query(sanitized_message)
-            and (_is_lang_switch or not request.language or request.language == "en")):
-        # Quick peek at flow state — skip deterministic if user is mid-flow
-        _quick_flow = await get_flow_state(request.session_id) if request.session_id else {}
-        _t.mark("quick_flow")
-        if _quick_flow.get("state", "idle") == "idle":
-            session = await session_manager.get_or_create_session(
-                channel="web", user_identifier=_resolved_user_id,
-                session_id=request.session_id,
-                metadata={"language": request.language}
-            )
-            _t.mark("session")
-            _t.flush(extra="path=deterministic")
-            return _sse(
-                _stream_deterministic(deterministic, session["id"], "complete", lang_switch=_lang_switch_code)
-            )
+    _t.mark("lang_switch")
+    if _lang_switch_code:
+        session = await session_manager.get_or_create_session(
+            channel="web", user_identifier=_resolved_user_id,
+            session_id=request.session_id,
+            metadata={"language": request.language}
+        )
+        _t.mark("session")
+        _t.flush(extra="path=lang_switch")
+        return _sse(
+            _stream_deterministic("🌐 Switching language...", session["id"], "complete", lang_switch=_lang_switch_code)
+        )
 
     # ── Full LLM path ─────────────────────────────────────────────────
     user_id   = _resolved_user_id
@@ -871,7 +837,7 @@ async def chat_stream(
             session_id=request.session_id,
             metadata={"language": request.language}
         ),
-        get_realtime_knowledge(),
+        get_realtime_knowledge(tenant_id),
     )
     session_id = session["id"]
     _t.mark("session_kb")
@@ -885,7 +851,9 @@ async def chat_stream(
 
     # ── Blocked keyword: stream canned response without calling LLM ───
     if context_info == BLOCKED_SENTINEL:
-        _blocked_msg = "I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n📞 +27 11-4828484 / +27 11 581 9800\n📧 ccom.jburg@mea.gov.in\n🏢 No. 1, Eton Road, Park Town, Johannesburg\n🕐 Mon–Fri 08:30–17:00"
+        _blk_cfg2 = await get_bot_config(tenant_id)
+        _blk_footer2 = _build_footer_contact(_blk_cfg2, [])
+        _blocked_msg = f"I'm sorry, I don't have information on that topic. For assistance, please contact us directly:\n{_blk_footer2}"
         await session_manager.add_message(session_id, "user", sanitized_message)
         await session_manager.add_message(session_id, "assistant", _blocked_msg)
         import json as _json
@@ -980,25 +948,19 @@ async def chat_stream(
     _s_clean_ctx = filter_blocked_lines(llm_context, _s_blocked_kws)
     _s_clean_hint = filter_blocked_lines(svc_docs_hint, _s_blocked_kws)
     _s_prohibition = blocked_prohibition(_s_blocked_kws)
-    _s_facts = filter_blocked_lines(
-        "- Acting Consul General: Mr. Harish Kumar\n"
-        "- Address: No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-        "- Phone: +27 11-4828484 / +27 11-4828485 / +27 11-4828486 / +27 11 581 9800\n"
-        "- Email: ccom.jburg@mea.gov.in (general) | cons.jburg@mea.gov.in (consular/OCI)\n"
-        "- Website: www.cgijoburg.gov.in\n"
-        "- Office Hours: Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-        "- Jurisdiction: Gauteng, North West, Limpopo and Mpumalanga provinces\n"
-        "- VFS Global (Passport/PCC): 2nd Floor, Harrow Court 1, Isle of Houghton, Park Town, JHB — Tel: 012 425 3007\n"
-        "- VFS Global (Visa): 1st Floor, Rivonia Village Office Block, Rivonia, JHB — Tel: 012 425 3007\n"
-        "- VFS Hours: Submission Mon–Fri 08:00–15:00 | Collection 11:00–16:00",
-        _s_blocked_kws,
-    )
-    _s_footer = filter_blocked_lines(
-        "  📞 +27 11-4828484 / +27 11 581 9800  |  📧 ccom.jburg@mea.gov.in\n"
-        "  🏢 No. 1, Eton Road (Corner Jan Smuts Avenue & Eton Road), Park Town 2193, Johannesburg\n"
-        "  🕐 Mon–Fri 08:30–17:00 (Lunch: 13:00–13:30)\n"
-        "  VFS Global — Submission: Mon–Fri 08:00–15:00 | Collection: 11:00–16:00 — https://services.vfsglobal.com/zaf/en/ind/",
-        _s_blocked_kws,
+
+    # Per-tenant bot config + service names (both cached; negligible extra latency)
+    _bot_cfg_stream = await get_bot_config(tenant_id)
+    _tenant_svc_rows = await db.tenant_services.find(
+        {"company_id": tenant_id, "enabled": True}, {"_id": 0, "name": 1}
+    ).sort("display_order", 1).to_list(50)
+    _tenant_svc_names = [r["name"] for r in _tenant_svc_rows if r.get("name")]
+
+    _s_facts  = _build_contact_facts(_bot_cfg_stream, _s_blocked_kws)
+    _s_footer = _build_footer_contact(_bot_cfg_stream, _s_blocked_kws)
+    _s_scope  = _build_scope_rules(
+        _bot_cfg_stream.fallback("out_of_scope"),
+        _tenant_svc_names,
     )
 
     _is_walkthrough = bool(re.search(
@@ -1013,27 +975,27 @@ async def chat_stream(
     # across requests, so anything that varies per query goes at the bottom.
     # NOTE: bot_name/org_name change the cache-key prefix per-tenant, which is
     # expected — each tenant has its own prefix cache.
-    _bot_cfg_stream = await get_bot_config(tenant_id)
-    static_prefix = f"""You are {_bot_cfg_stream.bot_name}, the official consular assistant for {_bot_cfg_stream.org_name}.
+    _org_label = _bot_cfg_stream.org_name or _bot_cfg_stream.bot_name
+    static_prefix = f"""You are {_bot_cfg_stream.bot_name}, the official assistant for {_org_label}.
 {_lang_instruction(request.language or "en")}
 
-{SCOPE_RULES}
+{_s_scope}
 
 RESPONSE STYLE:
 - Be concise. Default to 3–5 short sentences. Use bullet points for lists, numbered steps for processes.
-- When the answer comes from a source (CGI Johannesburg, VFS Global, an uploaded document), quote only the key facts and include a markdown link to the source page so the user can read more — for example: *Read more: https://www.cgijoburg.gov.in/page/passport-services-for-the-indian-nationals/*. Prefer the URL given in any "(Source: …)" tag in the additional knowledge below.
+- When the answer comes from a source, quote only the key facts and include a markdown link to the source page if available. Prefer the URL given in any "(Source: …)" tag in the additional knowledge below.
 - Expand into a fuller answer only when the user asks for detail, a step-by-step walkthrough, or a multi-part explanation.
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
 - Do NOT ask clarifying questions like "What information do you need?" — answer directly.
 - Do NOT repeat information already shown in the conversation.
 - When an INTENDED RESPONSE is provided in the dynamic context below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
-
+{f'''
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
-CONSULATE FACTS:
+ORGANISATION FACTS:
 {_s_facts}
-
+''' if _s_facts else ''}
 (Per-request context, prohibition rules, service-specific details, and additional knowledge follow below.)"""
 
     dynamic_suffix_parts: list[str] = [""]
@@ -1048,11 +1010,11 @@ CONSULATE FACTS:
     if _s_clean_hint:
         dynamic_suffix_parts.append(_s_clean_hint)
     dynamic_suffix_parts.append(
-        "ADDITIONAL KNOWLEDGE (from cgijoburg.gov.in | vfsglobal.com | uploaded documents):\n"
+        "ADDITIONAL KNOWLEDGE (from uploaded documents, knowledge base, and web sources):\n"
         f"{_s_clean_ctx}"
     )
     dynamic_suffix_parts.append(
-        "IF the answer is not in any of the data above, say so and direct the user to:\n"
+        "IF the answer is not in any of the data above, say so briefly and direct the user to:\n"
         f"{_s_footer}{_stream_flow_translate_hint}"
     )
     system_msg = static_prefix + "\n\n" + "\n\n".join(p for p in dynamic_suffix_parts if p)
@@ -1182,7 +1144,12 @@ Be accurate and thorough."""
     ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
     
     try:
-        pages = _validate_and_normalize_upload(request.image_base64)
+        _doc_sec = _cfg.security()
+        pages = _validate_and_normalize_upload(
+            request.image_base64,
+            max_bytes=_doc_sec["upload_max_bytes"],
+            max_pdf_pages=_doc_sec["upload_max_pdf_pages"],
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
@@ -1304,6 +1271,7 @@ async def generate_pdf(
         )
 
     service_name = svc_obj.name
+    _cfg = await get_bot_config(tenant_id)
 
     try:
         loop = asyncio.get_event_loop()
@@ -1314,6 +1282,13 @@ async def generate_pdf(
                 form_data=form_data,
                 tracking_id=tracking_id,
                 uploaded_docs=uploaded_docs,
+                org_name=_cfg.org_name or _cfg.bot_name,
+                branding=dict(_cfg.pdf_branding or {}),
+                field_labels={
+                    f["key"]: f["display_label"]
+                    for f in (getattr(svc_obj, "fields", []) or [])
+                    if isinstance(f, dict) and f.get("key") and f.get("display_label")
+                },
             ),
         )
     except Exception as e:
@@ -1368,6 +1343,7 @@ async def download_pdf_by_tracking(
         )
 
     service_name = svc_obj.name
+    _cfg = await get_bot_config(tenant_id)
 
     try:
         loop = asyncio.get_event_loop()
@@ -1378,6 +1354,13 @@ async def download_pdf_by_tracking(
                 form_data=form_data,
                 tracking_id=tracking_id.upper(),
                 uploaded_docs=uploaded_docs,
+                org_name=_cfg.org_name or _cfg.bot_name,
+                branding=dict(_cfg.pdf_branding or {}),
+                field_labels={
+                    f["key"]: f["display_label"]
+                    for f in (getattr(svc_obj, "fields", []) or [])
+                    if isinstance(f, dict) and f.get("key") and f.get("display_label")
+                },
             ),
         )
     except Exception as e:
@@ -1462,13 +1445,13 @@ class TTSRequest(BaseModel):
     language: Optional[str] = "en"
 
 @router.post("/tts")
-async def text_to_speech(request: TTSRequest):
+async def text_to_speech(request: TTSRequest, tenant_id: str = Depends(get_tenant_id)):
     """Convert bot response text to speech using OpenAI TTS (supports all languages)."""
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
     # Truncate to avoid very large TTS calls
     text = request.text.strip()[:3000]
-    audio_base64 = await voice_service.text_to_speech(text, request.language or "en")
+    audio_base64 = await voice_service.text_to_speech(text, request.language or "en", company_id=tenant_id)
     if not audio_base64:
         raise HTTPException(status_code=500, detail="TTS generation failed")
     return {"audio_base64": audio_base64}
@@ -1580,57 +1563,53 @@ async def chat_widget(
     )
     session_id = session['id']
     
-    # Concise system prompt - KEY TO BETTER BEHAVIOR (BASE)
+    # Widget system prompt — sourced entirely from the tenant's bot_config,
+    # wrapped with the generic anti-injection guards. The previous version
+    # referenced an undefined ``SCOPE_RULES`` constant (NameError on every
+    # widget hit post-Phase 2) and embedded verbatim OCI / passportindia.gov.in
+    # / "Mon-Fri 9:00 AM - 5:30 PM" few-shot examples — both fixed here.
+    # The widget concise-response style now comes from the tenant's
+    # ``system_prompt_template`` (operators add their own style rules) or
+    # the generic platform default.
     _bot_cfg_widget = await get_bot_config(tenant_id)
-    _base_system_message = f"You are {_bot_cfg_widget.bot_name}, a helpful consular assistant for {_bot_cfg_widget.org_name}.\n\n" + SCOPE_RULES + """
+    _widget_base = _bot_cfg_widget.system_prompt() + (
+        "\n\nWIDGET RESPONSE STYLE:\n"
+        "- Wait for the user's question — do not volunteer information.\n"
+        "- Keep simple answers to 2-4 sentences. Use bullet points only when listing items.\n"
+        "- No lengthy introductions or trailing 'Is there anything else?'."
+    )
+    _base_system_message = create_safe_system_prompt(
+        _widget_base,
+        bot_name=_bot_cfg_widget.bot_name,
+    )
 
-CRITICAL RULES:
-1. WAIT for user's question. DO NOT volunteer information they didn't ask for.
-2. Give SHORT, DIRECT answers (2-4 sentences max for simple questions).
-3. Only provide step-by-step details when user asks "how to" or "what are the steps".
-4. If user asks a specific question, answer ONLY that question.
-5. Use bullet points only when listing multiple items.
-6. NO lengthy introductions or conclusions.
-7. NO "Is there anything else?" - let user ask.
-
-RESPONSE LENGTH GUIDE:
-- Simple question (what is OCI?) → 2-3 sentences
-- Process question (how to apply?) → Numbered steps, brief
-- Document question (what documents?) → Bullet list only
-
-{_lang_instruction(request.language or "en")}
-
-EXAMPLE GOOD RESPONSES:
-
-User: "What is OCI?"
-You: "OCI (Overseas Citizen of India) provides a multi-purpose, multi-entry life-long visa to India. Eligible persons include those who were citizens of India on or after 26 Jan 1950, or whose parents/grandparents were Indian citizens, or spouses of Indian citizens/OCI holders (married ≥2 years), or minor children of Indian citizens. Apply online at ociservices.gov.in and submit documents at the Consulate (appointment via cons.jburg@mea.gov.in). Fees as per MEA notification."
-
-User: "How to renew passport?"
-You: "**Passport Renewal Steps:**
-1. Book appointment on passportindia.gov.in
-2. Fill online application form
-3. Visit with: old passport, photos, address proof
-4. Pay fee (ZAR 2,280 for 36-page / ZAR 2,655 for 60-page / ZAR 780 for minor/ETD)
-Processing: as per Consulate schedule"
-
-User: "Office timings?"
-You: "**CGI Johannesburg Hours:**
-Mon-Fri: 9:00 AM - 5:30 PM
-Consular services: 9:00 AM - 12:30 PM
-Closed on Indian & SA public holidays"
-
-NOW RESPOND TO THE USER'S QUERY CONCISELY:"""
-    
     api_key = os.environ.get('EMERGENT_LLM_KEY')
+
+    # LLM model: env default → tenant company.llm_model override (parity
+    # with /chat and /chat_stream).
+    _widget_llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    _widget_db = await get_database()
+    _co_widget = await _widget_db.companies.find_one(
+        {"id": tenant_id}, {"_id": 0, "llm_model": 1}
+    )
+    if _co_widget and _co_widget.get("llm_model"):
+        _widget_llm_model = _co_widget["llm_model"]
+
     chat_instance = LlmChat(
         api_key=api_key,
         session_id=session_id,
         system_message=_base_system_message
-    ).with_model("openai", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+    ).with_model("openai", _widget_llm_model)
     
     if request.image_base64:
         try:
-            pages = _validate_and_normalize_upload(request.image_base64)
+            _w_cfg = await get_bot_config(tenant_id)
+            _w_sec = _w_cfg.security()
+            pages = _validate_and_normalize_upload(
+                request.image_base64,
+                max_bytes=_w_sec["upload_max_bytes"],
+                max_pdf_pages=_w_sec["upload_max_pdf_pages"],
+            )
             user_message = UserMessage(
                 text=sanitized_message or "Please describe what you see in this document/image and help me with it.",
                 file_contents=[ImageContent(image_base64=b64, media_type=mime) for b64, mime in pages]
@@ -1789,12 +1768,57 @@ async def lookup_applications_by_contact(
 @router.get("/widget-config")
 async def widget_config(tenant_id: str = Depends(get_tenant_id)):
     """Public branding endpoint — the widget calls this on boot to fetch
-    bot name, avatar, colors, supported languages for the calling tenant.
+    everything it needs to render: bot name, avatar, colors, supported
+    languages, chat-chrome copy (tagline/footer/greeting/advisories), and
+    the tenant's service catalogue.
 
-    No auth required (the widget runs on third-party pages). Returns only
-    `cfg.public_branding()` — system prompt, contact info, and fallback
-    response templates are NOT exposed here. Use the super-admin endpoints
-    to read those.
+    No auth required (the widget runs on third-party pages). System prompt,
+    contact info, and the raw fallback_responses dict are NOT exposed here;
+    only the rendered subset from `cfg.public_branding()` plus a flattened
+    services list pulled from `tenant_services`.
     """
     cfg = await get_bot_config(tenant_id)
-    return cfg.public_branding()
+    payload = cfg.public_branding()
+
+    # Services menu — read enabled rows for this tenant, ordered for display.
+    # Each row is reshaped to a stable public schema so renaming a backend
+    # field doesn't silently break the widget.
+    db = await get_database()
+    rows = await db.tenant_services.find(
+        {"company_id": tenant_id, "enabled": True},
+        {"_id": 0},
+    ).sort("display_order", 1).to_list(200)
+    payload["services"] = [
+        {
+            "key":          r.get("service_key"),
+            "name":         r.get("name"),
+            "emoji":        r.get("emoji") or "",
+            "description":  r.get("description") or "",
+            "category":     r.get("category") or "TYPE_A",
+            "external_url": r.get("external_url"),
+            "documents":    list(r.get("documents") or []),
+            "keywords":     list(r.get("keywords") or []),
+            "post_confirm_message": r.get("post_confirm_message") or "",
+        }
+        for r in rows
+        if r.get("service_key") and r.get("name")
+    ]
+    # Expose the frontend-facing slice of platform_config so the widget
+    # picks up super-admin tuning (HTTP timeouts, TTS chunk size) without
+    # a build. Server-only knobs (cache TTLs, OTP secrets) stay private.
+    try:
+        from services import platform_config
+        payload["platform"] = {
+            "chat_stream_timeout_ms":   int(platform_config.get("frontend_chat_stream_timeout_ms", 60000)),
+            "tts_timeout_ms":           int(platform_config.get("frontend_tts_timeout_ms", 30000)),
+            "inactivity_check_ms":      int(platform_config.get("frontend_inactivity_check_ms", 30000)),
+            "tts_chunk_size_chars":     int(platform_config.get("frontend_tts_chunk_size_chars", 250)),
+        }
+    except Exception:
+        payload["platform"] = {
+            "chat_stream_timeout_ms":   60000,
+            "tts_timeout_ms":           30000,
+            "inactivity_check_ms":      30000,
+            "tts_chunk_size_chars":     250,
+        }
+    return payload
