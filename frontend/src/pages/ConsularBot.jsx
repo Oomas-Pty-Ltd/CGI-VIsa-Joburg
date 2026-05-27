@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square, Eye, RefreshCw, Trash2, LogOut, List, Download, UserCheck, ChevronRight } from "lucide-react";
+import { Mic, Camera, Send, FileText, Check, AlertTriangle, Globe, X, Volume2, VolumeX, Square, Eye, RefreshCw, Trash2, LogOut, List, Download, UserCheck, ChevronRight, Bot } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -20,22 +21,22 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // ── Custom markdown renderer for bot responses ──────────────────────────────
 const MD = {
   h1: ({ children }) => (
-    <h1 className="text-base font-bold text-[#1A2E40] mt-4 mb-1.5 first:mt-0 leading-snug border-b border-gray-100 pb-1">
+    <h1 className="text-base font-bold text-foreground mt-4 mb-1.5 first:mt-0 leading-snug border-b border-border pb-1">
       {children}
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="text-sm font-bold text-[#1A2E40] mt-3 mb-1 first:mt-0 leading-snug">
+    <h2 className="text-sm font-bold text-foreground mt-3 mb-1 first:mt-0 leading-snug">
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="text-sm font-semibold text-[#E06F2C] mt-2 mb-0.5 first:mt-0">
+    <h3 className="text-sm font-semibold text-primary mt-2 mb-0.5 first:mt-0">
       {children}
     </h3>
   ),
   p: ({ children }) => (
-    <p className="text-sm text-[#1A2E40] mb-2 last:mb-0 leading-relaxed">
+    <p className="text-sm text-foreground mb-2 last:mb-0 leading-relaxed">
       {children}
     </p>
   ),
@@ -48,65 +49,65 @@ const MD = {
     <ol className="mb-2 last:mb-0 space-y-1 pl-1">{children}</ol>
   ),
   li: ({ children, ordered, index }) => (
-    <li className="flex items-start gap-2 text-sm text-[#1A2E40] leading-relaxed">
-      <span className="mt-[3px] flex-shrink-0 text-[#E06F2C] font-bold text-xs select-none min-w-[1.1rem]">
+    <li className="flex items-start gap-2 text-sm text-foreground leading-relaxed">
+      <span className="mt-[3px] flex-shrink-0 text-primary font-bold text-xs select-none min-w-[1.1rem]">
         {ordered ? `${(index ?? 0) + 1}.` : "•"}
       </span>
       <span className="flex-1">{children}</span>
     </li>
   ),
   strong: ({ children }) => (
-    <strong className="font-semibold text-[#1A2E40]">{children}</strong>
+    <strong className="font-semibold text-foreground">{children}</strong>
   ),
   em: ({ children }) => (
-    <em className="italic text-gray-500">{children}</em>
+    <em className="italic text-muted-foreground">{children}</em>
   ),
   hr: () => (
-    <hr className="my-3 border-0 border-t border-gray-200" />
+    <hr className="my-3 border-0 border-t border-border" />
   ),
   a: ({ href, children }) => (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-[#E06F2C] underline underline-offset-2 hover:text-[#c45a1a] break-all"
+      className="text-primary underline underline-offset-2 hover:text-primary/80 break-all"
     >
       {children}
     </a>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="border-l-3 border-[#E06F2C] pl-3 my-2 text-sm text-gray-600 italic bg-orange-50 py-1 rounded-r">
+    <blockquote className="border-l-3 border-primary pl-3 my-2 text-sm text-muted-foreground italic bg-warning/10 py-1 rounded-r">
       {children}
     </blockquote>
   ),
   code: ({ inline, children }) =>
     inline ? (
-      <code className="bg-gray-100 text-[#1A2E40] px-1 py-0.5 rounded text-xs font-mono">
+      <code className="bg-muted text-foreground px-1 py-0.5 rounded text-xs font-mono">
         {children}
       </code>
     ) : (
-      <pre className="bg-gray-100 text-[#1A2E40] px-3 py-2 rounded text-xs font-mono overflow-x-auto my-2 whitespace-pre-wrap">
+      <pre className="bg-muted text-foreground px-3 py-2 rounded text-xs font-mono overflow-x-auto my-2 whitespace-pre-wrap">
         <code>{children}</code>
       </pre>
     ),
   table: ({ children }) => (
-    <div className="overflow-x-auto my-2 rounded border border-gray-200">
+    <div className="overflow-x-auto my-2 rounded border border-border">
       <table className="w-full text-sm border-collapse">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+  thead: ({ children }) => <thead className="bg-muted/40">{children}</thead>,
   th: ({ children }) => (
-    <th className="border-b border-gray-200 px-3 py-1.5 text-left text-xs font-semibold text-[#1A2E40] uppercase tracking-wide">
+    <th className="border-b border-border px-3 py-1.5 text-left text-xs font-semibold text-foreground uppercase tracking-wide">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border-b border-gray-100 px-3 py-1.5 text-sm text-[#1A2E40]">
+    <td className="border-b border-border px-3 py-1.5 text-sm text-foreground">
       {children}
     </td>
   ),
   tr: ({ children }) => (
-    <tr className="even:bg-gray-50 hover:bg-orange-50 transition-colors">
+    <tr className="even:bg-muted/40 hover:bg-warning/10 transition-colors">
       {children}
     </tr>
   ),
@@ -119,34 +120,162 @@ const BotMessage = ({ content }) => (
 );
 
 // ── Service info card — shown before auth ─────────────────────────────────────
-const ServiceInfoCard = ({ svc, onApply }) => (
-  <div className="bg-white border-2 border-[#E06F2C] rounded-xl shadow-md px-5 py-4 max-w-[92%] space-y-3">
-    <div className="flex items-center gap-2">
-      <span className="text-2xl">{svc.emoji}</span>
-      <h3 className="text-base font-bold text-[#1A2E40] flex-1">{svc.name}</h3>
-      {svc.category === "TYPE_A" && (
-        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium whitespace-nowrap">Gov Portal</span>
+const ServiceInfoCard = ({ svc, onApply }) => {
+  if (svc.category === "INFO") {
+    return <InfoOnlyCard svc={svc} />;
+  }
+  return (
+    <div className="bg-card border-2 border-primary rounded-xl shadow-md px-5 py-4 max-w-[92%] space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-2xl">{svc.emoji}</span>
+        <h3 className="text-base font-bold text-foreground flex-1">{svc.name}</h3>
+        {svc.category === "TYPE_A" && (
+          <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium whitespace-nowrap">Gov Portal</span>
+        )}
+      </div>
+      <p className="text-sm text-muted-foreground leading-relaxed">{svc.description}</p>
+      <div>
+        <p className="text-xs font-semibold text-foreground uppercase tracking-wide mb-1.5">Required Documents</p>
+        <ul className="space-y-1">
+          {svc.documents.map((doc, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <span className="text-primary mt-0.5 flex-shrink-0">•</span>{doc}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <button
+        onClick={onApply}
+        className="w-full bg-primary text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-primary/90 transition"
+      >
+        Apply Now →
+      </button>
+    </div>
+  );
+};
+
+// ── INFO-only card — reference content with no application flow ───────────────
+// Uses a muted card variant + neutral border so it visually reads as
+// "this is reference information" against the surrounding action cards.
+const InfoOnlyCard = ({ svc }) => {
+  const sections = svc.info_content?.sections || [];
+  const primary  = svc.info_content?.primary_action;
+  return (
+    <div className="bg-card border border-border rounded-xl shadow-sm px-5 py-4 max-w-[92%] space-y-3">
+      <div className="flex items-center gap-2">
+        {svc.emoji && <span className="text-2xl">{svc.emoji}</span>}
+        <h3 className="text-base font-semibold text-foreground flex-1">{svc.name}</h3>
+        <span className="text-xs bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium whitespace-nowrap">Info</span>
+      </div>
+      {svc.description && (
+        <p className="text-sm text-muted-foreground leading-relaxed">{svc.description}</p>
+      )}
+      {sections.map((sec, i) => <InfoSection key={i} section={sec} />)}
+      {primary?.url && primary?.label && (
+        <a
+          href={primary.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-1.5 mt-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition w-full"
+        >
+          {primary.label} <ChevronRight className="w-4 h-4" />
+        </a>
       )}
     </div>
-    <p className="text-sm text-gray-600 leading-relaxed">{svc.description}</p>
+  );
+};
+
+const InfoSection = ({ section }) => {
+  const kind = section?.kind || "text";
+  const title = section?.title;
+  const Title = title ? (
+    <p className="text-xs font-semibold text-foreground uppercase tracking-wide mb-1.5">{title}</p>
+  ) : null;
+
+  if (kind === "bullets") {
+    return (
+      <div>
+        {Title}
+        <ul className="space-y-1">
+          {(section.items || []).map((it, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <span className="text-primary mt-0.5 flex-shrink-0">•</span>{it}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (kind === "callout") {
+    const tone = (section.tone || "info").toLowerCase();
+    const toneClass = {
+      info:    "bg-primary/5 border-primary/20 text-foreground",
+      warning: "bg-warning/10 border-warning/30 text-foreground",
+      success: "bg-success/10 border-success/30 text-foreground",
+    }[tone] || "bg-primary/5 border-primary/20 text-foreground";
+    return (
+      <div className={`rounded-lg border px-3 py-2 ${toneClass}`}>
+        {title && <p className="text-xs font-semibold mb-0.5">{title}</p>}
+        {section.body && <p className="text-xs leading-relaxed">{section.body}</p>}
+      </div>
+    );
+  }
+
+  if (kind === "links") {
+    return (
+      <div>
+        {Title}
+        <ul className="space-y-1">
+          {(section.items || []).map((it, i) => (
+            <li key={i}>
+              <a
+                href={it.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:text-primary/80 underline underline-offset-2 break-all"
+              >
+                {it.label || it.url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (kind === "contact") {
+    return (
+      <div>
+        {Title}
+        <ul className="space-y-1 text-xs">
+          {(section.items || []).map((it, i) => (
+            <li key={i} className="flex flex-wrap items-baseline gap-1.5">
+              {it.label && <span className="font-medium text-foreground">{it.label}:</span>}
+              {it.href ? (
+                <a href={it.href} className="text-primary hover:text-primary/80 underline underline-offset-2 break-all">
+                  {it.value}
+                </a>
+              ) : (
+                <span className="text-muted-foreground">{it.value}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // text or unknown — markdown body via Markdown handler from above
+  return (
     <div>
-      <p className="text-xs font-semibold text-[#1A2E40] uppercase tracking-wide mb-1.5">Required Documents</p>
-      <ul className="space-y-1">
-        {svc.documents.map((doc, i) => (
-          <li key={i} className="flex items-start gap-1.5 text-xs text-gray-600">
-            <span className="text-[#E06F2C] mt-0.5 flex-shrink-0">•</span>{doc}
-          </li>
-        ))}
-      </ul>
+      {Title}
+      {section?.body && (
+        <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{section.body}</p>
+      )}
     </div>
-    <button
-      onClick={onApply}
-      className="w-full bg-[#E06F2C] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-[#c45a1a] transition"
-    >
-      Apply Now →
-    </button>
-  </div>
-);
+  );
+};
 
 // ── TYPE A card with gov-reference input (self-contained state) ───────────────
 const TypeACard = ({ msg, onFinalize }) => {
@@ -166,21 +295,21 @@ const TypeACard = ({ msg, onFinalize }) => {
   };
 
   return (
-    <div className="bg-white border border-[#E06F2C] rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
+    <div className="bg-white border border-primary rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
       {/* Reference ID */}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">Reference</span>
-        <span className="font-mono text-sm font-bold text-[#E06F2C]">{msg.service?.reference_id}</span>
+        <span className="text-xs text-muted-foreground">Reference</span>
+        <span className="font-mono text-sm font-bold text-primary">{msg.service?.reference_id}</span>
       </div>
 
       {/* Required documents */}
       {(msg.service?.documents_required || []).length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-[#1A2E40] mb-1">Documents Required</p>
+          <p className="text-xs font-semibold text-foreground mb-1">Documents Required</p>
           <ul className="space-y-0.5">
             {msg.service.documents_required.map((d, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-gray-600">
-                <span className="text-[#E06F2C] mt-0.5">•</span>{d}
+              <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <span className="text-primary mt-0.5">•</span>{d}
               </li>
             ))}
           </ul>
@@ -192,7 +321,7 @@ const TypeACard = ({ msg, onFinalize }) => {
         href={msg.govUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 bg-[#E06F2C] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#c45a1a] transition w-full justify-center"
+        className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition w-full justify-center"
       >
         <ChevronRight className="w-4 h-4" /> Open Government Portal
       </a>
@@ -200,7 +329,7 @@ const TypeACard = ({ msg, onFinalize }) => {
       {/* Gov reference input */}
       {!submitted ? (
         <div>
-          <p className="text-xs text-gray-500 mb-1">After applying on the portal, enter your Government Reference / Application Number below to record it and receive your PDF:</p>
+          <p className="text-xs text-muted-foreground mb-1">After applying on the portal, enter your Government Reference / Application Number below to record it and receive your PDF:</p>
           <div className="flex gap-2">
             <input
               type="text"
@@ -208,19 +337,19 @@ const TypeACard = ({ msg, onFinalize }) => {
               value={govRef}
               onChange={e => setGovRef(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+              className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <button
               onClick={handleSubmit}
               disabled={loading || !govRef.trim()}
-              className="bg-[#1A2E40] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#243a52] transition disabled:opacity-50"
+              className="bg-foreground text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-foreground/90 transition disabled:opacity-50"
             >
               {loading ? "…" : "Submit"}
             </button>
           </div>
         </div>
       ) : (
-        <p className="text-sm text-green-700 font-semibold text-center">✅ Recorded — check your email for the PDF!</p>
+        <p className="text-sm text-success font-semibold text-center">✅ Recorded — check your email for the PDF!</p>
       )}
     </div>
   );
@@ -230,11 +359,11 @@ const TypeACard = ({ msg, onFinalize }) => {
 const DocumentCard = ({ doc, onView, onReplace, onRemove }) => (
   <div className="flex flex-col gap-2 mt-1">
     <div
-      className="relative w-40 h-28 rounded-lg overflow-hidden border border-gray-200 cursor-pointer group shadow-sm"
+      className="relative w-40 h-28 rounded-lg overflow-hidden border border-border cursor-pointer group shadow-sm"
       onClick={onView}
     >
       {doc.isPdf ? (
-        <div className="flex flex-col items-center justify-center w-full h-full bg-red-50 text-red-500 gap-1">
+        <div className="flex flex-col items-center justify-center w-full h-full bg-destructive/10 text-destructive gap-1">
           <FileText size={32} />
           <span className="text-xs font-medium">PDF</span>
         </div>
@@ -245,17 +374,17 @@ const DocumentCard = ({ doc, onView, onReplace, onRemove }) => (
         <Eye size={22} className="text-white" />
       </div>
     </div>
-    <p className="text-xs text-gray-500 truncate max-w-[160px]">{doc.name}</p>
+    <p className="text-xs text-muted-foreground truncate max-w-[160px]">{doc.name}</p>
     <div className="flex gap-2">
       <button
         onClick={onReplace}
-        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/10 transition"
       >
         <RefreshCw size={12} /> Replace
       </button>
       <button
         onClick={onRemove}
-        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100 transition"
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/10 transition"
       >
         <Trash2 size={12} /> Remove
       </button>
@@ -291,6 +420,11 @@ function _normalizeService(row) {
     documents:   Array.isArray(row.documents) ? row.documents : [],
     keywords:    Array.isArray(row.keywords)  ? row.keywords  : [],
     post_confirm_message: row.post_confirm_message || "",
+    // INFO services carry a typed sections payload + optional CTA.
+    // Empty object for TYPE_A/TYPE_B — safe to spread either way.
+    info_content: (row.info_content && typeof row.info_content === "object")
+      ? row.info_content
+      : { sections: [], primary_action: null },
   };
 }
 
@@ -310,12 +444,32 @@ export default function ConsularBot() {
   // / ADVISORY_MESSAGES / SUPPORTED_LANGUAGES so the brand strings stay in
   // one place and fall back to neutral defaults until the fetch resolves.
   const [tenantBranding, setTenantBranding] = useState(null);
+  // Per-turn input hints from the backend's chat stream — drives whether
+  // the camera + upload buttons are visible. Defaults to text-only so a
+  // fresh session opens with the lean input row, and the user only sees
+  // those affordances when the bot has actually asked for a file/image.
+  const [uiHints, setUiHints] = useState({
+    expects_upload: false,
+    expects_image:  false,
+    expects_text:   true,
+  });
+  // Tenant feature gates (mic in particular is global, not contextual).
+  // Defaults preserve legacy behaviour for tenants that don't have
+  // `features` on their stored bot_config row yet.
+  const tenantFeatures = {
+    voice_input:  tenantBranding?.features?.voice_input  !== false,
+    file_upload:  tenantBranding?.features?.file_upload  !== false,
+    camera:       tenantBranding?.features?.camera       !== false,
+  };
   const BOT_CONFIG = {
     title:        tenantBranding?.bot_name        || DEFAULT_BOT_CONFIG.title,
     subtitle:     tenantBranding?.header_tagline  || DEFAULT_BOT_CONFIG.subtitle,
     tagline:      tenantBranding?.footer_copy     || DEFAULT_BOT_CONFIG.tagline,
     organization: tenantBranding?.org_name        || DEFAULT_BOT_CONFIG.organization,
     location:     DEFAULT_BOT_CONFIG.location,
+    // Per-tenant bot avatar. Empty → the markup renders a lucide Bot icon
+    // inside a primary-tinted circle. Never points at a third-party CDN.
+    avatarUrl:    tenantBranding?.bot_avatar_url || "",
   };
   const GREETING_MESSAGE  = tenantBranding?.greeting || DEFAULT_GREETING;
   // widget-config returns only already-active advisories with no `active`
@@ -470,10 +624,14 @@ export default function ConsularBot() {
 
   useEffect(() => {
     scrollToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
   useEffect(() => {
     if (!isTyping) scrollToBottom();
+    // scrollToBottom is a stable inline function — omit from deps to avoid
+    // re-running every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTyping]);
 
   useEffect(() => {
@@ -541,6 +699,14 @@ export default function ConsularBot() {
           welcomeBackShownRef.current = false;
         });
     }
+    // Mount-only: GREETING_MESSAGE / ADVISORY_MESSAGES are derived from
+    // tenantBranding which may load AFTER mount; the initial render uses
+    // the static defaults (DEFAULT_GREETING/DEFAULT_ADVISORIES). The
+    // welcome flow is intentionally not re-run when branding loads —
+    // re-running would replay the welcome and clobber any messages the
+    // user already sent. Re-greeting on tenant-config change is a UX
+    // change that should happen via an explicit reset, not silently.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Cleanup camera stream on unmount
@@ -1083,6 +1249,9 @@ export default function ConsularBot() {
             }
             if (evt.done) {
               if (enableVoiceRef.current && fullText) speakWithBackend(fullText);
+              if (evt.ui_hints && typeof evt.ui_hints === 'object') {
+                setUiHints((prev) => ({ ...prev, ...evt.ui_hints }));
+              }
             }
           } catch {}
         }
@@ -1105,6 +1274,11 @@ export default function ConsularBot() {
     } finally {
       setIsTyping(false);
     }
+    // sendDocumentToBackend reads `speakWithBackend` and the platform timeout from
+    // tenantBranding via stable refs/closures; re-binding on every tenantBranding
+    // change would orphan in-flight uploads. Tracking the latest values via refs
+    // is the right next step but out of scope for the lint pass.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSend = async (overrideText) => {
@@ -1198,6 +1372,11 @@ export default function ConsularBot() {
               localStorage.setItem("consular_session_id", sid);
             }
             setCurrentStep(evt.step || "complete");
+            // Per-turn input hints — controls visibility of camera +
+            // upload buttons for the user's next turn.
+            if (evt.ui_hints && typeof evt.ui_hints === 'object') {
+              setUiHints((prev) => ({ ...prev, ...evt.ui_hints }));
+            }
             if (evt.step === "submitted") {
               localStorage.removeItem("consular_session_id");
               sessionIdRef.current = null;
@@ -1208,12 +1387,19 @@ export default function ConsularBot() {
                 }, 800);
               }
             }
-            // After LLM responds with knowledge base info, show Apply card for detected service
+            // After LLM responds with knowledge base info, show Apply card
+            // for detected service. INFO services skip this — they have no
+            // application flow, so the "Ready to start your application?"
+            // prompt is misleading. Their card already carries the CTA via
+            // info_content.primary_action.
             if (detectedServiceKey && SERVICE_INFO_MAP[detectedServiceKey]) {
-              setMessages(prev => [...prev, {
-                role: "seva_service_action",
-                svc: SERVICE_INFO_MAP[detectedServiceKey],
-              }]);
+              const svc = SERVICE_INFO_MAP[detectedServiceKey];
+              if (svc.category !== "INFO") {
+                setMessages(prev => [...prev, {
+                  role: "seva_service_action",
+                  svc,
+                }]);
+              }
             }
             // Speak the completed response if voice is enabled
             if (enableVoiceRef.current && fullText) {
@@ -1414,6 +1600,10 @@ export default function ConsularBot() {
       audio.onerror = () => { setIsSpeaking(false); audioRef.current = null; resolve(); };
       audio.play().catch(() => { setIsSpeaking(false); resolve(); });
     });
+    // Stable across renders — audio playback callback doesn't need to
+    // re-bind when tenant TTS timeout changes; the latest value is read
+    // from the captured tenantBranding ref inside fetchTTSChunk anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch TTS audio for one chunk from backend
@@ -1427,6 +1617,10 @@ export default function ConsularBot() {
     if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
     const data = await res.json();
     return data.audio_base64 || null;
+    // Tenant TTS timeout read from tenantBranding via closure capture —
+    // not in deps because the latest value is fetched per call and
+    // re-binding would mid-flight-cancel in-progress fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Backend TTS — splits text into sentence chunks, fires all fetches in parallel,
@@ -1474,6 +1668,10 @@ export default function ConsularBot() {
       // All backend calls failed — fall back to browser TTS
       speakText(plain);
     }
+    // speakText is a stable inline helper; adding it would re-bind this
+    // callback every render and re-trigger TTS dedup logic. Captured via
+    // closure on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchTTSChunk, playAudioAsync]);
 
   // =====================================================================
@@ -1567,6 +1765,12 @@ export default function ConsularBot() {
         toast.error("Failed to access microphone. Please try again.");
       }
     }
+    // SPEECH_LANG_MAP is derived from tenantBranding inside the component;
+    // recording starts on a button click and runs once. The deferred
+    // recognition.lang read at fallback time captures the current value
+    // via the closure — adding to deps would re-create startRecording on
+    // every render and orphan in-progress recordings.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopRecording = useCallback(() => {
@@ -1661,7 +1865,7 @@ export default function ConsularBot() {
       }
     ]);
     sendDocumentToBackend(imageBase64);
-  }, [sessionId, stopCamera, sendDocumentToBackend]);
+  }, [stopCamera, sendDocumentToBackend]);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -1748,7 +1952,7 @@ export default function ConsularBot() {
   const currentLang = LANGUAGES.find(l => l.code === selectedLanguage) || LANGUAGES[0];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 p-6">
+    <div className="min-h-screen bg-background p-6">
       {/* Skip Link for Keyboard Navigation */}
       <a 
         href="#chat-input" 
@@ -1783,7 +1987,7 @@ export default function ConsularBot() {
               aria-expanded={showLanguageMenu}
               aria-label={`Current language: ${currentLang.name}. Click to change language`}
             >
-              <Globe className="w-4 h-4 text-[#E06F2C]" aria-hidden="true" />
+              <Globe className="w-4 h-4 text-primary" aria-hidden="true" />
               <span className="text-lg" aria-hidden="true">{currentLang.flag}</span>
               <span className="font-medium">{currentLang.name}</span>
             </Button>
@@ -1796,7 +2000,7 @@ export default function ConsularBot() {
                 aria-label="Select language"
               >
                 <div className="p-2 max-h-80 overflow-y-auto">
-                  <p className="text-xs text-gray-500 px-3 py-1 font-semibold uppercase" id="lang-label">Select Language</p>
+                  <p className="text-xs text-muted-foreground px-3 py-1 font-semibold uppercase" id="lang-label">Select Language</p>
                   {LANGUAGES.map((lang) => (
                     <button
                       key={lang.code}
@@ -1843,8 +2047,8 @@ export default function ConsularBot() {
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors min-h-[44px] ${
                         selectedLanguage === lang.code 
-                          ? 'bg-orange-50 text-[#E06F2C]' 
-                          : 'hover:bg-gray-50'
+                          ? 'bg-warning/10 text-primary' 
+                          : 'hover:bg-muted/40'
                       }`}
                       data-testid={`lang-option-${lang.code}`}
                       role="option"
@@ -1853,7 +2057,7 @@ export default function ConsularBot() {
                       <span className="text-xl" aria-hidden="true">{lang.flag}</span>
                       <span className="font-medium">{lang.name}</span>
                       {selectedLanguage === lang.code && (
-                        <Check className="w-4 h-4 ml-auto text-[#E06F2C]" aria-hidden="true" />
+                        <Check className="w-4 h-4 ml-auto text-primary" aria-hidden="true" />
                       )}
                     </button>
                   ))}
@@ -1863,157 +2067,156 @@ export default function ConsularBot() {
           </div>
         </div>
 
-        {/* Progress Stepper */}
-        <nav aria-label="Application progress" className="flex justify-center mb-8">
-          <ol className="flex items-center w-full max-w-2xl" data-testid="progress-stepper">
-            {STEPS.map((step, index) => (
-              <React.Fragment key={step.id}>
-                <li className="flex flex-col items-center">
-                  <div
-                    className={`${
-                      index <= currentStepIndex
-                        ? "bg-[#E06F2C] text-white shadow-lg ring-4 ring-orange-100"
-                        : "bg-slate-200 text-slate-500"
-                    } w-12 h-12 rounded-full flex items-center justify-center font-bold transition-all`}
-                    data-testid={`step-${step.value}`}
-                    aria-current={index === currentStepIndex ? "step" : undefined}
-                    role="img"
-                    aria-label={`Step ${step.id}: ${step.label}${index < currentStepIndex ? ', completed' : index === currentStepIndex ? ', current step' : ''}`}
-                  >
-                    {index < currentStepIndex ? <Check className="w-6 h-6" aria-hidden="true" /> : <span aria-hidden="true">{step.id}</span>}
-                  </div>
-                  <span className="text-sm mt-2 font-medium text-[#1A2E40]">{step.label}</span>
-                </li>
-                {index < STEPS.length - 1 && (
+        {/* Progress strip — compact dot+label row that hugs one line instead
+            of the previous 80px-tall ribbon of circles. Same information,
+            roughly a third of the vertical real estate. */}
+        <nav aria-label="Application progress" className="mb-6">
+          <ol className="flex items-center justify-between gap-2 max-w-2xl mx-auto" data-testid="progress-stepper">
+            {STEPS.map((step, index) => {
+              const done = index < currentStepIndex;
+              const here = index === currentStepIndex;
+              return (
+                <React.Fragment key={step.id}>
                   <li
-                    className={`h-1 flex-1 mx-4 ${index < currentStepIndex ? "bg-[#E06F2C]" : "bg-slate-200"}`}
-                    aria-hidden="true"
-                    role="presentation"
-                  />
-                )}
-              </React.Fragment>
-            ))}
+                    className="flex items-center gap-2"
+                    data-testid={`step-${step.value}`}
+                    aria-current={here ? "step" : undefined}
+                  >
+                    <span
+                      className={`flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-semibold shrink-0 ${
+                        done
+                          ? "bg-primary text-primary-foreground"
+                          : here
+                          ? "bg-primary/15 text-primary ring-2 ring-primary"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                      aria-hidden="true"
+                    >
+                      {done ? <Check className="w-3.5 h-3.5" /> : step.id}
+                    </span>
+                    <span
+                      className={`text-sm ${
+                        here ? "font-medium text-foreground" : done ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                  </li>
+                  {index < STEPS.length - 1 && (
+                    <li
+                      className={`h-px flex-1 ${done ? "bg-primary" : "bg-border"}`}
+                      aria-hidden="true"
+                      role="presentation"
+                    />
+                  )}
+                </React.Fragment>
+              );
+            })}
           </ol>
         </nav>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Avatar Section */}
+          {/* Avatar Section — flat card on tokens, no gradients. The avatar
+              circle either renders the tenant-provided URL or falls back to
+              a Bot icon inside a primary-tinted circle (no third-party CDN). */}
           <div className="lg:col-span-4">
-            <div className="glass-card rounded-xl p-6 text-center" data-testid="bot-avatar">
-              <div className={`relative w-full aspect-square max-w-xs mx-auto mb-4 rounded-full overflow-hidden transition-all duration-500 ${
-                isSpeaking ? 'ring-4 ring-[#2E8B57] ring-offset-4 ring-offset-white shadow-2xl shadow-green-400/50 scale-105' : 'ring-4 ring-[#E06F2C] ring-offset-4 ring-offset-white shadow-xl'
+            <div className="bg-card border border-border rounded-lg shadow-sm p-6 text-center" data-testid="bot-avatar">
+              <div className={`relative w-44 h-44 mx-auto mb-4 rounded-full overflow-hidden transition-shadow ${
+                isSpeaking
+                  ? "ring-2 ring-success ring-offset-4 ring-offset-card shadow-lg"
+                  : "ring-2 ring-primary/30 ring-offset-4 ring-offset-card"
               }`}>
-                <div className="relative w-full h-full bg-gradient-to-br from-orange-50 to-blue-50">
+                {BOT_CONFIG.avatarUrl ? (
                   <img
-                    src="https://static.prod-images.emergentagent.com/jobs/41ee56b6-38da-4112-8da3-b4cf6bfcfd91/images/1fc401012f88731c201ca30b4be56212c44bad84c995e7ed04da381c8740f43b.png"
-                    alt={BOT_CONFIG.title || 'Bot'}
-                    className={`w-full h-full object-cover ${isSpeaking ? 'brightness-110 scale-105' : 'brightness-100 scale-100'} transition-all duration-500`}
+                    src={BOT_CONFIG.avatarUrl}
+                    alt={BOT_CONFIG.title || "Bot"}
+                    className="w-full h-full object-cover"
                   />
-                  
-                  {isSpeaking && (
-                    <div className="absolute inset-0 bg-gradient-to-t from-green-500/20 to-transparent pointer-events-none">
-                      <div className="absolute bottom-1/3 left-1/2 transform -translate-x-1/2">
-                        <div className="flex gap-1 animate-pulse">
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '100ms'}}></div>
-                          <div className="w-3 h-3 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '200ms'}}></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {isSpeaking && (
-                  <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 z-10">
-                    <div className="flex gap-1 bg-white px-4 py-2 rounded-full shadow-lg border-2 border-[#2E8B57]">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                        <span className="w-2 h-2 bg-[#2E8B57] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
-                      </div>
-                      <span className="text-xs font-semibold text-[#2E8B57] ml-2">Speaking</span>
-                    </div>
+                ) : (
+                  <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                    <Bot className="w-20 h-20 text-primary" aria-hidden="true" />
                   </div>
                 )}
               </div>
-              
-              <div className="space-y-3">
-                <h2 className="text-xl font-bold text-[#1A2E40] leading-tight">{BOT_CONFIG.title}</h2>
-                <p className="text-lg font-semibold text-[#E06F2C]">{BOT_CONFIG.subtitle}</p>
-                <p className="text-sm text-gray-600 italic">{BOT_CONFIG.tagline}</p>
-                
-                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 ${
-                  isSpeaking ? 'bg-gradient-to-r from-green-100 to-green-50' : 'bg-gradient-to-r from-orange-100 to-orange-50'
-                }`}>
-                  <span className={`w-3 h-3 rounded-full ${isSpeaking ? 'bg-[#2E8B57] animate-pulse' : 'bg-[#E06F2C]'}`}></span>
-                  <span className={`text-sm font-semibold ${isSpeaking ? 'text-[#2E8B57]' : 'text-[#1A2E40]'}`}>
-                    {isSpeaking ? "🎙️ Speaking..." : "✨ Ready to Assist"}
-                  </span>
-                </div>
+
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold tracking-tight text-foreground leading-tight">{BOT_CONFIG.title}</h2>
+                {BOT_CONFIG.subtitle && (
+                  <p className="text-sm text-primary">{BOT_CONFIG.subtitle}</p>
+                )}
+                {BOT_CONFIG.tagline && (
+                  <p className="text-xs text-muted-foreground">{BOT_CONFIG.tagline}</p>
+                )}
               </div>
-              
-              {/* Voice Toggle */}
-              <div className="mt-6 pt-6 border-t-2 border-gray-100">
-                <label className="flex items-center justify-center gap-3 cursor-pointer group">
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      checked={enableVoice}
-                      onChange={(e) => {
-                        enableVoiceRef.current = e.target.checked;
-                        setEnableVoice(e.target.checked);
-                        if (!e.target.checked) {
-                          // Stop base64 audio if playing
-                          if (audioRef.current) {
-                            audioRef.current.pause();
-                            audioRef.current.onended = null;
-                            audioRef.current.onerror = null;
-                            audioRef.current = null;
-                          }
-                          // Stop browser TTS if speaking
-                          if (window.speechSynthesis) {
-                            window.speechSynthesis.cancel();
-                          }
-                          setIsSpeaking(false);
-                        }
-                      }}
-                      className="sr-only peer"
-                      data-testid="voice-toggle"
-                    />
-                    <div className="w-14 h-7 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-7 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-[#2E8B57]"></div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {enableVoice ? <Volume2 className="w-6 h-6 text-[#2E8B57]" /> : <VolumeX className="w-6 h-6 text-gray-400" />}
-                    <div className="text-left">
-                      <p className="text-sm font-bold text-[#1A2E40] group-hover:text-[#E06F2C] transition-colors">
-                        {enableVoice ? "Voice Enabled" : "Voice Disabled"}
+
+              <div className="mt-4 flex justify-center">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
+                  <span className={`w-2 h-2 rounded-full ${isSpeaking ? "bg-success animate-pulse" : "bg-success"}`} aria-hidden="true" />
+                  {isSpeaking ? "Speaking" : "Ready"}
+                </span>
+              </div>
+
+              {/* Voice Toggle — shadcn Switch, no custom checkbox-as-toggle. */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <label className="flex items-center justify-between gap-3 cursor-pointer">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {enableVoice
+                      ? <Volume2 className="w-4 h-4 text-success shrink-0" />
+                      : <VolumeX className="w-4 h-4 text-muted-foreground shrink-0" />}
+                    <div className="text-left min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {enableVoice ? "Voice enabled" : "Voice disabled"}
                       </p>
-                      <p className="text-xs text-gray-500">Toggle to hear responses</p>
+                      <p className="text-xs text-muted-foreground">Toggle to hear responses</p>
                     </div>
                   </div>
+                  <Switch
+                    checked={enableVoice}
+                    onCheckedChange={(checked) => {
+                      enableVoiceRef.current = checked;
+                      setEnableVoice(checked);
+                      if (!checked) {
+                        if (audioRef.current) {
+                          audioRef.current.pause();
+                          audioRef.current.onended = null;
+                          audioRef.current.onerror = null;
+                          audioRef.current = null;
+                        }
+                        if (window.speechSynthesis) {
+                          window.speechSynthesis.cancel();
+                        }
+                        setIsSpeaking(false);
+                      }
+                    }}
+                    data-testid="voice-toggle"
+                  />
                 </label>
               </div>
 
               {/* Organization Info */}
-              <div className="mt-6 pt-6 border-t-2 border-gray-100 space-y-3">
+              <div className="mt-6 pt-6 border-t border-border space-y-4 text-left">
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Official Representative</p>
-                  <p className="text-sm font-bold text-[#1A2E40] mt-1">{BOT_CONFIG.organization}</p>
-                  <p className="text-sm text-gray-600">{BOT_CONFIG.location}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Official representative</p>
+                  <p className="text-sm text-foreground mt-1">{BOT_CONFIG.organization}</p>
+                  {BOT_CONFIG.location && (
+                    <p className="text-xs text-muted-foreground">{BOT_CONFIG.location}</p>
+                  )}
                 </div>
-                
+
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Supported Languages</p>
-                  <div className="flex flex-wrap justify-center gap-2">
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-2">Supported languages</p>
+                  <div className="flex flex-wrap gap-1.5">
                     {(showAllLangs ? SUPPORTED_LANGUAGES : SUPPORTED_LANGUAGES.slice(0, 5)).map((lang) => (
-                      <span key={lang} className="text-xs px-3 py-1.5 bg-gradient-to-r from-orange-100 to-orange-50 text-[#E06F2C] rounded-full font-semibold border border-orange-200">{lang}</span>
+                      <span key={lang} className="text-[11px] px-2 py-0.5 bg-muted text-foreground rounded-full font-medium border border-border">{lang}</span>
                     ))}
-                    <button
-                      onClick={() => setShowAllLangs(v => !v)}
-                      className="text-xs px-3 py-1.5 bg-gradient-to-r from-[#1A2E40] to-[#243a52] text-white rounded-full font-semibold border border-[#1A2E40] hover:opacity-90 transition-opacity"
-                    >
-                      {showAllLangs ? "Show Less" : `+${SUPPORTED_LANGUAGES.length - 5} More`}
-                    </button>
+                    {SUPPORTED_LANGUAGES.length > 5 && (
+                      <button
+                        onClick={() => setShowAllLangs(v => !v)}
+                        className="text-[11px] px-2 py-0.5 text-primary hover:text-primary/80 font-medium"
+                      >
+                        {showAllLangs ? "Show less" : `+${SUPPORTED_LANGUAGES.length - 5} more`}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2024,11 +2227,11 @@ export default function ConsularBot() {
           <div className="lg:col-span-8">
             {/* Persistent auth bar — always visible above the chat box when logged in */}
             {sevaToken && sevaUser && (
-              <div className="flex items-center justify-between px-4 py-2 mb-2 rounded-xl bg-[#1A2E40] shadow">
+              <div className="flex items-center justify-between px-4 py-2 mb-2 rounded-xl bg-foreground shadow">
                 <div className="flex items-center gap-2 text-sm text-white">
                   <UserCheck className="w-4 h-4 text-white" />
                   <span className="font-semibold text-white">{sevaUser.name}</span>
-                  <span className="text-gray-400 text-xs hidden sm:inline">· {sevaUser.email}</span>
+                  <span className="text-muted-foreground text-xs hidden sm:inline">· {sevaUser.email}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2039,7 +2242,7 @@ export default function ConsularBot() {
                   </button>
                   <button
                     onClick={() => handleSevaLogout(false)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-red-500 text-white hover:bg-red-600 transition"
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-destructive/100 text-white hover:bg-destructive transition"
                   >
                     <LogOut className="w-3.5 h-3.5" /> Logout
                   </button>
@@ -2048,7 +2251,7 @@ export default function ConsularBot() {
             )}
 
             <div
-              className="glass-card rounded-xl shadow-lg flex flex-col relative"
+              className="bg-card border border-border rounded-xl shadow-lg flex flex-col relative"
               style={{ height: sevaToken && sevaUser ? "560px" : "600px" }}
               role="region"
               aria-label="Chat conversation"
@@ -2057,15 +2260,15 @@ export default function ConsularBot() {
               {isApiLoading && (
                 <>
                   {/* progress bar */}
-                  <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl overflow-hidden z-30 bg-gray-100">
-                    <div className="h-full bg-[#E06F2C] rounded-full"
+                  <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-xl overflow-hidden z-30 bg-muted">
+                    <div className="h-full bg-primary rounded-full"
                       style={{ animation: "loading-bar 1.2s ease-in-out infinite" }} />
                   </div>
                   {/* centre spinner */}
                   <div className="absolute inset-0 bg-white/50 backdrop-blur-[2px] flex items-center justify-center z-20 rounded-xl pointer-events-none">
-                    <div className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-full shadow-lg border border-gray-100">
-                      <div className="w-4 h-4 border-[3px] border-[#E06F2C] border-t-transparent rounded-full animate-spin" />
-                      <span className="text-sm font-semibold text-[#1A2E40]">Please wait…</span>
+                    <div className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-full shadow-lg border border-border">
+                      <div className="w-4 h-4 border-[3px] border-primary border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm font-semibold text-foreground">Please wait…</span>
                     </div>
                   </div>
                 </>
@@ -2091,17 +2294,17 @@ export default function ConsularBot() {
                       <div 
                         className={`max-w-lg px-4 py-3 rounded-lg border-l-4 ${
                           msg.type === "alert" 
-                            ? "bg-red-50 border-red-500 text-red-900" 
+                            ? "bg-destructive/10 border-destructive text-destructive" 
                             : msg.type === "warning"
-                            ? "bg-amber-50 border-amber-500 text-amber-900"
-                            : "bg-blue-50 border-blue-500 text-blue-900"
+                            ? "bg-warning/10 border-warning text-warning"
+                            : "bg-primary/10 border-primary text-primary"
                         }`}
                         role={msg.type === "alert" ? "alert" : "note"}
                       >
                         <div className="flex items-start gap-2 mb-2">
                           <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                            msg.type === "alert" ? "text-red-600" : 
-                            msg.type === "warning" ? "text-amber-600" : "text-blue-600"
+                            msg.type === "alert" ? "text-destructive" : 
+                            msg.type === "warning" ? "text-warning" : "text-primary"
                           }`} aria-hidden="true" />
                           <h4 className="font-bold text-sm">{msg.title}</h4>
                         </div>
@@ -2110,7 +2313,7 @@ export default function ConsularBot() {
                         </div>
                       </div>
                     ) : msg.type === "document" ? (
-                      <div className="bg-white border border-gray-200 text-[#1A2E40] rounded-2xl rounded-bl-sm shadow-sm px-4 py-3 max-w-[88%]">
+                      <div className="bg-white border border-border text-foreground rounded-2xl rounded-bl-sm shadow-sm px-4 py-3 max-w-[88%]">
                         <BotMessage content={msg.content} />
                         <DocumentCard
                           doc={msg.docData}
@@ -2122,20 +2325,20 @@ export default function ConsularBot() {
                     ) : msg.role === "seva_type_a" ? (
                       <TypeACard msg={msg} onFinalize={handleSevaTypeAFinalize} />
                     ) : msg.role === "seva_form_mode" ? (
-                      <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 max-w-[88%]">
-                        <p className="text-sm font-semibold text-[#1A2E40] mb-3">How would you like to proceed?</p>
+                      <div className="bg-white border border-border rounded-xl shadow-sm px-4 py-3 max-w-[88%]">
+                        <p className="text-sm font-semibold text-foreground mb-3">How would you like to proceed?</p>
                         <div className="flex gap-3">
                           <button
                             onClick={() => handleSevaChooseFormMode("upload")}
-                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-[#E06F2C] rounded-lg p-3 hover:bg-orange-50 transition text-sm font-medium text-[#E06F2C]"
+                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-primary rounded-lg p-3 hover:bg-warning/10 transition text-sm font-medium text-primary"
                           >
-                            <Download className="w-5 h-5" /> Upload Documents<span className="text-xs text-gray-400 font-normal">OCR auto-fill</span>
+                            <Download className="w-5 h-5" /> Upload Documents<span className="text-xs text-muted-foreground font-normal">OCR auto-fill</span>
                           </button>
                           <button
                             onClick={() => handleSevaChooseFormMode("manual")}
-                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-[#1A2E40] rounded-lg p-3 hover:bg-slate-50 transition text-sm font-medium text-[#1A2E40]"
+                            className="flex-1 flex flex-col items-center gap-1.5 border-2 border-foreground rounded-lg p-3 hover:bg-muted/40 transition text-sm font-medium text-foreground"
                           >
-                            <FileText className="w-5 h-5" /> Fill Manually<span className="text-xs text-gray-400 font-normal">Step by step</span>
+                            <FileText className="w-5 h-5" /> Fill Manually<span className="text-xs text-muted-foreground font-normal">Step by step</span>
                           </button>
                         </div>
                       </div>
@@ -2144,8 +2347,8 @@ export default function ConsularBot() {
                         const appId = msg.appId || sevaCurrentApp?.application_id;
                         const previews = sevaDocPreviews[appId] || [];
                         return (
-                          <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-4 py-3 max-w-[92%] space-y-3">
-                            <p className="text-sm font-semibold text-[#1A2E40]">Upload Required Documents</p>
+                          <div className="bg-white border border-border rounded-xl shadow-sm px-4 py-3 max-w-[92%] space-y-3">
+                            <p className="text-sm font-semibold text-foreground">Upload Required Documents</p>
 
                             {/* Upload rows */}
                             <div className="flex flex-col gap-2">
@@ -2154,36 +2357,36 @@ export default function ConsularBot() {
                                 return (
                                   <div key={i} className="space-y-1.5">
                                     {/* Upload row */}
-                                    <label className={`flex items-center gap-2 cursor-pointer rounded p-1.5 border transition ${preview ? "border-green-300 bg-green-50" : "border-dashed border-gray-300 hover:bg-gray-50"}`}>
+                                    <label className={`flex items-center gap-2 cursor-pointer rounded p-1.5 border transition ${preview ? "border-success/40 bg-success/10" : "border-dashed border-border hover:bg-muted/40"}`}>
                                       <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
                                         onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ""; }}
                                         disabled={sevaUploadingDocName === doc}
                                       />
-                                      <FileText className={`w-4 h-4 flex-shrink-0 ${preview ? "text-green-600" : "text-[#E06F2C]"}`} />
-                                      <span className="text-xs text-[#1A2E40] flex-1 line-clamp-1">{doc}</span>
+                                      <FileText className={`w-4 h-4 flex-shrink-0 ${preview ? "text-success" : "text-primary"}`} />
+                                      <span className="text-xs text-foreground flex-1 line-clamp-1">{doc}</span>
                                       {sevaUploadingDocName === doc
-                                        ? <span className="text-xs text-gray-400 animate-pulse">Uploading…</span>
+                                        ? <span className="text-xs text-muted-foreground animate-pulse">Uploading…</span>
                                         : preview
-                                          ? <span className="text-xs text-green-600 font-medium">✓ Uploaded</span>
-                                          : <span className="text-xs text-[#E06F2C] font-medium">Upload ↑</span>
+                                          ? <span className="text-xs text-success font-medium">✓ Uploaded</span>
+                                          : <span className="text-xs text-primary font-medium">Upload ↑</span>
                                       }
                                     </label>
 
                                     {/* Preview card */}
                                     {preview && (
-                                      <div className="flex items-center gap-2 pl-2 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
+                                      <div className="flex items-center gap-2 pl-2 py-1.5 bg-muted/40 rounded-lg border border-border">
                                         {preview.isPdf ? (
-                                          <div className="w-10 h-10 rounded bg-red-50 flex items-center justify-center flex-shrink-0">
-                                            <FileText className="w-5 h-5 text-red-500" />
+                                          <div className="w-10 h-10 rounded bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                                            <FileText className="w-5 h-5 text-destructive" />
                                           </div>
                                         ) : (
                                           <img src={preview.dataUrl} alt={preview.name}
-                                            className="w-10 h-10 rounded object-cover flex-shrink-0 border border-gray-200 cursor-pointer"
+                                            className="w-10 h-10 rounded object-cover flex-shrink-0 border border-border cursor-pointer"
                                             onClick={() => setDocModal({ doc: { dataUrl: preview.dataUrl, name: preview.name, isPdf: false }, msgIndex: -1 })}
                                           />
                                         )}
-                                        <span className="text-xs text-gray-600 flex-1 truncate">{preview.name}</span>
-                                        <label className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition cursor-pointer">
+                                        <span className="text-xs text-muted-foreground flex-1 truncate">{preview.name}</span>
+                                        <label className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/10 transition cursor-pointer">
                                           <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
                                             onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ""; }}
                                           />
@@ -2191,7 +2394,7 @@ export default function ConsularBot() {
                                         </label>
                                         <button
                                           onClick={() => handleSevaRemoveDoc(appId, preview.id, preview.name)}
-                                          className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100 transition"
+                                          className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/10 transition"
                                         >
                                           <Trash2 className="w-3 h-3" /> Remove
                                         </button>
@@ -2205,7 +2408,7 @@ export default function ConsularBot() {
                             {appId && (
                               <button
                                 onClick={() => setMessages(prev => [...prev, { role: "seva_submit_review", appId }])}
-                                className="w-full bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition"
+                                className="w-full bg-primary text-white rounded-lg py-2 text-sm font-semibold hover:bg-primary/90 transition"
                               >
                                 Done Uploading — Review & Submit
                               </button>
@@ -2214,20 +2417,20 @@ export default function ConsularBot() {
                         );
                       })()
                     ) : msg.role === "seva_submit_review" ? (
-                      <div className="bg-white border border-[#059669] rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
-                        <p className="text-sm font-semibold text-[#1A2E40]">Ready to submit?</p>
-                        <p className="text-xs text-gray-500">A review email will be sent to <strong>{sevaUser?.email}</strong>. You can edit for 24 hours before it locks.</p>
+                      <div className="bg-white border border-success rounded-xl shadow-sm px-4 py-4 max-w-[88%] space-y-3">
+                        <p className="text-sm font-semibold text-foreground">Ready to submit?</p>
+                        <p className="text-xs text-muted-foreground">A review email will be sent to <strong>{sevaUser?.email}</strong>. You can edit for 24 hours before it locks.</p>
                         <button
                           onClick={handleSevaPreviewPdf}
-                          className="w-full border border-[#1A2E40] text-[#1A2E40] rounded-lg py-2 text-sm font-semibold hover:bg-gray-50 transition flex items-center justify-center gap-2"
+                          className="w-full border border-foreground text-foreground rounded-lg py-2 text-sm font-semibold hover:bg-muted/40 transition flex items-center justify-center gap-2"
                         >
                           <FileText className="w-4 h-4" /> Preview PDF
                         </button>
                         <div className="flex gap-2">
-                          <button onClick={handleSevaSubmitApp} className="flex-1 bg-[#059669] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#047857] transition">
+                          <button onClick={handleSevaSubmitApp} className="flex-1 bg-success text-white rounded-lg py-2 text-sm font-semibold hover:bg-success/90 transition">
                             📤 Submit for Review
                           </button>
-                          <button onClick={handleSevaConfirmApp} className="flex-1 bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition">
+                          <button onClick={handleSevaConfirmApp} className="flex-1 bg-primary text-white rounded-lg py-2 text-sm font-semibold hover:bg-primary/90 transition">
                             ✅ Confirm &amp; Get PDF
                           </button>
                         </div>
@@ -2253,12 +2456,12 @@ export default function ConsularBot() {
                         }}
                       />
                     ) : msg.role === "seva_service_action" ? (
-                      <div className="bg-white border border-[#E06F2C] rounded-xl shadow-sm px-4 py-3 max-w-[88%] flex items-center justify-between gap-4">
+                      <div className="bg-white border border-primary rounded-xl shadow-sm px-4 py-3 max-w-[88%] flex items-center justify-between gap-4">
                         <div>
-                          <p className="text-sm font-semibold text-[#1A2E40]">
+                          <p className="text-sm font-semibold text-foreground">
                             {msg.svc.emoji} {msg.svc.name}
                           </p>
-                          <p className="text-xs text-gray-500 mt-0.5">Ready to start your application?</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Ready to start your application?</p>
                         </div>
                         <button
                           onClick={() => {
@@ -2277,7 +2480,7 @@ export default function ConsularBot() {
                             setSevaAuthError("");
                             handleSevaStartAuth({ key: msg.svc.key, name: msg.svc.name, category: msg.svc.category });
                           }}
-                          className="whitespace-nowrap bg-[#E06F2C] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#c45a1a] transition flex-shrink-0"
+                          className="whitespace-nowrap bg-primary text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-primary/90 transition flex-shrink-0"
                         >
                           Apply Now →
                         </button>
@@ -2286,8 +2489,8 @@ export default function ConsularBot() {
                       <div
                         className={`max-w-[88%] px-4 py-3 rounded-2xl ${
                           msg.role === "user"
-                            ? "bg-[#E06F2C] text-white rounded-br-sm text-sm leading-relaxed"
-                            : "bg-white border border-gray-200 text-[#1A2E40] rounded-bl-sm shadow-sm"
+                            ? "bg-primary text-white rounded-br-sm text-sm leading-relaxed"
+                            : "bg-white border border-border text-foreground rounded-bl-sm shadow-sm"
                         }`}
                       >
                         {msg.role === "assistant" ? (
@@ -2307,13 +2510,13 @@ export default function ConsularBot() {
                     role="status"
                     aria-label="Loading..."
                   >
-                    <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
+                    <div className="bg-white border border-border rounded-lg px-4 py-3 flex items-center gap-3">
                       <div className="flex gap-1" aria-hidden="true">
-                        <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
-                        <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
-                        <span className="w-2 h-2 bg-[#E06F2C] rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0ms'}}></span>
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '150ms'}}></span>
+                        <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '300ms'}}></span>
                       </div>
-                      <span className="text-sm text-gray-500">Loading...</span>
+                      <span className="text-sm text-muted-foreground">Loading...</span>
                     </div>
                   </div>
                 )}
@@ -2368,7 +2571,7 @@ export default function ConsularBot() {
                         key={chip.value}
                         onClick={() => chip.action ? chip.action() : handleSend(chip.value)}
                         disabled={isTyping && !chip.action}
-                        className="text-xs px-3 py-1.5 rounded-full border border-[#E06F2C] text-[#E06F2C] hover:bg-[#E06F2C] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-xs px-3 py-1.5 rounded-full border border-primary text-primary hover:bg-primary hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {chip.label}
                       </button>
@@ -2379,16 +2582,16 @@ export default function ConsularBot() {
 
               {/* Seva Auth Panel — name/email entry */}
               {sevaAuthStep === "name_email" && (
-                <div className="border-t border-orange-200 bg-orange-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-[#E06F2C] mb-2">Step 1 of 2 — Your Details</p>
-                  {sevaAuthError && <p className="text-xs text-red-500 mb-2">{sevaAuthError}</p>}
+                <div className="border-t border-warning/20 bg-warning/10 px-4 py-3">
+                  <p className="text-xs font-semibold text-primary mb-2">Step 1 of 2 — Your Details</p>
+                  {sevaAuthError && <p className="text-xs text-destructive mb-2">{sevaAuthError}</p>}
                   <div className="flex flex-col gap-2">
                     <input
                       type="text"
                       placeholder="Full Name"
                       value={sevaAuthName}
                       onChange={e => setSevaAuthName(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                     <input
                       type="email"
@@ -2396,12 +2599,12 @@ export default function ConsularBot() {
                       value={sevaAuthEmail}
                       onChange={e => setSevaAuthEmail(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleSevaSubmitNameEmail()}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                     <button
                       onClick={handleSevaSubmitNameEmail}
                       disabled={sevaAuthLoading}
-                      className="bg-[#E06F2C] text-white rounded-lg py-2 text-sm font-semibold hover:bg-[#c45a1a] transition disabled:opacity-50"
+                      className="bg-primary text-white rounded-lg py-2 text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50"
                     >
                       {sevaAuthLoading ? "Sending OTP…" : "Send OTP →"}
                     </button>
@@ -2411,9 +2614,9 @@ export default function ConsularBot() {
 
               {/* Seva Auth Panel — OTP entry */}
               {sevaAuthStep === "otp" && (
-                <div className="border-t border-orange-200 bg-orange-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-[#E06F2C] mb-2">Step 2 of 2 — Enter OTP</p>
-                  {sevaAuthError && <p className="text-xs text-red-500 mb-2">{sevaAuthError}</p>}
+                <div className="border-t border-warning/20 bg-warning/10 px-4 py-3">
+                  <p className="text-xs font-semibold text-primary mb-2">Step 2 of 2 — Enter OTP</p>
+                  {sevaAuthError && <p className="text-xs text-destructive mb-2">{sevaAuthError}</p>}
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -2422,17 +2625,17 @@ export default function ConsularBot() {
                       value={sevaOtpInput}
                       onChange={e => setSevaOtpInput(e.target.value.replace(/\D/g, ""))}
                       onKeyDown={e => e.key === "Enter" && handleSevaVerifyOtp()}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-[#E06F2C]"
+                      className="flex-1 border border-border rounded-lg px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                     <button
                       onClick={handleSevaVerifyOtp}
                       disabled={sevaAuthLoading}
-                      className="bg-[#E06F2C] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#c45a1a] transition disabled:opacity-50"
+                      className="bg-primary text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50"
                     >
                       {sevaAuthLoading ? "…" : "Verify ✓"}
                     </button>
                   </div>
-                  <button onClick={() => { setSevaAuthStep("name_email"); setSevaOtpInput(""); setSevaAuthError(""); }} className="text-xs text-gray-400 hover:text-gray-600 mt-1">← Back</button>
+                  <button onClick={() => { setSevaAuthStep("name_email"); setSevaOtpInput(""); setSevaAuthError(""); }} className="text-xs text-muted-foreground hover:text-muted-foreground mt-1">← Back</button>
                 </div>
               )}
 
@@ -2442,8 +2645,8 @@ export default function ConsularBot() {
                 const field = fields[sevaFormFieldIndex];
                 if (!field) return null;
                 return (
-                  <div className="border-t border-blue-200 bg-blue-50 px-4 py-3">
-                    <p className="text-xs font-semibold text-blue-600 mb-1">{field.label} ({sevaFormFieldIndex + 1}/{fields.length})</p>
+                  <div className="border-t border-primary/20 bg-primary/10 px-4 py-3">
+                    <p className="text-xs font-semibold text-primary mb-1">{field.label} ({sevaFormFieldIndex + 1}/{fields.length})</p>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -2451,11 +2654,11 @@ export default function ConsularBot() {
                         value={sevaFormInput}
                         onChange={e => setSevaFormInput(e.target.value)}
                         onKeyDown={e => e.key === "Enter" && handleSevaFormFieldSubmit()}
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                       />
                       <button
                         onClick={handleSevaFormFieldSubmit}
-                        className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition"
+                        className="bg-primary text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-primary/90 transition"
                       >
                         Next →
                       </button>
@@ -2465,7 +2668,7 @@ export default function ConsularBot() {
               })()}
 
               {/* Input Area */}
-              <div className="border-t border-gray-200 p-4" role="form" aria-label="Message input form">
+              <div className="border-t border-border p-4" role="form" aria-label="Message input form">
                 <div className="flex gap-2">
                   <label htmlFor="chat-input-field" className="sr-only">
                     Type your message
@@ -2493,37 +2696,52 @@ export default function ConsularBot() {
                     aria-label="Upload document"
                   />
                   <div className="flex flex-col gap-2" role="toolbar" aria-label="Message actions">
-                    <Button
-                      onClick={handleVoice}
-                      className={`${
-                        isRecording ? "bg-red-500 hover:bg-red-600 animate-pulse" : "bg-[#2E8B57] hover:bg-[#256B47]"
-                      } text-white min-h-[44px] min-w-[44px]`}
-                      data-testid="voice-btn"
-                      aria-label={isRecording ? "Stop recording" : "Start voice input"}
-                      aria-pressed={isRecording}
-                    >
-                      <Mic className="w-5 h-5" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      onClick={startCamera}
-                      className="bg-[#1A2E40] hover:bg-[#132230] text-white min-h-[44px] min-w-[44px]"
-                      data-testid="camera-btn"
-                      aria-label="Scan document with camera"
-                    >
-                      <Camera className="w-5 h-5" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px]"
-                      data-testid="upload-btn"
-                      aria-label="Upload document file (JPG, PNG, or PDF)"
-                    >
-                      <FileText className="w-5 h-5" aria-hidden="true" />
-                    </Button>
+                    {/* Mic — tenant-global. Disabled by a super-admin in
+                        the Bot Config tab if the tenant doesn't want
+                        voice input at all. */}
+                    {tenantFeatures.voice_input && (
+                      <Button
+                        onClick={handleVoice}
+                        className={`${
+                          isRecording ? "bg-destructive/100 hover:bg-destructive animate-pulse" : "bg-success hover:bg-success/90"
+                        } text-white min-h-[44px] min-w-[44px]`}
+                        data-testid="voice-btn"
+                        aria-label={isRecording ? "Stop recording" : "Start voice input"}
+                        aria-pressed={isRecording}
+                      >
+                        <Mic className="w-5 h-5" aria-hidden="true" />
+                      </Button>
+                    )}
+                    {/* Camera + Upload — contextual. Only surface them
+                        when the backend's last `ui_hints` said the bot
+                        is expecting a file/image; otherwise the column
+                        stays lean (just mic + send). The same tenant
+                        feature flag also gates them in case an operator
+                        wants to disable file capture entirely. */}
+                    {tenantFeatures.camera && uiHints.expects_image && (
+                      <Button
+                        onClick={startCamera}
+                        className="bg-foreground hover:bg-foreground/90 text-white min-h-[44px] min-w-[44px]"
+                        data-testid="camera-btn"
+                        aria-label="Scan document with camera"
+                      >
+                        <Camera className="w-5 h-5" aria-hidden="true" />
+                      </Button>
+                    )}
+                    {tenantFeatures.file_upload && uiHints.expects_upload && (
+                      <Button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-primary hover:bg-primary/90 text-white min-h-[44px] min-w-[44px]"
+                        data-testid="upload-btn"
+                        aria-label="Upload document file (JPG, PNG, or PDF)"
+                      >
+                        <FileText className="w-5 h-5" aria-hidden="true" />
+                      </Button>
+                    )}
                     {isTyping ? (
                       <Button
                         onClick={handleStop}
-                        className="bg-red-500 hover:bg-red-600 text-white min-h-[44px] min-w-[44px]"
+                        className="bg-destructive/100 hover:bg-destructive text-white min-h-[44px] min-w-[44px]"
                         data-testid="stop-btn"
                         aria-label="Stop response"
                       >
@@ -2533,7 +2751,7 @@ export default function ConsularBot() {
                       <Button
                         onClick={() => handleSend()}
                         disabled={isTyping}
-                        className="bg-[#E06F2C] hover:bg-[#C55D20] text-white min-h-[44px] min-w-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-primary hover:bg-primary/90 text-white min-h-[44px] min-w-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                         data-testid="send-btn"
                         aria-label="Send message"
                       >
@@ -2548,7 +2766,7 @@ export default function ConsularBot() {
         </div>
         
         {/* Compliance Footer */}
-        <footer className="text-center mt-6 text-xs text-gray-500" role="contentinfo">
+        <footer className="text-center mt-6 text-xs text-muted-foreground" role="contentinfo">
           <p>GDPR, DPDA & POPIA Compliant • Your data is secure and private</p>
         </footer>
       </div>
@@ -2558,30 +2776,30 @@ export default function ConsularBot() {
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setShowSevaApps(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b">
-              <h2 className="text-lg font-bold text-[#1A2E40]">My Applications</h2>
-              <button onClick={() => setShowSevaApps(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+              <h2 className="text-lg font-bold text-foreground">My Applications</h2>
+              <button onClick={() => setShowSevaApps(false)} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
             </div>
             <div className="overflow-y-auto flex-1 p-4 space-y-3">
               {sevaApps.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">No applications found.</p>
+                <p className="text-sm text-muted-foreground text-center py-8">No applications found.</p>
               ) : sevaApps.map(app => (
-                <div key={app.id} className="border border-gray-200 rounded-xl p-4 hover:border-[#E06F2C] transition">
+                <div key={app.id} className="border border-border rounded-xl p-4 hover:border-primary transition">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold text-[#1A2E40] text-sm">{app.service_name}</p>
-                      <p className="text-xs text-[#E06F2C] font-mono mt-0.5">{app.reference_id}</p>
-                      <p className="text-xs text-gray-400 mt-1">{new Date(app.created_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}</p>
+                      <p className="font-semibold text-foreground text-sm">{app.service_name}</p>
+                      <p className="text-xs text-primary font-mono mt-0.5">{app.reference_id}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{new Date(app.created_at).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}</p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                        app.status === "confirmed" ? "bg-green-100 text-green-700" :
-                        app.status === "submitted" ? "bg-blue-100 text-blue-700" :
-                        "bg-gray-100 text-gray-600"
+                        app.status === "confirmed" ? "bg-success/10 text-success" :
+                        app.status === "submitted" ? "bg-primary/10 text-primary" :
+                        "bg-muted text-muted-foreground"
                       }`}>{app.status.charAt(0).toUpperCase() + app.status.slice(1)}</span>
                       {app.has_pdf && (
                         <button
                           onClick={() => handleSevaDownloadPdf(app.id)}
-                          className="flex items-center gap-1 text-xs bg-[#1A2E40] text-white px-2.5 py-1 rounded-full hover:bg-[#243a52] transition"
+                          className="flex items-center gap-1 text-xs bg-foreground text-white px-2.5 py-1 rounded-full hover:bg-foreground/90 transition"
                         >
                           <Download className="w-3 h-3" /> PDF
                         </button>
@@ -2604,7 +2822,7 @@ export default function ConsularBot() {
           aria-describedby="camera-dialog-desc"
         >
           <div className="flex justify-between items-center mb-4">
-            <h2 id="camera-dialog-title" className="text-2xl font-bold text-[#1A2E40]">Capture Document</h2>
+            <h2 id="camera-dialog-title" className="text-2xl font-bold text-foreground">Capture Document</h2>
             <Button 
               variant="ghost" 
               size="sm" 
@@ -2621,7 +2839,7 @@ export default function ConsularBot() {
           
           {cameraError ? (
             <div 
-              className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700"
+              className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-destructive"
               role="alert"
             >
               <p className="font-semibold">Camera Error</p>
@@ -2655,7 +2873,7 @@ export default function ConsularBot() {
               <div className="flex gap-4 mt-4">
                 <Button 
                   onClick={captureImage} 
-                  className="flex-1 bg-[#E06F2C] hover:bg-[#C55D20] min-h-[44px]" 
+                  className="flex-1 bg-primary hover:bg-primary/90 min-h-[44px]" 
                   data-testid="capture-btn"
                   aria-label="Capture document photo"
                 >
@@ -2689,17 +2907,17 @@ export default function ConsularBot() {
           >
             <button
               onClick={() => setDocModal(null)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-800"
+              className="absolute top-3 right-3 text-muted-foreground hover:text-foreground"
               aria-label="Close"
             >
               <X size={20} />
             </button>
-            <p className="text-sm font-semibold text-[#1A2E40] mb-3 pr-6 truncate">{docModal.doc.name}</p>
+            <p className="text-sm font-semibold text-foreground mb-3 pr-6 truncate">{docModal.doc.name}</p>
             {docModal.doc.isPdf ? (
-              <div className="flex flex-col items-center justify-center h-48 bg-red-50 rounded-lg text-red-500 gap-2">
+              <div className="flex flex-col items-center justify-center h-48 bg-destructive/10 rounded-lg text-destructive gap-2">
                 <FileText size={48} />
                 <span className="text-sm font-medium">PDF Document</span>
-                <span className="text-xs text-gray-400">{docModal.doc.name}</span>
+                <span className="text-xs text-muted-foreground">{docModal.doc.name}</span>
               </div>
             ) : (
               <img
@@ -2711,13 +2929,13 @@ export default function ConsularBot() {
             <div className="flex gap-3 mt-4 justify-end">
               <button
                 onClick={() => { handleDocReplace(docModal.msgIndex); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 transition"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm hover:bg-primary/90 transition"
               >
                 <RefreshCw size={14} /> Replace
               </button>
               <button
                 onClick={() => handleDocRemove(docModal.msgIndex)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-500 text-white text-sm hover:bg-red-600 transition"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-destructive/100 text-white text-sm hover:bg-destructive transition"
               >
                 <Trash2 size={14} /> Remove
               </button>

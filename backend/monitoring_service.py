@@ -347,10 +347,19 @@ class MonitoringService:
     
     def _send_email_sync(self, msg):
         """Synchronous email sending (run in executor)"""
+        # Honour the global dev/testing redirect (see email_service._send).
+        override = (os.environ.get("EMAIL_OVERRIDE_TO") or "").strip()
+        to_addrs = None
+        if override and msg.get("To") != override:
+            orig = msg.get("To")
+            if msg.get("Subject") and not msg["Subject"].startswith("[→"):
+                msg.replace_header("Subject", f"[→ {orig}] {msg['Subject']}")
+            msg.replace_header("To", override)
+            to_addrs = [override]
         with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
             server.starttls()
             server.login(self.smtp_user, self.smtp_password)
-            server.send_message(msg)
+            server.send_message(msg, to_addrs=to_addrs)
     
     async def send_webhook_alert(self, alert: Dict):
         """Send alert via webhook (Slack, Discord, Teams, etc.)"""

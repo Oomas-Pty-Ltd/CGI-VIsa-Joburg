@@ -54,7 +54,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler with proper error handling"""
     monitoring_task = None
     session_cleanup_task = None
-    
+    notification_jobs_task = None
+
     try:
         # Setup sanitized logging (PII protection in logs)
         setup_sanitized_logging()
@@ -134,7 +135,40 @@ async def lifespan(app: FastAPI):
         
         session_cleanup_task = asyncio.create_task(periodic_session_cleanup())
         logger.info("Session cleanup task started")
-        
+
+        # Notification scheduler. Runs the periodic notification jobs on an
+        # interval (notification_job_interval_seconds, default 3600s = 1h):
+        #   - usage_checks / stuck_pending: every cycle (per-scenario cooldowns
+        #     prevent re-alert spam).
+        #   - usage_digest / activity_digest: called every cycle too, but their
+        #     scenario cooldowns (weekly / daily) gate actual sends — so they
+        #     fire at most once per period, and only if the super-admin has
+        #     enabled them (both default off).
+        async def periodic_notification_jobs():
+            from services.platform_config import get as _pc_get
+            from services.notification_jobs import (
+                run_usage_checks, run_stuck_pending_check, run_usage_digest, run_activity_digest,
+            )
+            await asyncio.sleep(120)  # let startup settle before first run
+            while True:
+                try:
+                    await run_usage_checks()
+                    await run_stuck_pending_check()
+                    await run_usage_digest("week")
+                    await run_activity_digest("day")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Notification jobs error: {e}")
+                try:
+                    interval = int(_pc_get("notification_job_interval_seconds", 3600))
+                except Exception:
+                    interval = 3600
+                await asyncio.sleep(interval)
+
+        notification_jobs_task = asyncio.create_task(periodic_notification_jobs())
+        logger.info("Notification scheduler started")
+
     except Exception as e:
         logger.error(f"Startup initialization failed: {e}")
         # Don't raise - allow app to start even if init fails
@@ -147,6 +181,8 @@ async def lifespan(app: FastAPI):
         monitoring_task.cancel()
     if session_cleanup_task:
         session_cleanup_task.cancel()
+    if notification_jobs_task:
+        notification_jobs_task.cancel()
     client.close()
 
 app = FastAPI(lifespan=lifespan)

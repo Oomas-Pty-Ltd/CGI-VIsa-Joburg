@@ -115,7 +115,7 @@ from services.escalation_service import (
     EscalationPriority
 )
 from services.knowledge_service import knowledge_service
-from services.application_flow import process_flow, flow_suffix, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query, preload_flow_keywords, preload_service_patterns
+from services.application_flow import process_flow, flow_suffix, detect_service, detect_website_service, get_flow_state, is_apply_intent, is_tracking_query, preload_flow_keywords, preload_service_patterns, ui_hints_for_state
 from services.service_registry import get_service
 from services.pdf_service import generate_application_pdf
 from fastapi.responses import Response as FastAPIResponse
@@ -297,12 +297,29 @@ def _build_footer_contact(bot_cfg, blocked_kws: list[str]) -> str:
     return filter_blocked_lines(raw, blocked_kws)
 
 
-def _resolve_user_id(req_user_id: Optional[str], http_request: Optional[Request]) -> str:
-    """Anonymous users are scoped by hashed client IP so one bad upload
-    can't poison a globally shared 'guest' session.
+def _resolve_user_id(
+    req_user_id: Optional[str],
+    http_request: Optional[Request],
+    visitor_id: Optional[str] = None,
+) -> str:
+    """Resolve the session-manager ``user_identifier`` for a request.
+
+    Priority (highest first):
+      1. ``req_user_id`` — explicit user_id from an authenticated client
+         (e.g. ``seva_user_id`` after OTP login).
+      2. ``visitor_id`` — stable per-browser token persisted in
+         localStorage by ChatWidget. Two anonymous visitors on the same
+         IP get different identifiers — without this they share a
+         session because the IP-hash fallback bucketed them together.
+      3. ``"guest:<sha256(client_ip)[:16]>"`` — last-ditch fallback so
+         legacy callers without a visitor_id keep working. Two users
+         behind the same NAT still collide here; tell new clients to
+         send a visitor_id to avoid that.
     """
     if req_user_id and req_user_id != "guest":
         return req_user_id
+    if visitor_id and visitor_id.strip():
+        return "visitor:" + visitor_id.strip()
     client_ip = "unknown"
     if http_request and http_request.client:
         client_ip = http_request.client.host or "unknown"
@@ -414,6 +431,11 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     company_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Stable per-browser visitor token (uuid stored in localStorage by
+    # ChatWidget). Used as the session-manager ``user_identifier`` so two
+    # anonymous visitors on the same IP / behind the same NAT don't get
+    # bucketed into the same session.
+    visitor_id: Optional[str] = None
     image_base64: Optional[str] = None
     enable_voice: Optional[bool] = False
     language: Optional[str] = "en"
@@ -444,7 +466,7 @@ async def chat(
     # Get client IP for rate limiting logging
     client_ip = http_request.client.host if http_request.client else "unknown"
 
-    _resolved_user_id = _resolve_user_id(request.user_id, http_request)
+    _resolved_user_id = _resolve_user_id(request.user_id, http_request, getattr(request, "visitor_id", None))
 
     # Preload tenant flow-keywords so sync is_apply_intent / is_yes / etc.
     # below use per-tenant overrides.
@@ -457,6 +479,13 @@ async def chat(
     if not sanitization_result.is_safe:
         logger.warning(f"[SECURITY] Blocked unsafe input from {client_ip}: {sanitization_result.detected_patterns}")
         _cfg = await get_bot_config(tenant_id)
+        try:
+            from services.notification_dispatcher import notify
+            await notify("security.guardrail_triggered", company_id=tenant_id, context={
+                "rule": ", ".join(sanitization_result.detected_patterns or []) or "unsafe_input",
+            })
+        except Exception:
+            logger.exception("security.guardrail_triggered notify failed")
         return ChatResponse(
             session_id=request.session_id or str(uuid.uuid4()),
             response=_cfg.fallback("blocked_input") or "I cannot process that request.",
@@ -510,6 +539,13 @@ async def chat(
         )
         response = await escalation_service.get_escalation_response(_esc_priority, company_id=tenant_id)
         response += f"\n\n**Reference ID:** {escalation.id[:8].upper()}"
+        try:
+            from services.notification_dispatcher import notify
+            await notify("chat.escalation_requested", company_id=tenant_id, context={
+                "session_id": session['id'], "reason": _esc_reason,
+            })
+        except Exception:
+            logger.exception("chat.escalation_requested notify failed")
         return ChatResponse(
             session_id=session['id'],
             response=response,
@@ -701,8 +737,21 @@ IF the answer is not in any of the data above, say so briefly and direct the use
                 output_text=bot_response,
                 model=llm_model
             ))
+            # Per-tenant cost ledger (Sprint 14 — Cost dashboard). Uses
+            # the actual OpenAI usage from `LlmChat.last_usage` rather
+            # than the char-count estimate above, so the tenant view is
+            # billing-grade accurate.
+            from services import llm_usage as _llm_usage
+            asyncio.create_task(_llm_usage.log(tenant_id, chat_instance.last_usage))
         except Exception as e:
             logger.error(f"AI service error: {sanitize_logs(str(e))}")
+            try:
+                from services.notification_dispatcher import notify
+                await notify("llm.provider_error", context={
+                    "provider": "openai", "model": llm_model, "error": str(e)[:200],
+                })
+            except Exception:
+                logger.exception("llm.provider_error notify failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"AI service error: {str(e)}"
@@ -760,7 +809,7 @@ async def chat_stream(
     db = await get_database()
     _t = _StageTimer("chat_stream")
 
-    _resolved_user_id = _resolve_user_id(request.user_id, http_request)
+    _resolved_user_id = _resolve_user_id(request.user_id, http_request, getattr(request, "visitor_id", None))
 
     # Preload tenant flow keywords for sync apply/yes/no/discard helpers.
     await preload_flow_keywords(tenant_id)
@@ -812,6 +861,14 @@ async def chat_stream(
             done_event['pdf_url'] = pdf_url
         if lang_switch:
             done_event['lang_switch'] = lang_switch
+        # Tell the widget which input controls to surface for the next
+        # turn. Hides upload + camera unless the flow state actually
+        # wants them — see services.application_flow.ui_hints_for_state.
+        try:
+            _fs = await get_flow_state(sid)
+            done_event['ui_hints'] = ui_hints_for_state((_fs or {}).get('state'))
+        except Exception:
+            pass
         yield f"data: {json.dumps(done_event)}\n\n"
 
     _t.mark("lang_switch")
@@ -819,7 +876,7 @@ async def chat_stream(
         session = await session_manager.get_or_create_session(
             channel="web", user_identifier=_resolved_user_id,
             session_id=request.session_id,
-            metadata={"language": request.language}
+            metadata={"language": request.language, "company_id": tenant_id},
         )
         _t.mark("session")
         _t.flush(extra="path=lang_switch")
@@ -831,11 +888,16 @@ async def chat_stream(
     user_id   = _resolved_user_id
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
+    # Thread `company_id` into session metadata so the session manager's
+    # tenant-scoped lookup (channel + user_identifier + company_id) finds
+    # this tenant's session rather than falling through to the env-var
+    # default tenant. Missing this scoped a Phase-2 widget call to the
+    # CGI default tenant even when X-Company-Id pointed elsewhere.
     session, knowledge_base = await asyncio.gather(
         session_manager.get_or_create_session(
             channel="web", user_identifier=user_id,
             session_id=request.session_id,
-            metadata={"language": request.language}
+            metadata={"language": request.language, "company_id": tenant_id},
         ),
         get_realtime_knowledge(tenant_id),
     )
@@ -1070,7 +1132,13 @@ ORGANISATION FACTS:
                 full_text += suffix
                 yield f"data: {json.dumps({'chunk': suffix})}\n\n"
 
-        yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'step': current_step})}\n\n"
+        _done = {'done': True, 'session_id': session_id, 'step': current_step}
+        try:
+            _fs = await get_flow_state(session_id)
+            _done['ui_hints'] = ui_hints_for_state((_fs or {}).get('state'))
+        except Exception:
+            pass
+        yield f"data: {json.dumps(_done)}\n\n"
         _t.flush(extra=f"path=llm step={current_step} model={llm_model} out_len={len(full_text)}")
 
         # Fire-and-forget persistence + usage tracking
@@ -1078,6 +1146,8 @@ ORGANISATION FACTS:
             session_id=session_id, input_text=sanitized_message,
             output_text=full_text, model=llm_model
         ))
+        from services import llm_usage as _llm_usage
+        asyncio.create_task(_llm_usage.log(tenant_id, chat_instance.last_usage))
         asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
         asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
 
@@ -1525,6 +1595,8 @@ class WidgetChatRequest(BaseModel):
     mode: Optional[str] = "concise"  # concise or detailed
     language: Optional[str] = "en"
     image_base64: Optional[str] = None
+    # See ChatRequest.visitor_id — same field, same purpose.
+    visitor_id: Optional[str] = None
 
 class WidgetChatResponse(BaseModel):
     session_id: str
@@ -1553,16 +1625,57 @@ async def chat_widget(
 
     sanitized_message = request.message
 
-    # Use secure session management for widgets — thread tenant into metadata
-    # so downstream queries can scope by it.
+    # Use secure session management for widgets — thread tenant into
+    # metadata so downstream queries can scope by it. ``visitor_id`` is
+    # the stable per-browser token sent by ChatWidget; falling back to
+    # the literal "widget_guest" bucketed every anonymous visitor into
+    # one session per tenant. Two real users in different browsers
+    # collide there.
+    _widget_user_identifier = (
+        f"visitor:{request.visitor_id.strip()}"
+        if getattr(request, "visitor_id", None) and request.visitor_id.strip()
+        else "widget_guest"
+    )
     session = await session_manager.get_or_create_session(
         channel="widget",
-        user_identifier="widget_guest",
+        user_identifier=_widget_user_identifier,
         session_id=request.session_id,
         metadata={"mode": request.mode, "source": "widget", "company_id": tenant_id}
     )
     session_id = session['id']
-    
+
+    # ── Application flow + workflow hooks ────────────────────────────────
+    # Parity with /chat: run process_flow first so the widget channel gets
+    # the same consent / form-collection / submit state machine — and the
+    # same pre_consent / pre_submit / post_submit hook points operators
+    # configure on tenant_services. Pure Q&A messages (no apply intent,
+    # state already idle) come back from process_flow with
+    # ``needs_llm=True`` and ``flow_response=None`` so we fall through to
+    # the LLM path below. Gated on APPLICATION_FLOW_ENABLED so deployments
+    # that want a pure-LLM widget can keep the legacy behaviour.
+    if _FLOW_ENABLED:
+        await preload_flow_keywords(tenant_id)
+        await preload_service_patterns(tenant_id)
+        _w_current_flow = await get_flow_state(session_id)
+        _w_flow_response, _w_needs_llm, _w_step = await process_flow(
+            session_id, sanitized_message, tenant_id,
+            has_image=bool(request.image_base64),
+            user_id="widget_guest",
+            preloaded_flow=_w_current_flow,
+            channel="widget",
+        )
+        if _w_flow_response is not None and not _w_needs_llm:
+            # Flow has a deterministic answer (consent prompt, hook
+            # advisory, field question, submit confirmation, etc.) —
+            # short-circuit the LLM. Still log to the session so the
+            # transcript stays complete.
+            await session_manager.add_message(session_id, "user", request.message)
+            await session_manager.add_message(session_id, "assistant", _w_flow_response)
+            return WidgetChatResponse(
+                session_id=session_id,
+                response=_w_flow_response,
+            )
+
     # Widget system prompt — sourced entirely from the tenant's bot_config,
     # wrapped with the generic anti-injection guards. The previous version
     # referenced an undefined ``SCOPE_RULES`` constant (NameError on every
@@ -1799,6 +1912,10 @@ async def widget_config(tenant_id: str = Depends(get_tenant_id)):
             "documents":    list(r.get("documents") or []),
             "keywords":     list(r.get("keywords") or []),
             "post_confirm_message": r.get("post_confirm_message") or "",
+            # INFO services ship a typed sections payload + optional CTA.
+            # Empty for TYPE_A/TYPE_B; the consumer card hides the block
+            # when sections is empty, so this is always safe to include.
+            "info_content": dict(r.get("info_content") or {}),
         }
         for r in rows
         if r.get("service_key") and r.get("name")

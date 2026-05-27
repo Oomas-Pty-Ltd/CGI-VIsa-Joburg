@@ -1,5 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+import os
+import uuid
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
@@ -10,6 +13,66 @@ from tenant import get_tenant_id
 from services.audit_service import audit_service, AuditSeverity
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Console-login 2FA. After a correct password, an OTP is issued and the real
+# JWT is only minted once it's verified (POST /auth/login/verify-otp). Honors
+# the platform `dev_auth_mode` flag: dev ON → fixed 123456, no email; dev OFF →
+# random OTP emailed, 123456 rejected.
+_CONSOLE_DEV_OTP = "123456"
+_LOGIN_OTP_TTL_MIN = 10
+_LOGIN_OTP_MAX_ATTEMPTS = 5
+_LOGIN_OTP_LOCKOUT_MIN = 5
+
+
+async def _issue_login_otp(db, email: str, identity: dict) -> dict:
+    """Create a one-time login OTP bound to a password-verified identity.
+    Returns {dev_mode, email_sent}."""
+    from services import platform_config as _pc
+    try:
+        await _pc.ensure_loaded()
+    except Exception:
+        pass
+    dev_mode = bool(_pc.get("dev_auth_mode", True))
+    otp_value = _CONSOLE_DEV_OTP if dev_mode else f"{secrets.randbelow(1_000_000):06d}"
+
+    # One active challenge per email at a time.
+    await db.login_otp_tokens.delete_many({"email": email, "used": False})
+    await db.login_otp_tokens.insert_one({
+        "id":          str(uuid.uuid4()),
+        "email":       email,
+        "otp":         otp_value,
+        "identity":    identity,   # user_id, user_type, company_id, password_change_required
+        "expires_at":  (datetime.now(timezone.utc) + timedelta(minutes=_LOGIN_OTP_TTL_MIN)).isoformat(),
+        "used":        False,
+        "attempts":    0,
+        "created_at":  datetime.now(timezone.utc).isoformat(),
+    })
+
+    email_sent = False
+    if not dev_mode:
+        from services.email_service import send_otp_email
+        email_sent = send_otp_email(
+            email, otp_value, bot_name="",
+            org_name=os.environ.get("PLATFORM_NAME") or "Admin Console",
+        )
+    return {"dev_mode": dev_mode, "email_sent": email_sent}
+
+# Rolling per-email failed-login counter (in-process; resets on restart — fine
+# for a brute-force burst signal). Maps email -> list of recent attempt times.
+_FAILED_LOGINS: dict = {}
+_FAILED_WINDOW_SECONDS = 900  # 15 min
+
+
+async def _maybe_alert_lockout(email: str, ip: str) -> None:
+    from services.notification_dispatcher import notify, get_setting
+    now = datetime.now(timezone.utc).timestamp()
+    times = [t for t in _FAILED_LOGINS.get(email, []) if now - t < _FAILED_WINDOW_SECONDS]
+    times.append(now)
+    _FAILED_LOGINS[email] = times
+    setting = await get_setting("security.login_lockout")
+    threshold = int((setting.get("params") or {}).get("attempts_threshold", 5))
+    if len(times) >= threshold:
+        await notify("security.login_lockout", context={"email": email, "attempts": len(times), "ip": ip or "unknown"})
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -27,13 +90,25 @@ class UnifiedLoginRequest(BaseModel):
     company_id: Optional[str] = None
 
 class LoginResponse(BaseModel):
-    token: str
-    user_type: str
-    user_id: str
+    # token/user_* are null on the OTP-challenge response (password verified,
+    # awaiting OTP). They're populated by /auth/login/verify-otp.
+    token: Optional[str] = None
+    user_type: Optional[str] = None
+    user_id: Optional[str] = None
     company_id: Optional[str] = None
     # Sprint 10: when True the frontend should land on /change-password
     # instead of the dashboard. Cleared by POST /api/auth/change-password.
     password_change_required: bool = False
+    # 2FA challenge fields.
+    otp_required: bool = False
+    email: Optional[str] = None
+    message: Optional[str] = None
+    dev_mode: Optional[bool] = None
+
+
+class LoginOtpVerifyRequest(BaseModel):
+    email: EmailStr
+    otp: str
 
 
 class ChangePasswordRequest(BaseModel):
@@ -67,7 +142,7 @@ async def unified_login(request: UnifiedLoginRequest, http_request: Request):
     company_id = None
 
     if request.company_id:
-        # Explicit local-admin scope
+        # Explicit tenant scope — try local_admin first, then viewer.
         row = await db.local_admins.find_one(
             {"email": request.email, "company_id": request.company_id}, {"_id": 0}
         )
@@ -75,6 +150,14 @@ async def unified_login(request: UnifiedLoginRequest, http_request: Request):
             admin = row
             user_type = "local_admin"
             company_id = row["company_id"]
+        else:
+            row = await db.local_viewers.find_one(
+                {"email": request.email, "company_id": request.company_id}, {"_id": 0}
+            )
+            if row:
+                admin = row
+                user_type = "viewer"
+                company_id = row["company_id"]
     else:
         # Try super-admin first (no company scope)
         row = await db.super_admins.find_one({"email": request.email}, {"_id": 0})
@@ -82,12 +165,19 @@ async def unified_login(request: UnifiedLoginRequest, http_request: Request):
             admin = row
             user_type = "super_admin"
         else:
-            # Fall back to local-admin (post-migration emails are globally unique)
+            # Fall back to local-admin then viewer (emails are globally
+            # unique post-Sprint-7 / migration 0010, so first hit wins).
             row = await db.local_admins.find_one({"email": request.email}, {"_id": 0})
             if row:
                 admin = row
                 user_type = "local_admin"
                 company_id = row["company_id"]
+            else:
+                row = await db.local_viewers.find_one({"email": request.email}, {"_id": 0})
+                if row:
+                    admin = row
+                    user_type = "viewer"
+                    company_id = row["company_id"]
 
     if not admin or not bcrypt.checkpw(
         request.password.encode("utf-8"), admin["password"].encode("utf-8")
@@ -105,16 +195,103 @@ async def unified_login(request: UnifiedLoginRequest, http_request: Request):
             )
         except Exception:
             pass  # never let audit failure block the login response
+        # Brute-force signal: track failed attempts per email in a short
+        # rolling window and alert when they cross the configured threshold.
+        try:
+            await _maybe_alert_lockout(request.email, client_ip)
+        except Exception:
+            pass
         raise generic_unauthorized
 
-    token = create_token(admin["id"], user_type, company_id) if company_id else create_token(admin["id"], user_type)
+    # Password verified — issue a 2FA OTP challenge instead of the token.
+    # The JWT is minted only after /auth/login/verify-otp.
+    identity = {
+        "user_id": admin["id"],
+        "user_type": user_type,
+        "company_id": company_id,
+        "password_change_required": bool(admin.get("password_change_required", False)),
+    }
+    otp_info = await _issue_login_otp(db, request.email, identity)
 
-    # Sprint 12 — audit successful login.
     try:
         await audit_service.log_auth(
-            db=db, action="login", user_id=admin["id"], user_type=user_type,
-            ip_address=client_ip, company_id=company_id,
-            success=True,
+            db=db, action="login_otp_challenge", user_id=admin["id"], user_type=user_type,
+            ip_address=client_ip, company_id=company_id, success=True,
+        )
+    except Exception:
+        pass
+
+    if otp_info["dev_mode"]:
+        msg = "Developer mode is on — enter OTP 123456 to finish signing in."
+    elif otp_info["email_sent"]:
+        msg = f"We sent a verification code to {request.email}. Enter it to finish signing in."
+    else:
+        msg = "We couldn't send the verification email just now. Please try again in a moment."
+
+    return LoginResponse(
+        otp_required=True,
+        email=request.email,
+        message=msg,
+        dev_mode=otp_info["dev_mode"],
+        user_type=user_type,  # UX hint only; token still withheld
+    )
+
+
+@router.post("/login/verify-otp", response_model=LoginResponse)
+async def verify_login_otp(req: LoginOtpVerifyRequest, http_request: Request):
+    """Second step of console login: verify the OTP and mint the JWT."""
+    db = await get_database()
+    client_ip = http_request.client.host if http_request.client else None
+    otp_input = req.otp.strip()
+
+    token_doc = await db.login_otp_tokens.find_one(
+        {"email": req.email, "used": False}, sort=[("created_at", -1)]
+    )
+    if not token_doc:
+        raise HTTPException(status_code=400, detail="No active verification code. Please sign in again.")
+
+    # Expiry
+    expires_at = token_doc["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expires_at:
+        await db.login_otp_tokens.delete_one({"id": token_doc["id"]})
+        raise HTTPException(status_code=400, detail="Verification code expired. Please sign in again.")
+
+    # Lockout on too many wrong attempts.
+    locked_until = token_doc.get("locked_until")
+    if locked_until:
+        lu = datetime.fromisoformat(locked_until) if isinstance(locked_until, str) else locked_until
+        if lu.tzinfo is None:
+            lu = lu.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) < lu:
+            raise HTTPException(status_code=429, detail="Too many attempts. Please try again shortly.")
+
+    if token_doc["otp"] != otp_input:
+        attempts = token_doc.get("attempts", 0) + 1
+        update = {"attempts": attempts}
+        if attempts >= _LOGIN_OTP_MAX_ATTEMPTS:
+            update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=_LOGIN_OTP_LOCKOUT_MIN)).isoformat()
+        await db.login_otp_tokens.update_one({"id": token_doc["id"]}, {"$set": update})
+        remaining = max(_LOGIN_OTP_MAX_ATTEMPTS - attempts, 0)
+        if remaining == 0:
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Locked for {_LOGIN_OTP_LOCKOUT_MIN} minutes.")
+        raise HTTPException(status_code=400, detail=f"Invalid code. {remaining} attempt(s) remaining.")
+
+    await db.login_otp_tokens.update_one({"id": token_doc["id"]}, {"$set": {"used": True}})
+
+    identity = token_doc.get("identity") or {}
+    uid = identity.get("user_id")
+    user_type = identity.get("user_type")
+    company_id = identity.get("company_id")
+    token = create_token(uid, user_type, company_id)
+
+    try:
+        await audit_service.log_auth(
+            db=db, action="login", user_id=uid, user_type=user_type,
+            ip_address=client_ip, company_id=company_id, success=True,
         )
     except Exception:
         pass
@@ -122,9 +299,9 @@ async def unified_login(request: UnifiedLoginRequest, http_request: Request):
     return LoginResponse(
         token=token,
         user_type=user_type,
-        user_id=admin["id"],
+        user_id=uid,
         company_id=company_id,
-        password_change_required=bool(admin.get("password_change_required", False)),
+        password_change_required=bool(identity.get("password_change_required", False)),
     )
 
 
@@ -151,10 +328,15 @@ async def change_password(
         collection = "super_admins"
     elif user_type == "local_admin":
         collection = "local_admins"
+    elif user_type == "viewer":
+        # Viewers go through the same forced-first-login rotation as
+        # admins — the resolver was missing this branch when the role
+        # was introduced, so their initial bootstrap rotation 403'd.
+        collection = "local_viewers"
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin users can change their password via this endpoint",
+            detail="Only console users can change their password via this endpoint",
         )
 
     if len(body.new_password) < 8:

@@ -5,7 +5,7 @@ import jwt
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, Request, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 logger = logging.getLogger("auth_utils")
@@ -158,20 +158,47 @@ def verify_local_admin(payload: dict = Depends(verify_token)):
 
 # ── Sprint 8: shared admin dependency + tenant-scope enforcement ────────────
 
-def verify_admin(payload: dict = Depends(verify_token)):
-    """Accept either a super_admin or a local_admin token.
+# HTTP methods that mutate state and therefore must NOT be exposed to
+# viewer-role tokens. GET (and HEAD/OPTIONS, which FastAPI handles upstream)
+# are read-only and safe to allow.
+_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-    Endpoints that both roles can hit (services, bot-config, scrapers,
-    knowledge, escalations, audit logs, conversations) use this instead
-    of ``verify_super_admin``. The handler is then responsible for
-    calling ``enforce_tenant_scope()`` to constrain the data a local
-    admin can see to their own tenant."""
-    if payload.get('user_type') not in ('super_admin', 'local_admin'):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-    return payload
+
+def verify_admin(
+    request: Request,
+    payload: dict = Depends(verify_token),
+):
+    """Accept any role with read access to the admin surface.
+
+    Resolved roles:
+      * ``super_admin`` and ``local_admin`` — full access (read + write),
+        subject to tenant scoping via :py:func:`enforce_tenant_scope`.
+      * ``viewer`` — read-only. Same data visibility as a local_admin
+        for their tenant, but rejected on any HTTP method in
+        ``_WRITE_METHODS``. Handlers therefore don't need a per-route
+        write-guard — flipping a route from GET → PUT automatically
+        re-gates it.
+
+    Endpoints that both admins and viewers can hit (services,
+    bot-config, conversations, audit logs, knowledge, applications) use
+    this dependency. The handler is then responsible for calling
+    ``enforce_tenant_scope()`` to constrain the data a local-admin /
+    viewer can see to their own tenant.
+    """
+    role = payload.get('user_type')
+    if role in ('super_admin', 'local_admin'):
+        return payload
+    if role == 'viewer':
+        if request.method.upper() in _WRITE_METHODS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Read-only account — this action requires an admin role.",
+            )
+        return payload
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access required",
+    )
 
 
 def enforce_tenant_scope(payload: dict, company_id):
@@ -179,10 +206,10 @@ def enforce_tenant_scope(payload: dict, company_id):
 
     - ``super_admin``: returns ``company_id`` as-is. ``None`` means
       "all tenants" (cross-tenant overview).
-    - ``local_admin``: ignores any ``company_id`` that differs from the
-      JWT's tenant. Returns the JWT's tenant. Cross-tenant access
-      attempts raise 403 — a tenant admin cannot probe other tenants
-      by guessing IDs.
+    - ``local_admin`` / ``viewer``: ignores any ``company_id`` that
+      differs from the JWT's tenant. Returns the JWT's tenant.
+      Cross-tenant access attempts raise 403 — a tenant admin / viewer
+      cannot probe other tenants by guessing IDs.
 
     Pattern in handlers::
 
@@ -199,11 +226,11 @@ def enforce_tenant_scope(payload: dict, company_id):
     if user_type == 'super_admin':
         return company_id  # may be None for cross-tenant views
 
-    if user_type == 'local_admin':
+    if user_type in ('local_admin', 'viewer'):
         if not jwt_tenant:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Local admin token missing company_id",
+                detail=f"{user_type} token missing company_id",
             )
         if company_id is not None and company_id != jwt_tenant:
             raise HTTPException(

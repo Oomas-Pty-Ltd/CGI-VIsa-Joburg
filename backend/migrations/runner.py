@@ -106,6 +106,13 @@ async def _apply_one(db, version: int, modname: str) -> dict:
                 "failed_at":  datetime.now(timezone.utc).isoformat(),
             }},
         ))
+        try:
+            from services.notification_dispatcher import notify
+            await notify("ops.migration_failed", context={
+                "version": version, "description": description, "error": str(exc)[:300],
+            })
+        except Exception:
+            logger.exception("ops.migration_failed notify failed")
         raise
 
     # Shielded: once up() succeeds, the registry MUST reach "applied" even if

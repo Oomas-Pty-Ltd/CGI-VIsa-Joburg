@@ -6,8 +6,11 @@ import uuid
 import csv
 import io
 import re
+import logging
 from datetime import datetime, timezone, date
 import bcrypt
+
+logger = logging.getLogger("super_admin_routes")
 from database import get_database
 from auth_utils import verify_super_admin, verify_admin, enforce_tenant_scope
 from knowledge_scraper import invalidate_knowledge_cache
@@ -117,6 +120,14 @@ async def create_company(
         ip_address=http_request.client.host if http_request.client else None,
     )
 
+    try:
+        from services.notification_dispatcher import notify
+        await notify("tenant.created", company_id=company_id, context={
+            "tenant_name": company.name, "admin_email": company.email, "org_name": company.name,
+        })
+    except Exception:
+        logger.exception("tenant.created notify failed")
+
     return Company(**company_doc)
 
 @router.get("/companies", response_model=List[Company])
@@ -216,6 +227,13 @@ async def create_company_admin(
         new_value={"email": body.email},
         ip_address=http_request.client.host if http_request.client else None,
     )
+    try:
+        from services.notification_dispatcher import notify
+        await notify("tenant.admin_added", company_id=company_id, context={
+            "new_email": body.email, "role": "admin",
+        })
+    except Exception:
+        logger.exception("tenant.admin_added notify failed")
     # Exclude both the password hash and the Mongo-injected ObjectId from
     # the response. insert_one mutates `doc` in place to add `_id`.
     return {k: v for k, v in doc.items() if k not in ("password", "_id")}
@@ -331,25 +349,280 @@ async def reset_admin_password(
     )
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Admin not found for this tenant")
+    try:
+        from services.notification_dispatcher import notify
+        admin = await db.local_admins.find_one({"id": admin_id, "company_id": company_id}, {"_id": 0, "email": 1})
+        await notify("tenant.password_reset", company_id=company_id, context={
+            "admin_email": (admin or {}).get("email", ""),
+        })
+    except Exception:
+        logger.exception("tenant.password_reset notify failed")
     return {"success": True, "admin_id": admin_id}
+
+
+# ── Viewers (read-only tenant accounts) ─────────────────────────────────────
+# Mirrors the admins surface above. The runtime gate that distinguishes
+# the two is `auth_utils.verify_admin`, which rejects viewer tokens on
+# any non-GET request — so a viewer can browse every tab a local-admin
+# can, but every Save/Delete/Add button fails with a 403.
+
+
+@router.get("/companies/{company_id}/viewers")
+async def list_company_viewers(company_id: str, payload: dict = Depends(verify_super_admin)):
+    """List read-only viewers for a tenant. Passwords are never returned."""
+    db = await get_database()
+    if not await _company_exists(db, company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+    viewers = await db.local_viewers.find(
+        {"company_id": company_id},
+        {"_id": 0, "password": 0},
+    ).sort("created_at", 1).to_list(100)
+    return {"viewers": viewers, "count": len(viewers)}
+
+
+@router.post("/companies/{company_id}/viewers", status_code=201)
+async def create_company_viewer(
+    company_id: str,
+    body: AdminCreate,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Provision a viewer for a tenant. Same shape as create-admin —
+    initial_password is hashed, password_change_required is true so the
+    viewer must rotate the bootstrap password on first login."""
+    db = await get_database()
+    if not await _company_exists(db, company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+    if len(body.initial_password) < 8:
+        raise HTTPException(status_code=400, detail="initial_password must be at least 8 characters")
+
+    # Same global-uniqueness invariant as create_company_admin — a single
+    # email can't exist in more than one role, otherwise the login resolver
+    # can't decide which row to authenticate.
+    if await db.local_admins.find_one({"email": body.email}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail=f"Email {body.email!r} is already a local admin somewhere.")
+    if await db.super_admins.find_one({"email": body.email}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail=f"Email {body.email!r} is a super admin.")
+    if await db.local_viewers.find_one({"email": body.email}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail=f"Email {body.email!r} is already a viewer somewhere.")
+
+    viewer_id = str(uuid.uuid4())
+    hashed    = bcrypt.hashpw(body.initial_password.encode("utf-8"), bcrypt.gensalt())
+    now       = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id":                       viewer_id,
+        "company_id":               company_id,
+        "email":                    body.email,
+        "password":                 hashed.decode("utf-8"),
+        "password_change_required": True,
+        "created_at":               now,
+        "created_by":               payload.get("user_id"),
+    }
+    await db.local_viewers.insert_one(doc)
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="create_local_viewer",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="local_viewer",
+        resource_id=viewer_id,
+        company_id=company_id,
+        new_value={"email": body.email},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return {k: v for k, v in doc.items() if k not in ("password", "_id")}
+
+
+@router.delete("/companies/{company_id}/viewers/{viewer_id}")
+async def delete_company_viewer(
+    company_id: str,
+    viewer_id: str,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Remove a viewer. Unlike admins, a tenant may have zero viewers —
+    they're a strictly additive role, so no last-row safety guard."""
+    db = await get_database()
+    if not await _company_exists(db, company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    result = await db.local_viewers.delete_one(
+        {"id": viewer_id, "company_id": company_id}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Viewer not found for this tenant")
+    await _audit_safe(
+        db,
+        category=AuditCategory.DATA_DELETION,
+        action="delete_local_viewer",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="local_viewer",
+        resource_id=viewer_id,
+        company_id=company_id,
+        ip_address=http_request.client.host if http_request.client else None,
+        severity=AuditSeverity.WARNING,
+    )
+    return {"deleted": True, "viewer_id": viewer_id}
+
+
+@router.post("/companies/{company_id}/viewers/{viewer_id}/reset-password")
+async def reset_viewer_password(
+    company_id: str,
+    viewer_id: str,
+    body: AdminPasswordReset,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Rotate a viewer's password and force a change on next login."""
+    db = await get_database()
+    if not await _company_exists(db, company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="new_password must be at least 8 characters")
+
+    hashed = bcrypt.hashpw(body.new_password.encode("utf-8"), bcrypt.gensalt())
+    result = await db.local_viewers.update_one(
+        {"id": viewer_id, "company_id": company_id},
+        {"$set": {
+            "password":                 hashed.decode("utf-8"),
+            "password_change_required": True,
+            "password_reset_at":        datetime.now(timezone.utc).isoformat(),
+            "password_reset_by":        payload.get("user_id"),
+        }},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Viewer not found for this tenant")
+    return {"success": True, "viewer_id": viewer_id}
 
 
 @router.put("/companies/{company_id}/llm-config")
 async def update_llm_config(company_id: str, config: LLMConfig, payload: dict = Depends(verify_super_admin)):
     db = await get_database()
-    
+
     result = await db.companies.update_one(
         {"id": company_id},
         {"$set": {"llm_model": config.model}}
     )
-    
+
     if result.modified_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Company not found"
         )
-    
+
     return {"success": True, "message": "LLM config updated"}
+
+
+class CompanyStatusUpdate(BaseModel):
+    """Allowed values: "active" or "suspended". Anything else is rejected
+    so a typo doesn't accidentally take a tenant offline."""
+    status: str
+
+
+class CompanyBudgetUpdate(BaseModel):
+    """Monthly LLM cost budget in USD. Validated >= 0."""
+    llm_monthly_budget_usd: float
+
+
+@router.put("/companies/{company_id}/llm-budget")
+async def update_company_llm_budget(
+    company_id: str,
+    update: CompanyBudgetUpdate,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Per-tenant LLM cost budget. The local-admin Cost tab reads this
+    via /local-admin/llm-usage and renders the gauge against it."""
+    if update.llm_monthly_budget_usd < 0:
+        raise HTTPException(status_code=400, detail="Budget must be >= 0")
+    db = await get_database()
+    existing = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "llm_monthly_budget_usd": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Company not found")
+    await db.companies.update_one(
+        {"id": company_id},
+        {"$set": {"llm_monthly_budget_usd": float(update.llm_monthly_budget_usd)}},
+    )
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="update_llm_budget",
+        user_id=payload.get("user_id"),
+        user_type=payload.get("user_type"),
+        resource_type="company",
+        resource_id=company_id,
+        company_id=company_id,
+        old_value={"llm_monthly_budget_usd": existing.get("llm_monthly_budget_usd")},
+        new_value={"llm_monthly_budget_usd": update.llm_monthly_budget_usd},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return {"id": company_id, "llm_monthly_budget_usd": update.llm_monthly_budget_usd}
+
+
+@router.put("/companies/{company_id}/status")
+async def update_company_status(
+    company_id: str,
+    update: CompanyStatusUpdate,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Activate or suspend a tenant. Suspended tenants are rejected at the
+    `get_tenant_id` boundary, so the widget can't open sessions, the chat
+    endpoint refuses inbound messages, and widget-config returns 400 —
+    the embed effectively goes dark without any infra change on the host
+    page.
+
+    Cache invalidation is critical here: `tenant._validity_cache` holds
+    a positive result for `cache_company_validity_ttl_seconds` (default
+    60s), so without invalidating, a freshly-suspended tenant would keep
+    serving for up to a minute.
+    """
+    desired = (update.status or "").strip().lower()
+    if desired not in ("active", "suspended"):
+        raise HTTPException(
+            status_code=400,
+            detail="status must be 'active' or 'suspended'",
+        )
+    db = await get_database()
+    existing = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "status": 1, "name": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    await db.companies.update_one(
+        {"id": company_id},
+        {"$set": {"status": desired, "status_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+
+    # Bust the cache so the change takes effect immediately, not on the
+    # next 60s expiry.
+    import tenant
+    tenant.invalidate_cache(company_id)
+
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="update_company_status",
+        user_id=payload.get("user_id"),
+        user_type=payload.get("user_type"),
+        resource_type="company",
+        resource_id=company_id,
+        company_id=company_id,
+        old_value={"status": existing.get("status")},
+        new_value={"status": desired},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+
+    try:
+        from services.notification_dispatcher import notify
+        await notify("tenant.status_changed", company_id=company_id, context={
+            "tenant_name": existing.get("name", ""),
+            "status": "activated" if desired == "active" else "deactivated",
+        })
+    except Exception:
+        logger.exception("tenant.status_changed notify failed")
+
+    return {"id": company_id, "status": desired, "name": existing.get("name")}
 
 @router.get("/analytics/overview")
 async def get_analytics_overview(payload: dict = Depends(verify_super_admin)):
@@ -1098,22 +1371,50 @@ async def upload_pdf_to_knowledge(
 
 # ─── List knowledge entries from PDF uploads ──────────────────────────────────
 
+# Source-provenance helpers. `source_type` is reliably set on crawl rows but
+# legacy PDF/manual rows may lack it, so we derive from the `source` field
+# (which is always set: "pdf_upload:…", an http(s) URL for crawls, or other).
+_SOURCE_TYPE_QUERY = {
+    "pdf":    {"source": {"$regex": "^pdf_upload:"}},
+    "crawl":  {"source": {"$regex": "^https?://"}},
+    "manual": {"source": {"$not": {"$regex": "^(pdf_upload:|https?://)"}}},
+}
+
+
+def _derive_source_type(e: dict) -> str:
+    src = (e.get("source") or "")
+    if e.get("source_type") in ("crawl", "pdf", "manual"):
+        return e["source_type"]
+    if src.startswith("pdf_upload:"):
+        return "pdf"
+    if src.startswith("http://") or src.startswith("https://"):
+        return "crawl"
+    return "manual"
+
+
 @router.get("/knowledge/entries")
 async def list_knowledge_entries(
     event_status: Optional[str] = None,   # past | present | future | general
     category: Optional[str] = None,
     pdf_filename: Optional[str] = None,
+    source_type: Optional[str] = None,    # manual | crawl | pdf  (omit = all)
     company_id: Optional[str] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    payload: dict = Depends(verify_super_admin),
+    payload: dict = Depends(verify_admin),
 ):
-    """List knowledge entries created via PDF upload.
+    """List knowledge-base entries across all provenances (manual, crawler,
+    PDF). Filter by ``source_type`` to narrow to one. Each entry carries its
+    derived ``source_type`` + source detail (URL for crawls, filename for
+    PDFs) so the UI can show where the bot's knowledge came from.
 
-    Sprint 14: ``?company_id`` scopes to one tenant. Omit for the
-    cross-tenant view (super-admin only)."""
+    Super-admins may pass ``?company_id`` (or omit for the cross-tenant view);
+    local-admins are always scoped to their own tenant."""
+    company_id = enforce_tenant_scope(payload, company_id)
     db = await get_database()
-    query: dict = {"source": {"$regex": "^pdf_upload:"}}
+    query: dict = {}
+    if source_type in _SOURCE_TYPE_QUERY:
+        query.update(_SOURCE_TYPE_QUERY[source_type])
     if event_status:
         query["event_status"] = event_status
     if category:
@@ -1135,23 +1436,43 @@ async def list_knowledge_entries(
 
     entries = []
     for e in raw:
+        st = _derive_source_type(e)
         entries.append({
             "id": e.get("id", ""),
             "company_id": e.get("company_id"),
             "title": e.get("title", ""),
             "category": e.get("category", ""),
             "event_status": e.get("event_status", "general"),
+            "source_type": st,
+            # Human-readable source detail: filename for PDFs, URL for crawls.
+            "source_detail": (
+                e.get("pdf_filename", "") if st == "pdf"
+                else e.get("url") or e.get("source", "") if st == "crawl"
+                else ""
+            ),
+            "url": e.get("url"),
             "pdf_filename": e.get("pdf_filename", ""),
             "pdf_doc_title": e.get("pdf_doc_title", ""),
             "valid_from": e.get("valid_from"),
             "valid_until": e.get("valid_until"),
             "keywords": e.get("keywords", [])[:6],
             "answer_preview": (e.get("answer", "")[:200] + "…") if len(e.get("answer", "")) > 200 else e.get("answer", ""),
+            "version": e.get("version"),
+            "last_seen_at": e.get("last_seen_at"),
             "created_at": e.get("created_at", ""),
             "status": e.get("status", "active"),
         })
 
-    return {"entries": entries, "total": total, "page": page, "limit": limit}
+    # Provenance breakdown for the current filter scope (minus source_type
+    # filter) so the UI can show counts per source.
+    scope = {k: v for k, v in query.items() if k != "source"}
+    if company_id:
+        scope["company_id"] = company_id
+    counts = {}
+    for st, q in _SOURCE_TYPE_QUERY.items():
+        counts[st] = await db.knowledge_base.count_documents({**scope, **q})
+
+    return {"entries": entries, "total": total, "page": page, "limit": limit, "source_counts": counts}
 
 
 # ─── Delete a knowledge entry ─────────────────────────────────────────────────
@@ -1159,10 +1480,19 @@ async def list_knowledge_entries(
 @router.delete("/knowledge/entries/{entry_id}")
 async def delete_knowledge_entry(
     entry_id: str,
-    payload: dict = Depends(verify_super_admin),
+    payload: dict = Depends(verify_admin),
 ):
-    """Permanently delete a knowledge entry (PDF-sourced or otherwise)."""
+    """Permanently delete a knowledge entry. Local-admins can only delete
+    entries belonging to their own tenant."""
     db = await get_database()
+    if payload.get("user_type") != "super_admin":
+        # Scope the delete to the caller's tenant.
+        tenant = enforce_tenant_scope(payload, None)
+        entry = await db.knowledge_base.find_one({"id": entry_id}, {"_id": 0, "company_id": 1})
+        if not entry:
+            raise HTTPException(status_code=404, detail="Entry not found.")
+        if entry.get("company_id") != tenant:
+            raise HTTPException(status_code=404, detail="Entry not found.")
     result = await db.knowledge_base.delete_one({"id": entry_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found.")
@@ -1172,12 +1502,16 @@ async def delete_knowledge_entry(
 # ─── List distinct PDF filenames uploaded ────────────────────────────────────
 
 @router.get("/knowledge/pdf-files")
-async def list_uploaded_pdfs(payload: dict = Depends(verify_super_admin)):
-    """Return the distinct PDF filenames that have been uploaded."""
+async def list_uploaded_pdfs(company_id: Optional[str] = None, payload: dict = Depends(verify_admin)):
+    """Return the distinct PDF filenames that have been uploaded. Local-admins
+    are scoped to their tenant; super-admins see all (or one if company_id is
+    given)."""
+    company_id = enforce_tenant_scope(payload, company_id)
     db = await get_database()
-    filenames = await db.knowledge_base.distinct(
-        "pdf_filename", {"source": {"$regex": "^pdf_upload:"}}
-    )
+    q: dict = {"source": {"$regex": "^pdf_upload:"}}
+    if company_id:
+        q["company_id"] = company_id
+    filenames = await db.knowledge_base.distinct("pdf_filename", q)
     return {"files": sorted(f for f in filenames if f)}
 
 
@@ -1268,6 +1602,11 @@ async def get_all_applications_with_documents(
                 for doc in docs
             ],
             "form_data_fields": len(app.get("form_data", {})),
+            "form_data": app.get("form_data", {}),
+            # External processing-service round-trips (recorded at confirm).
+            "service_status": app.get("service_status"),
+            "gov_processing_ref": app.get("gov_processing_ref"),
+            "service_invocations": app.get("service_invocations", []),
         }
         formatted_apps.append(formatted_app)
     
@@ -1337,9 +1676,15 @@ async def get_application_with_documents(
             }
             for doc in docs
         ],
+        # External processing-service round-trips recorded at confirm time.
+        # Surfaced so operators can audit the downstream submission and
+        # diagnose failures without DB access.
+        "service_status": app.get("service_status"),
+        "gov_processing_ref": app.get("gov_processing_ref"),
+        "service_invocations": app.get("service_invocations", []),
         "edit_token": app.get("edit_token"),
     }
-    
+
     return formatted_app
 
 
@@ -1716,6 +2061,147 @@ async def get_scraper_run(
     return {**run, "frontier_now": stats}
 
 
+@router.get("/scrapers/{company_id}/runs/{run_id}/pages")
+async def list_scraper_run_pages(
+    company_id: str,
+    run_id: str,
+    payload: dict = Depends(verify_admin),
+):
+    """Per-page results for a run: status, http_status, attempts, and a
+    processing summary (chunk count, keywords, summary, embedding dim). Raw
+    HTML and full chunk text are omitted here — fetch a single page for those."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    db = await get_database()
+    rows = await db.crawler_pages.find(
+        {"company_id": company_id, "run_id": run_id},
+        {"_id": 0, "raw_html": 0, "extracted_text": 0, "processing.chunks": 0, "processing.log": 0},
+    ).sort([("depth", 1), ("url", 1)]).to_list(1000)
+    return {"pages": rows, "count": len(rows)}
+
+
+@router.get("/scrapers/{company_id}/pages/{page_id}")
+async def get_scraper_page(
+    company_id: str,
+    page_id: str,
+    payload: dict = Depends(verify_admin),
+):
+    """Full per-page record including raw HTML, extracted text, all chunks and
+    the processing log. Tenant-scoped."""
+    company_id = enforce_tenant_scope(payload, company_id)
+    db = await get_database()
+    page = await db.crawler_pages.find_one(
+        {"company_id": company_id, "id": page_id}, {"_id": 0}
+    )
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return page
+
+
+# =============================================================================
+# Notifications — super-admin config for all platform notification scenarios.
+# The scenario catalog lives in services.notification_registry; per-scenario
+# overrides in `notification_settings`; deliveries in `notification_log`.
+# =============================================================================
+
+class NotificationSettingUpdate(BaseModel):
+    enabled:          Optional[bool] = None
+    recipients:       Optional[List[str]] = None
+    custom_emails:    Optional[List[str]] = None
+    subject:          Optional[str] = None
+    body:             Optional[str] = None
+    params:           Optional[Dict[str, Any]] = None
+    cooldown_minutes: Optional[int] = None
+
+
+@router.get("/notifications/scenarios")
+async def list_notification_scenarios(payload: dict = Depends(verify_super_admin)):
+    """Full catalog: scenario metadata (grouped by category) merged with the
+    current stored settings, so the UI can render one editable card each."""
+    from services import notification_registry as reg
+    from services.notification_dispatcher import list_settings
+    settings = await list_settings()
+    scenarios = []
+    for s in reg.SCENARIOS:
+        scenarios.append({
+            "key": s.key, "name": s.name, "description": s.description,
+            "category": s.category, "scope": s.scope, "severity": s.severity,
+            "available_recipients": reg.ROLE_CHOICES,
+            "setting": settings.get(s.key, {}),
+        })
+    return {
+        "categories": [{"key": k, "label": v} for k, v in reg.CATEGORIES],
+        "roles": reg.ROLE_CHOICES,
+        "scenarios": scenarios,
+    }
+
+
+@router.put("/notifications/settings/{scenario_key}")
+async def update_notification_setting(
+    scenario_key: str,
+    body: NotificationSettingUpdate,
+    payload: dict = Depends(verify_super_admin),
+):
+    from services.notification_dispatcher import update_setting
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    try:
+        merged = await update_setting(scenario_key, fields, updated_by=payload.get("user_id"))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"scenario_key": scenario_key, "setting": merged}
+
+
+@router.post("/notifications/test/{scenario_key}")
+async def test_notification(
+    scenario_key: str,
+    email: str = Query(..., description="Address to send the test to"),
+    payload: dict = Depends(verify_super_admin),
+):
+    """Send a test using the scenario's sample context to one address,
+    bypassing the enabled/cooldown gates."""
+    from services import notification_registry as reg
+    from services.notification_dispatcher import notify
+    s = reg.get_scenario(scenario_key)
+    if not s:
+        raise HTTPException(status_code=404, detail="Unknown scenario")
+    res = await notify(
+        scenario_key, context=dict(s.sample_context),
+        force=True, recipients_override=[email],
+    )
+    return {"scenario_key": scenario_key, "result": res}
+
+
+@router.post("/notifications/run-job/{job}")
+async def run_notification_job(job: str, payload: dict = Depends(verify_super_admin)):
+    """Run a periodic notification job now (usage_checks, stuck_pending,
+    usage_digest, activity_digest). Intended for cron; exposed for manual
+    trigger + testing. Emits notifications per the job's findings."""
+    from services.notification_jobs import JOBS
+    fn = JOBS.get(job)
+    if not fn:
+        raise HTTPException(status_code=404, detail=f"Unknown job. Options: {sorted(JOBS)}")
+    result = await fn()
+    return {"job": job, "result": result}
+
+
+@router.get("/notifications/log")
+async def notification_log(
+    scenario_key: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    payload: dict = Depends(verify_super_admin),
+):
+    db = await get_database()
+    query: dict = {}
+    if scenario_key:
+        query["scenario_key"] = scenario_key
+    if status:
+        query["status"] = status
+    rows = await db.notification_log.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return {"log": rows, "count": len(rows)}
+
+
 # =============================================================================
 # Tenant bot config — super-admin management of bot identity, contact info,
 # system prompt template, languages, branding, and fallback responses.
@@ -1864,6 +2350,7 @@ class TenantBotConfigUpdate(BaseModel):
     escalation_rules:        Optional[Dict[str, Any]] = None
     security_config:         Optional[_SecurityConfigUpdate] = None
     fallback_responses:      Optional[Dict[str, str]] = None
+    features:                Optional[Dict[str, bool]] = None
 
 
 def _strip_none(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -2008,7 +2495,7 @@ async def upsert_bot_config(
 # that drives the application_flow state machine.
 # =====================================================================
 
-_VALID_CATEGORIES = {"TYPE_A", "TYPE_B"}
+_VALID_CATEGORIES = {"TYPE_A", "TYPE_B", "INFO"}
 # Mirrors the regex used by tenant.validate_company_id — keys must be
 # url-safe and stable since they appear in tracking IDs (PASSPORT-...).
 _SERVICE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
@@ -2091,6 +2578,10 @@ class TenantServiceCreate(BaseModel):
     # rule schema. Loose typing because the rule format is free-form
     # JSON; validation happens at evaluation time.
     hooks: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    # INFO services carry a typed sections payload + optional CTA.
+    # Free-form dict; the consumer renderer falls back to defaults on
+    # malformed shapes so a bad blob never breaks the chat.
+    info_content: Optional[Dict[str, Any]] = None
 
 
 class TenantServiceUpdate(BaseModel):
@@ -2111,6 +2602,7 @@ class TenantServiceUpdate(BaseModel):
     display_order: Optional[int]              = None
     post_confirm_message: Optional[str]       = None
     hooks:                Optional[Dict[str, List[Dict[str, Any]]]] = None
+    info_content:         Optional[Dict[str, Any]] = None
 
 
 def _validate_service_payload(payload: Dict[str, Any]) -> None:
@@ -2276,6 +2768,7 @@ async def create_tenant_service(
         "display_order": int(incoming["display_order"]),
         "post_confirm_message": (incoming.get("post_confirm_message") or "").strip(),
         "hooks":         dict(incoming.get("hooks") or {}),
+        "info_content":  dict(incoming.get("info_content") or {"sections": [], "primary_action": None}),
         "created_at":    now,
         "updated_at":    now,
         "created_by":    payload.get("sub") or payload.get("user_type") or "admin",
@@ -2619,3 +3112,425 @@ async def put_platform_config(
         severity=AuditSeverity.WARNING,
     )
     return {"config": resolved}
+
+
+# ─── Platform model registry ────────────────────────────────────────────────
+# Replaces the hardcoded MODEL_MAP + _PRICING. Super-admin CRUD over the
+# ``platform_models`` collection; tenants are then assigned an allowlist
+# via ``PUT /companies/{id}/models``. See migration 0011 for the schema
+# and ``services.model_registry`` for the read path.
+
+_MODEL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._\-]{0,63}$", re.IGNORECASE)
+
+
+class _ModelPricing(BaseModel):
+    input_per_1m_usd:  float
+    output_per_1m_usd: float
+
+
+class _ModelCapabilities(BaseModel):
+    vision:     Optional[bool] = None
+    streaming:  Optional[bool] = None
+    max_tokens: Optional[int]  = None
+    model_config = {"extra": "allow"}
+
+
+class PlatformModelCreate(BaseModel):
+    key:          str
+    display_name: str
+    provider:     str
+    api_model:    str
+    description:  Optional[str]              = ""
+    pricing:      _ModelPricing
+    capabilities: Optional[_ModelCapabilities] = None
+    enabled:      Optional[bool]             = True
+
+
+class PlatformModelUpdate(BaseModel):
+    display_name: Optional[str]              = None
+    provider:     Optional[str]              = None
+    api_model:    Optional[str]              = None
+    description:  Optional[str]              = None
+    pricing:      Optional[_ModelPricing]    = None
+    capabilities: Optional[_ModelCapabilities] = None
+    enabled:      Optional[bool]             = None
+
+
+def _strip_none_dict(d: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def _sdk_installed(module_name: str) -> bool:
+    """Best-effort runtime check: try importing the provider SDK. True
+    if importable, False if missing. Used by the providers/status
+    endpoint and the model-create validator so we never let a
+    super-admin register a provider that the runtime can't actually
+    talk to."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except Exception:
+        return False
+
+
+# Single source of truth for provider runtime metadata. Adding a new
+# provider means: list it here, install its SDK, add its key to .env,
+# and wire its dispatch in LlmChat.
+_PROVIDER_SPECS = [
+    {
+        "provider":         "openai",
+        "label":            "OpenAI",
+        "env_var":          "OPENAI_API_KEY",
+        "fallback_env_var": "EMERGENT_LLM_KEY",
+        "sdk_module":       "openai",
+        "wired_in_llmchat": True,
+        "install_hint":     "Already shipped. Set OPENAI_API_KEY (or EMERGENT_LLM_KEY) in backend/.env.",
+    },
+    {
+        "provider":         "google",
+        "label":            "Google (Gemini)",
+        "env_var":          "GOOGLE_API_KEY",
+        "fallback_env_var": "GEMINI_API_KEY",
+        "sdk_module":       "google.genai",
+        "wired_in_llmchat": True,
+        "install_hint":     "pip install google-genai · set GOOGLE_API_KEY in backend/.env",
+    },
+    {
+        "provider":         "anthropic",
+        "label":            "Anthropic (Claude)",
+        "env_var":          "ANTHROPIC_API_KEY",
+        "fallback_env_var": None,
+        "sdk_module":       "anthropic",
+        "wired_in_llmchat": False,
+        "install_hint":     "pip install anthropic · set ANTHROPIC_API_KEY · wire provider dispatch in LlmChat",
+    },
+]
+
+
+def _resolve_provider_status() -> List[Dict[str, Any]]:
+    """Compute live status for each known provider. ``ready`` = all
+    three conditions hold (env key set, SDK importable, LlmChat
+    dispatch wired). Used by the GET endpoint AND by the create-model
+    validator so the two answers can't drift."""
+    import os
+    out = []
+    for spec in _PROVIDER_SPECS:
+        primary    = bool(os.environ.get(spec["env_var"]))
+        fallback   = bool(os.environ.get(spec["fallback_env_var"])) if spec["fallback_env_var"] else False
+        configured = primary or fallback
+        sdk_ok     = _sdk_installed(spec["sdk_module"])
+        wired      = spec["wired_in_llmchat"]
+        out.append({
+            **spec,
+            "configured":        configured,
+            "sdk_installed":     sdk_ok,
+            "runtime_supported": wired and sdk_ok,
+            "matched_env_var":   spec["env_var"] if primary else (spec["fallback_env_var"] if fallback else None),
+            "ready":             configured and wired and sdk_ok,
+        })
+    return out
+
+
+@router.get("/providers/status")
+async def get_provider_status(payload: dict = Depends(verify_super_admin)):
+    """Reports which LLM providers are runtime-ready right now.
+
+    A provider is ``ready`` when ALL three are true:
+      * env key set (``configured``)
+      * SDK importable in the running venv (``sdk_installed``)
+      * dispatch logic wired in ``LlmChat`` (``runtime_supported``)
+
+    The Models tab uses this to gate the Add Model dialog — operators
+    can only register a model whose provider is fully ready, so we
+    don't end up with rows that 500 at chat time.
+    """
+    return {"providers": _resolve_provider_status()}
+
+
+@router.get("/models")
+async def list_platform_models(payload: dict = Depends(verify_super_admin)):
+    """All registered models, ordered by provider + display_name.
+    Disabled rows are included so the operator can edit them in the
+    super-admin UI."""
+    db = await get_database()
+    rows = await db.platform_models.find({}, {"_id": 0}).to_list(500)
+    rows.sort(key=lambda r: ((r.get("provider") or ""), (r.get("display_name") or r.get("key") or "")))
+    return {"models": rows, "count": len(rows)}
+
+
+def _require_provider_ready(provider: str) -> None:
+    """Raise 400 if the provider isn't fully wired up (env key set,
+    SDK installed, dispatch wired). This is the gate that stops a
+    super-admin from registering a model whose runtime would 500.
+    Called by both POST and PUT handlers; the check is provider-level
+    so changing the `provider` field on an existing row re-validates."""
+    status_rows = _resolve_provider_status()
+    spec = next((p for p in status_rows if p["provider"] == provider.lower()), None)
+    if spec is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown provider {provider!r}. Supported: {', '.join(p['provider'] for p in status_rows)}",
+        )
+    if not spec["ready"]:
+        missing = []
+        if not spec["configured"]:        missing.append(f"set {spec['env_var']} in backend/.env")
+        if not spec["sdk_installed"]:     missing.append(f"install SDK ({spec['sdk_module']})")
+        if not spec["wired_in_llmchat"]:  missing.append("wire provider dispatch in LlmChat")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Provider {provider!r} is not runtime-ready. Missing: " + "; ".join(missing) +
+                ". Check the Providers status banner on the Models tab."
+            ),
+        )
+
+
+@router.post("/models", status_code=201)
+async def create_platform_model(
+    body: PlatformModelCreate,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Register a new model. ``key`` must be globally unique — it's the
+    identifier tenants pick when assigning models. The provider must be
+    fully runtime-ready (env key + SDK + dispatch)."""
+    if not _MODEL_KEY_RE.match(body.key):
+        raise HTTPException(
+            status_code=400,
+            detail="key must be lowercase alphanumeric / hyphen / dot / underscore (max 64 chars)",
+        )
+    _require_provider_ready(body.provider)
+    db = await get_database()
+    if await db.platform_models.find_one({"key": body.key}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail=f"Model {body.key!r} already exists.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    doc: Dict[str, Any] = {
+        "id":           str(uuid.uuid4()),
+        "key":          body.key,
+        "display_name": body.display_name,
+        "provider":     body.provider,
+        "api_model":    body.api_model,
+        "description":  body.description or "",
+        "pricing":      body.pricing.model_dump(),
+        "capabilities": (body.capabilities.model_dump() if body.capabilities else {}),
+        "enabled":      bool(body.enabled if body.enabled is not None else True),
+        "created_at":   now,
+        "updated_at":   now,
+        "created_by":   payload.get("user_id"),
+    }
+    await db.platform_models.insert_one(doc)
+
+    from services.model_registry import invalidate_cache
+    invalidate_cache()
+
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="create_platform_model",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="platform_model",
+        resource_id=body.key,
+        new_value={"key": body.key, "provider": body.provider, "api_model": body.api_model},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+
+@router.put("/models/{key}")
+async def update_platform_model(
+    key: str,
+    body: PlatformModelUpdate,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Partial update — only fields supplied are written. The ``key``
+    column is immutable (it's used as a foreign key by tenants and the
+    cost ledger); rename by creating a new row + reassigning tenants."""
+    db = await get_database()
+    existing = await db.platform_models.find_one({"key": key}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    incoming = _strip_none_dict(body.model_dump())
+    if not incoming:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    # If the operator's changing the provider, re-validate that the
+    # new one is runtime-ready (same gate as POST).
+    if "provider" in incoming and incoming["provider"] != existing.get("provider"):
+        _require_provider_ready(incoming["provider"])
+    # Pricing comes through as a dict from model_dump; serialize the
+    # nested model the same way for storage.
+    if "pricing" in incoming and incoming["pricing"] is not None:
+        incoming["pricing"] = body.pricing.model_dump() if body.pricing else existing.get("pricing")
+    if "capabilities" in incoming and incoming["capabilities"] is not None:
+        incoming["capabilities"] = body.capabilities.model_dump() if body.capabilities else existing.get("capabilities") or {}
+
+    incoming["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.platform_models.update_one({"key": key}, {"$set": incoming})
+
+    from services.model_registry import invalidate_cache
+    invalidate_cache()
+
+    await _audit_safe(
+        db,
+        category=AuditCategory.DATA_MODIFICATION,
+        action="update_platform_model",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="platform_model",
+        resource_id=key,
+        old_value={k: existing.get(k) for k in incoming.keys()},
+        new_value=incoming,
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return await db.platform_models.find_one({"key": key}, {"_id": 0})
+
+
+@router.delete("/models/{key}")
+async def delete_platform_model(
+    key: str,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Remove a model. Refuses if any tenant currently has the key in
+    their ``allowed_model_keys`` or ``default_model_key`` — re-assign
+    those tenants first."""
+    db = await get_database()
+    in_use = await db.companies.count_documents({
+        "$or": [
+            {"allowed_model_keys": key},
+            {"default_model_key": key},
+        ],
+    })
+    if in_use > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {key!r} is assigned to {in_use} tenant(s). Re-assign them before deleting.",
+        )
+    result = await db.platform_models.delete_one({"key": key})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    from services.model_registry import invalidate_cache
+    invalidate_cache()
+
+    await _audit_safe(
+        db,
+        category=AuditCategory.DATA_DELETION,
+        action="delete_platform_model",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="platform_model",
+        resource_id=key,
+        ip_address=http_request.client.host if http_request.client else None,
+        severity=AuditSeverity.WARNING,
+    )
+    return {"deleted": True, "key": key}
+
+
+# ─── Per-tenant model assignment ────────────────────────────────────────────
+
+
+class CompanyModelAssignment(BaseModel):
+    """Which model keys this tenant can pick from at runtime.
+    ``default`` MUST be one of the keys in ``allowed``."""
+    allowed: List[str]
+    default: str
+
+
+@router.get("/companies/{company_id}/models")
+async def get_company_model_assignment(
+    company_id: str,
+    payload: dict = Depends(verify_super_admin),
+):
+    db = await get_database()
+    company = await db.companies.find_one(
+        {"id": company_id},
+        {"_id": 0, "id": 1, "name": 1, "allowed_model_keys": 1, "default_model_key": 1, "llm_model": 1},
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {
+        "company_id":         company_id,
+        "name":               company.get("name"),
+        "allowed":            list(company.get("allowed_model_keys") or []),
+        "default":            company.get("default_model_key") or company.get("llm_model") or "",
+    }
+
+
+@router.put("/companies/{company_id}/models")
+async def set_company_model_assignment(
+    company_id: str,
+    body: CompanyModelAssignment,
+    http_request: Request,
+    payload: dict = Depends(verify_super_admin),
+):
+    """Assign an allowlist + default to a tenant. The default key must
+    be in the allowlist, and every key must exist as an *enabled* row
+    in ``platform_models``."""
+    if not body.allowed:
+        raise HTTPException(status_code=400, detail="At least one model must be allowed")
+    if body.default not in body.allowed:
+        raise HTTPException(status_code=400, detail="default must be one of the allowed keys")
+
+    db = await get_database()
+    existing_company = await db.companies.find_one(
+        {"id": company_id},
+        {"_id": 0, "id": 1, "allowed_model_keys": 1, "default_model_key": 1},
+    )
+    if not existing_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Validate every key exists and is enabled. Disabled models can be
+    # un-assigned but not newly-assigned — the chat path silently
+    # rejects them otherwise.
+    rows = await db.platform_models.find(
+        {"key": {"$in": body.allowed}},
+        {"_id": 0, "key": 1, "enabled": 1},
+    ).to_list(100)
+    known_keys = {r["key"]: r.get("enabled", True) for r in rows}
+    missing = [k for k in body.allowed if k not in known_keys]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Unknown model keys: {missing}")
+    disabled = [k for k in body.allowed if not known_keys[k]]
+    if disabled:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot assign disabled model keys: {disabled}. Re-enable them first or pick different models.",
+        )
+
+    update = {
+        "$set": {
+            "allowed_model_keys": body.allowed,
+            "default_model_key":  body.default,
+            # Keep the legacy column in sync — old code paths and
+            # existing analytics queries still read it. Will deprecate
+            # once everything migrates to default_model_key.
+            "llm_model":          body.default,
+        },
+    }
+    await db.companies.update_one({"id": company_id}, update)
+
+    await _audit_safe(
+        db,
+        category=AuditCategory.ADMIN_ACTION,
+        action="update_company_models",
+        user_id=payload.get("user_id"),
+        user_type="super_admin",
+        resource_type="company",
+        resource_id=company_id,
+        company_id=company_id,
+        old_value={
+            "allowed": list(existing_company.get("allowed_model_keys") or []),
+            "default": existing_company.get("default_model_key"),
+        },
+        new_value={"allowed": body.allowed, "default": body.default},
+        ip_address=http_request.client.host if http_request.client else None,
+    )
+    return {
+        "company_id": company_id,
+        "allowed":    body.allowed,
+        "default":    body.default,
+    }

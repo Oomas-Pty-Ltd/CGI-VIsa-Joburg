@@ -28,6 +28,97 @@ const STATE_KEY = '__SEVA_CONFIG__';
 
 let installed = false;
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Widget design tokens
+ *
+ * The widget renders inside arbitrary host pages, so the admin app's CSS
+ * custom properties (--foreground, --primary, etc.) aren't reliably
+ * inheritable — host stylesheets may shadow them, or the host may not
+ * load any of our base CSS at all. To stay isolated *and* still let
+ * tenants re-skin semantic surfaces, we ship a small constant token map
+ * and accept per-tenant overrides via the embed script tag:
+ *
+ *   <script src=".../seva-widget.js"
+ *           data-company-id="<UUID>"
+ *           data-widget-tokens='{"successAccent":"#16a34a"}'></script>
+ *
+ * Brand colours (foreground / primary) still come from the platform
+ * tokens via `hsl(var(--foreground))` references in ChatWidget — that
+ * path picks up the tenant's CSS variable overrides correctly when the
+ * widget mounts in the dashboard preview. WIDGET_TOKENS only covers the
+ * semantic colours (success / info / destructive / camera) that don't
+ * have a brand component.
+ * ──────────────────────────────────────────────────────────────────── */
+
+const WIDGET_TOKEN_DEFAULTS = {
+  // Surfaces
+  modalSurface:      '#ffffff',
+  fieldSurface:      '#f9fafb',
+  chatInputBar:      '#F0F2F5', // WhatsApp-style input bar
+  buttonInverse:     '#ffffff',
+
+  // Text scale
+  textPrimary:       '#111827',
+  textSecondary:     '#374151',
+  textMuted:         '#6b7280',
+  textFaint:         '#9ca3af',
+  textOnDark:        '#666666',
+
+  // Borders
+  borderDefault:     '#e5e7eb',
+
+  // Presence indicators (online / offline dots on the widget header)
+  statusOnline:      '#4ADE80',
+  statusOffline:     '#EF4444',
+
+  // Semantic — success (uploaded docs, completed flows)
+  successBg:         '#f0fdf4',
+  successBorder:     '#86efac',
+  successText:       '#15803d',
+  successAccent:     '#22c55e',
+  successDeep:       '#065f46',
+
+  // Semantic — info / links / "next-step" buttons (blue)
+  infoBg:            '#eff6ff',
+  infoBgAlt:         '#EFF6FF', // historical casing in one spot
+  infoBgSoft:        '#f0f9ff',
+  infoBorder:        '#2563EB',
+  infoAccent:        '#3b82f6',
+  infoDeep:          '#2563eb',
+
+  // Semantic — destructive (delete / cancel buttons, errors)
+  destructiveAccent: '#ef4444',
+  destructiveSoft:   'rgba(239,68,68,0.85)',
+
+  // Camera / OCR (purple)
+  cameraAccent:      '#7c3aed',
+  cameraBg:          '#f5f3ff',
+
+  // Misc — a slightly different purple used by one "secondary action" button
+  secondaryAccent:   '#8b5cf6',
+};
+
+function readWidgetTokens() {
+  // Same selection precedence as readCompanyId — current script tag first,
+  // then any tagged seva-widget script, then a plain data-widget-tokens.
+  const currentScript =
+    document.currentScript ||
+    document.querySelector('script[data-widget-tokens][src*="seva-widget"]') ||
+    document.querySelector('script[data-widget-tokens]');
+  const raw = currentScript?.dataset?.widgetTokens;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (err) {
+    // Invalid JSON — log loudly once, fall back to defaults so the widget
+    // still renders. A misconfigured embed shouldn't break the chat.
+    // eslint-disable-next-line no-console
+    console.warn('[seva-widget] data-widget-tokens is not valid JSON; using defaults.', err);
+  }
+  return null;
+}
+
 function readCompanyId() {
   // 1. Script-tag attribute — primary path
   const currentScript =
@@ -140,9 +231,13 @@ export function setupWidget() {
   if (installed) return window[STATE_KEY];
 
   const companyId = readCompanyId();
+  const tokenOverrides = readWidgetTokens();
+  const tokens = { ...WIDGET_TOKEN_DEFAULTS, ...(tokenOverrides || {}) };
+
   const config = {
     ...(window[STATE_KEY] || {}),
     companyId: companyId || null,
+    tokens,
   };
   window[STATE_KEY] = config;
 
@@ -165,6 +260,16 @@ export function setupWidget() {
 /** Read the resolved company_id from anywhere in the React tree. */
 export function getCompanyId() {
   return window[STATE_KEY]?.companyId || null;
+}
+
+/**
+ * Resolved widget tokens (defaults merged with any data-widget-tokens
+ * overrides). Returns the defaults verbatim if `setupWidget()` hasn't
+ * been called yet — so importing this module from the main app (not the
+ * widget bundle) still produces a usable palette.
+ */
+export function getWidgetTokens() {
+  return window[STATE_KEY]?.tokens || WIDGET_TOKEN_DEFAULTS;
 }
 
 /**

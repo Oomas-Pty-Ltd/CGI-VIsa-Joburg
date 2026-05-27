@@ -61,6 +61,7 @@ const EMPTY_CFG = {
   org_name: "", org_short_name: "",
   header_tagline: "", footer_copy: "",
   advisories: [],
+  features: { voice_input: true, file_upload: true, camera: true },
   contact: {
     address: "", phone: "", emergency_phone: "",
     email: "", website: "", office_hours: "", consular_hours: "",
@@ -111,8 +112,28 @@ export default function BotConfigTab({ companies, token, singleTenant = false })
   const [saving, setSaving]     = useState(false);
   const [noRow, setNoRow]       = useState(false);
 
+  // The command palette stamps a preferred tenant in localStorage when an
+  // operator jumps here from "⌘K → tenant name". We read it once on the
+  // first render that has companies populated, then clear the storage so
+  // subsequent direct visits default to the first row.
+  //
+  // The ref is needed because React Strict Mode runs effects twice in dev
+  // (mount → cleanup → mount). Without the guard, run 1 clears the value
+  // and run 2 sees nothing → falls through to `companies[0]`, defeating
+  // the hint. The ref survives the Strict-Mode re-invocation since the
+  // fiber isn't actually destroyed.
+  const initialTenantAppliedRef = useRef(false);
   useEffect(() => {
-    if (!tenantId && companies.length > 0) setTenantId(companies[0].id);
+    if (initialTenantAppliedRef.current) return;
+    if (tenantId || companies.length === 0) return;
+    initialTenantAppliedRef.current = true;
+    let preferred = "";
+    try { preferred = localStorage.getItem("super_admin_preferred_tenant") || ""; } catch { /* ignore */ }
+    const match = preferred && companies.find((c) => c.id === preferred);
+    setTenantId(match ? preferred : companies[0].id);
+    if (preferred) {
+      try { localStorage.removeItem("super_admin_preferred_tenant"); } catch { /* ignore */ }
+    }
   }, [companies, tenantId]);
 
   const fetchCfg = useCallback(async () => {
@@ -155,6 +176,7 @@ export default function BotConfigTab({ companies, token, singleTenant = false })
   const updateIntentKeywords = (patch) => setCfg((c) => ({ ...c, intent_keywords: { ...c.intent_keywords, ...patch } }));
   const updateEscalation    = (patch) => setCfg((c) => ({ ...c, escalation_rules: { ...c.escalation_rules, ...patch } }));
   const updateFallback      = (key, value) => setCfg((c) => ({ ...c, fallback_responses: { ...c.fallback_responses, [key]: value } }));
+  const updateFeatures      = (patch) => setCfg((c) => ({ ...c, features: { ...(c.features || {}), ...patch } }));
 
   const dirty = useMemo(() => JSON.stringify(cfg) !== JSON.stringify(pristine), [cfg, pristine]);
 
@@ -184,6 +206,7 @@ export default function BotConfigTab({ companies, token, singleTenant = false })
     update, updateContact, updateBranding, updatePdfBranding,
     updateKnowledgeSources, updateOcr, updateSecurity,
     updateFlowKeywords, updateIntentKeywords, updateEscalation, updateFallback,
+    updateFeatures,
     setCfg,
   };
 
@@ -645,9 +668,43 @@ function KnowledgeSection({ cfg, updateKnowledgeSources, updateOcr, setCfg }) {
   );
 }
 
-function BehaviourSection({ cfg, updateFlowKeywords, updateIntentKeywords, updateEscalation }) {
+function BehaviourSection({ cfg, updateFlowKeywords, updateIntentKeywords, updateEscalation, updateFeatures }) {
+  // The features block was added with the contextual-input work: mic
+  // is a tenant-global toggle (always-on / never-on), upload + camera
+  // are also gateable globally but the *contextual* visibility is
+  // driven by the chat-stream's ui_hints regardless. So setting these
+  // to false hides the affordance entirely; setting to true allows it
+  // to appear when the bot signals it expects a file/image.
+  const features = cfg.features || {};
+  const setFeature = (k, v) => updateFeatures({ [k]: v });
   return (
     <>
+      <Section
+        title="Input controls"
+        description="Global on/off for the mic, upload, and camera affordances in the chat widget. Upload + camera are also contextual — they only appear when the bot has actually asked for a file, regardless of these toggles. Mic is purely tenant-controlled (always-on if enabled)."
+      >
+        <div className="space-y-3">
+          <FeatureToggle
+            label="Voice input (mic)"
+            description="Show the microphone in the chat input bar so users can dictate messages. Disabling hides it completely."
+            checked={features.voice_input !== false}
+            onChange={(v) => setFeature("voice_input", v)}
+          />
+          <FeatureToggle
+            label="File upload"
+            description="Allow file uploads when the bot asks for documents. Disabling forces all flows to text-only — application flows that require document uploads will fail."
+            checked={features.file_upload !== false}
+            onChange={(v) => setFeature("file_upload", v)}
+          />
+          <FeatureToggle
+            label="Camera capture"
+            description="Allow in-widget camera capture for document scans. Same context rule as file upload — only appears when the bot expects an image."
+            checked={features.camera !== false}
+            onChange={(v) => setFeature("camera", v)}
+          />
+        </div>
+      </Section>
+
       <Section
         title="Flow keywords"
         description="Phrases the bot treats as apply / yes / no / discard / continue intents. Empty inherits the platform default."
@@ -832,6 +889,20 @@ function Grid2({ children }) {
   return <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{children}</div>;
 }
 
+function FeatureToggle({ label, description, checked, onChange }) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-card px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{description}</p>
+        )}
+      </div>
+      <Switch checked={!!checked} onCheckedChange={onChange} aria-label={label} />
+    </div>
+  );
+}
+
 function Field({ label, value, onChange, placeholder, hint, multiline = false }) {
   return (
     <div>
@@ -852,13 +923,44 @@ function Field({ label, value, onChange, placeholder, hint, multiline = false })
   );
 }
 
+// Matches /^#([0-9a-f]{3}|[0-9a-f]{6})$/i — anything else (including blank)
+// is treated as "no value" so the swatch can render a dashed empty state
+// instead of a misleading solid black square.
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
 function ColorField({ label, value, onChange, hint }) {
+  const valid = HEX_RE.test((value || "").trim());
+  const pickerRef = React.useRef(null);
   return (
     <div>
       <Label className="text-xs">{label}</Label>
       <div className="flex gap-2 items-center mt-1">
-        <Input type="color" value={value || "#000000"} onChange={(e) => onChange(e.target.value)} className="w-12 h-9 p-1 cursor-pointer shrink-0" />
-        <Input value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder="#6366f1" className="font-mono" />
+        <button
+          type="button"
+          onClick={() => pickerRef.current?.click()}
+          title={valid ? `Open picker (${value})` : "No colour set — click to pick"}
+          className={cn(
+            "relative w-9 h-9 rounded-md shrink-0 border border-border overflow-hidden transition-shadow hover:ring-2 hover:ring-ring/30 focus:outline-none focus:ring-2 focus:ring-ring",
+            !valid && "bg-[repeating-linear-gradient(45deg,hsl(var(--muted)),hsl(var(--muted))_4px,hsl(var(--card))_4px,hsl(var(--card))_8px)]",
+          )}
+          style={valid ? { background: value } : undefined}
+          aria-label={`${label} colour preview`}
+        />
+        <input
+          ref={pickerRef}
+          type="color"
+          value={valid ? value : "#6366f1"}
+          onChange={(e) => onChange(e.target.value)}
+          className="sr-only"
+          aria-hidden
+          tabIndex={-1}
+        />
+        <Input
+          value={value || ""}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="#6366f1"
+          className="font-mono"
+        />
       </div>
       {hint && <p className="text-xs text-muted-foreground mt-1 leading-snug">{hint}</p>}
     </div>
@@ -918,6 +1020,14 @@ function buildSaveBody(cfg) {
         content: a.content || "",
         active:  a.active !== false,
       })),
+    // Tenant feature toggles — drives mic visibility and the global
+    // on/off for file_upload + camera (their contextual visibility is
+    // separately gated by chat-stream ui_hints).
+    features: {
+      voice_input: cfg.features?.voice_input !== false,
+      file_upload: cfg.features?.file_upload !== false,
+      camera:      cfg.features?.camera       !== false,
+    },
     contact: cfg.contact,
     phone_country_code: (cfg.phone_country_code || "").trim() || undefined,
     system_prompt_template: cfg.system_prompt_template || undefined,

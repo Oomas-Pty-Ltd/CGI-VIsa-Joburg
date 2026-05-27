@@ -36,6 +36,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "bot_avatar_url": None,
     "org_name":       "",
     "org_short_name": "",
+    # Per-tenant feature toggles. The widget reads these via widget-config
+    # and uses them to gate the corresponding input controls. Camera and
+    # file_upload are *also* gated by per-turn ui_hints from the chat
+    # stream — these flags are the global on/off; the hint is the
+    # in-the-moment "show now" signal. voice_input is purely tenant-level
+    # since the mic affordance doesn't depend on bot state.
+    "features": {
+        "voice_input":  True,   # mic icon in the chat input bar
+        "file_upload":  True,   # upload affordance — only ever appears when the bot expects a file
+        "camera":       True,   # camera capture — same: contextual when on
+    },
     # Widget chrome — small bits of copy that appear around the chat
     # rather than inside the chat. Surfaced through public_branding() so the
     # widget can render tenant-specific text instead of the legacy hardcoded
@@ -317,6 +328,15 @@ class BotConfig:
             "upload_max_pdf_pages":      sec["upload_max_pdf_pages"],
             "upload_allowed_mime_types": sec["upload_allowed_mime_types"],
         }
+        # Per-tenant feature toggles surfaced to the widget. Missing fields
+        # default to True (preserves legacy behaviour for tenants that
+        # don't have the `features` block on their stored row yet).
+        stored_features = (self.raw.get("features") or {}) if isinstance(self.raw, dict) else {}
+        features = {
+            "voice_input":  bool(stored_features.get("voice_input",  True)),
+            "file_upload":  bool(stored_features.get("file_upload",  True)),
+            "camera":       bool(stored_features.get("camera",       True)),
+        }
         return {
             "bot_name":       self.bot_name,
             "bot_avatar_url": self.bot_avatar_url,
@@ -331,6 +351,7 @@ class BotConfig:
             "default_language":    self.default_language,
             "knowledge_categories": self.knowledge_categories(),
             "security":            client_security,
+            "features":            features,
         }
 
     # ── internals ────────────────────────────────────────────────────────

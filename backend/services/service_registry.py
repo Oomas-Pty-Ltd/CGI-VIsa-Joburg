@@ -56,6 +56,10 @@ class Service:
     external_url:  Optional[str]            = None
     enabled:       bool = True
     display_order: int  = 0
+    # INFO services carry a typed `sections` payload + optional single CTA.
+    # Ignored for TYPE_A / TYPE_B (kept empty by the admin UI's category
+    # gating). See migration 0009.
+    info_content:  Dict[str, Any]           = field(default_factory=dict)
     raw:           Dict[str, Any]           = field(default_factory=dict)
 
     def field_keys(self) -> List[str]:
@@ -72,6 +76,12 @@ class Service:
         ``external_url`` and is provided by the tenant."""
         return self.category == "TYPE_B"
 
+    def is_info_only(self) -> bool:
+        """INFO services render a reference card with no application flow —
+        no consent prompt, no field collection, no PDF. Pure content with
+        an optional single CTA."""
+        return self.category == "INFO"
+
 
 def _row_to_service(row: Dict[str, Any]) -> Service:
     return Service(
@@ -87,6 +97,7 @@ def _row_to_service(row: Dict[str, Any]) -> Service:
         external_url=row.get("external_url"),
         enabled=bool(row.get("enabled", True)),
         display_order=int(row.get("display_order") or 0),
+        info_content=dict(row.get("info_content") or {}),
         raw=row,
     )
 

@@ -246,6 +246,13 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
             
             if not facebook_validator.validate_signature(body_bytes, signature):
                 log_webhook_attempt("facebook", source_ip, False, "Invalid signature")
+                try:
+                    from services.notification_dispatcher import notify
+                    await notify("ops.webhook_failure", context={
+                        "channel": "facebook", "tenant_name": "(platform)", "error": "Invalid webhook signature",
+                    })
+                except Exception:
+                    pass
                 raise HTTPException(status_code=403, detail="Invalid webhook signature")
             
             log_webhook_attempt("facebook", source_ip, True, "Signature valid")

@@ -14,6 +14,12 @@ import ICSWhatsAppBot from "@/pages/ICSWhatsAppBot";
 import SevaReview from "@/pages/SevaReview";
 import ChatWidget from "@/components/ChatWidget";
 import { setupWidget } from "@/lib/widgetConfig";
+import { setupAuthInterceptor } from "@/lib/authInterceptor";
+
+// Install once at module load so any code path (including ChatWidget mounted
+// on /widget) gets the 401 handler. setupWidget() inside WidgetDemo only
+// patches request headers; the 401 response interceptor lives separately.
+setupAuthInterceptor();
 
 function App() {
   return (

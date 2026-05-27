@@ -53,6 +53,11 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
   const [running, setRunning] = useState(false);
   const [noRow, setNoRow]     = useState(false);
   const [confirmRun, setConfirmRun] = useState(false);
+  // Per-page drill-down for a selected run.
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [pages, setPages] = useState([]);
+  const [pagesLoading, setPagesLoading] = useState(false);
+  const [pageDetail, setPageDetail] = useState(null);
 
   useEffect(() => {
     if (!tenantId && companies.length > 0) setTenantId(companies[0].id);
@@ -103,6 +108,42 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
   }, [tenantId, token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Reset the per-page drill-down whenever the tenant changes.
+  useEffect(() => { setSelectedRun(null); setPages([]); setPageDetail(null); }, [tenantId]);
+
+  const openRun = useCallback(async (run) => {
+    const runId = run.run_id || run.id;
+    setSelectedRun(run);
+    setPages([]);
+    setPageDetail(null);
+    setPagesLoading(true);
+    try {
+      const res = await fetch(`${API}/super-admin/scrapers/${tenantId}/runs/${runId}/pages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load pages");
+      setPages(data.pages || []);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setPagesLoading(false);
+    }
+  }, [tenantId, token]);
+
+  const openPageDetail = useCallback(async (pageId) => {
+    try {
+      const res = await fetch(`${API}/super-admin/scrapers/${tenantId}/pages/${pageId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to load page");
+      setPageDetail(data);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }, [tenantId, token]);
 
   const update = (patch) => setCfg((c) => ({ ...c, ...patch }));
 
@@ -346,25 +387,88 @@ export default function ScrapersTab({ companies, token, singleTenant = false }) 
                 <th className="px-4 py-2.5">Status</th>
                 <th className="px-4 py-2.5">Trigger</th>
                 <th className="px-4 py-2.5 text-right">Pages</th>
-                <th className="px-4 py-2.5 text-right">Stored</th>
-                <th className="px-4 py-2.5 text-right">Errors</th>
+                <th className="px-4 py-2.5 text-right">Processed</th>
+                <th className="px-4 py-2.5 text-right">Failed</th>
+                <th className="px-4 py-2.5 text-right">Skipped</th>
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
-                <tr key={r.id} className="border-t border-border hover:bg-muted/30">
-                  <td className="px-4 py-2.5 text-muted-foreground">{formatDate(r.started_at)}</td>
-                  <td className="px-4 py-2.5"><RunStatusBadge status={r.status} /></td>
-                  <td className="px-4 py-2.5 text-xs">{r.trigger}</td>
-                  <td className="px-4 py-2.5 text-right font-mono">{r.pages_crawled ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-right font-mono">{r.entries_stored ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-right font-mono">{r.errors ?? "—"}</td>
-                </tr>
-              ))}
+              {runs.map((r) => {
+                const f = r.summary?.frontier || {};
+                const c = r.summary?.counts || {};
+                const runId = r.run_id || r.id;
+                const isSel = selectedRun && (selectedRun.run_id || selectedRun.id) === runId;
+                return (
+                  <tr
+                    key={runId}
+                    onClick={() => openRun(r)}
+                    className={`border-t border-border cursor-pointer hover:bg-muted/30 ${isSel ? "bg-primary/5" : ""}`}
+                  >
+                    <td className="px-4 py-2.5 text-muted-foreground">{formatDate(r.started_at)}</td>
+                    <td className="px-4 py-2.5"><RunStatusBadge status={r.status} /></td>
+                    <td className="px-4 py-2.5 text-xs">{r.triggered_by || r.trigger || "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{f.total ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{c.processed ?? f.success ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{f.failed ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono">{f.skipped ?? "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </Section>
+
+      {selectedRun && (
+        <Section
+          title="Per-page results"
+          description={`Run ${(selectedRun.run_id || selectedRun.id || "").slice(0, 8)} — raw HTML, extracted content, processing artifacts (chunks · summary · keywords · embedding), logs, and status per URL. Click a row for the full record.`}
+          bodyClassName="p-0"
+        >
+          {pagesLoading ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading pages…</div>
+          ) : pages.length === 0 ? (
+            <EmptyState icon={Clock} title="No page records" description="This run produced no per-page records yet." />
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-2.5">URL</th>
+                  <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5 text-right">HTTP</th>
+                  <th className="px-4 py-2.5 text-right">Depth</th>
+                  <th className="px-4 py-2.5 text-right">Tries</th>
+                  <th className="px-4 py-2.5 text-right">HTML</th>
+                  <th className="px-4 py-2.5 text-right">Chunks</th>
+                  <th className="px-4 py-2.5 text-right">KW</th>
+                  <th className="px-4 py-2.5 text-right">Emb</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pages.map((p) => (
+                  <tr
+                    key={p.id}
+                    onClick={() => openPageDetail(p.id)}
+                    className="border-t border-border cursor-pointer hover:bg-muted/30"
+                  >
+                    <td className="px-4 py-2.5 max-w-[280px] truncate font-mono text-xs" title={p.url}>{p.url}</td>
+                    <td className="px-4 py-2.5"><PageStatusBadge status={p.status} /></td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.http_status ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.depth ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.attempts ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.raw_html_bytes ? `${(p.raw_html_bytes / 1024).toFixed(1)}k` : "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.processing?.chunk_count ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.processing?.keywords?.length ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs">{p.processing?.embedding_dim || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Section>
+      )}
+
+      <PageDetailModal page={pageDetail} onClose={() => setPageDetail(null)} />
 
       <ConfirmDialog
         open={confirmRun}
@@ -462,10 +566,116 @@ function StringList({ label, values, onChange, onAdd, onDel, placeholder, mono, 
 }
 
 function RunStatusBadge({ status }) {
-  if (status === "completed") return <Badge className="bg-success/10 text-success border-success/20 gap-1"><CheckCircle2 className="h-3 w-3" />done</Badge>;
+  if (status === "completed" || status === "success") return <Badge className="bg-success/10 text-success border-success/20 gap-1"><CheckCircle2 className="h-3 w-3" />done</Badge>;
   if (status === "failed")    return <Badge className="bg-destructive/10 text-destructive border-destructive/20 gap-1"><XCircle className="h-3 w-3" />failed</Badge>;
   if (status === "running")   return <Badge className="bg-primary/10 text-primary border-primary/20 gap-1"><Clock className="h-3 w-3 animate-pulse" />running</Badge>;
+  if (status === "skipped")   return <Badge className="bg-warning/10 text-warning border-warning/20">skipped</Badge>;
   return <Badge variant="secondary">{status || "—"}</Badge>;
+}
+
+function PageStatusBadge({ status }) {
+  if (status === "processed") return <Badge className="bg-success/10 text-success border-success/20">processed</Badge>;
+  if (status === "failed")    return <Badge className="bg-destructive/10 text-destructive border-destructive/20">failed</Badge>;
+  if (status === "skipped")   return <Badge className="bg-warning/10 text-warning border-warning/20">skipped</Badge>;
+  return <Badge variant="secondary">{status || "—"}</Badge>;
+}
+
+function PageDetailModal({ page, onClose }) {
+  if (!page) return null;
+  const proc = page.processing || {};
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="bg-card border border-border rounded-xl shadow-lg max-w-3xl w-full max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground truncate">{page.title || "(no title)"}</p>
+            <p className="text-xs text-muted-foreground font-mono truncate">{page.url}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <PageStatusBadge status={page.status} />
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}><XCircle className="h-4 w-4" /></Button>
+          </div>
+        </div>
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4 text-sm">
+          <div className="grid grid-cols-4 gap-3 text-xs">
+            <Meta label="HTTP" value={page.http_status ?? "—"} />
+            <Meta label="Depth" value={page.depth ?? "—"} />
+            <Meta label="Attempts" value={page.attempts ?? "—"} />
+            <Meta label="Category" value={page.category || "—"} />
+            <Meta label="Raw HTML" value={page.raw_html_bytes ? `${(page.raw_html_bytes / 1024).toFixed(1)} KB` : "—"} />
+            <Meta label="Extracted" value={page.extracted_length ? `${page.extracted_length} chars` : "—"} />
+            <Meta label="Chunks" value={proc.chunk_count ?? "—"} />
+            <Meta label="Embedding" value={proc.embedding_dim ? `${proc.embedding_dim}-dim` : "—"} />
+          </div>
+          {page.error && (
+            <div className="rounded border border-destructive/30 bg-destructive/10 text-destructive text-xs p-2">{page.error}</div>
+          )}
+          {page.skip_reason && (
+            <div className="rounded border border-warning/30 bg-warning/10 text-warning text-xs p-2">Skipped: {page.skip_reason}</div>
+          )}
+          {proc.summary && <Block label="Summary">{proc.summary}</Block>}
+          {proc.keywords?.length > 0 && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Keywords</p>
+              <div className="flex flex-wrap gap-1">
+                {proc.keywords.map((k) => <Badge key={k} variant="secondary" className="text-xs">{k}</Badge>)}
+              </div>
+            </div>
+          )}
+          {proc.embedding_preview?.length > 0 && (
+            <Block label={`Dummy embedding (first ${proc.embedding_preview.length} of ${proc.embedding_dim})`} mono>
+              [{proc.embedding_preview.join(", ")}, …]
+            </Block>
+          )}
+          {proc.chunks?.length > 0 && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Chunks ({proc.chunk_count})</p>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {proc.chunks.map((ch, i) => (
+                  <div key={i} className="bg-muted/50 border border-border rounded p-2 text-xs">
+                    <span className="text-muted-foreground mr-2">#{i + 1}</span>{ch.slice(0, 240)}{ch.length > 240 ? "…" : ""}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {proc.log?.length > 0 && (
+            <Block label="Processing log" mono>
+              {proc.log.map((l, i) => <div key={i}>• {l}</div>)}
+            </Block>
+          )}
+          {page.raw_html && (
+            <Block label={`Raw HTML (${(page.raw_html_bytes / 1024).toFixed(1)} KB)`} mono scroll>
+              {page.raw_html.slice(0, 4000)}{page.raw_html.length > 4000 ? "\n…(truncated)" : ""}
+            </Block>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Meta({ label, value }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-foreground font-mono">{value}</p>
+    </div>
+  );
+}
+
+function Block({ label, children, mono, scroll }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">{label}</p>
+      <div className={`bg-muted/50 border border-border rounded p-2 text-xs ${mono ? "font-mono whitespace-pre-wrap break-all" : ""} ${scroll ? "max-h-48 overflow-y-auto" : ""}`}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function formatDate(iso) {

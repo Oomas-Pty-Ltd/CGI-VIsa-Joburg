@@ -85,12 +85,46 @@ def _kw(category: str, default: set, tenant_id: Optional[str] = None) -> set:
     return default
 
 
+# `\w+` with re.UNICODE (Python 3 default) captures Latin + Devanagari +
+# other scripts as words. We use this instead of `str.split()` so trailing
+# punctuation doesn't break exact-token matches (e.g. "yes." → ["yes"]).
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
 def _words(msg: str):
-    return set(msg.lower().split())
+    return set(_WORD_RE.findall(msg.lower()))
 
 
 def _contains(msg: str, kw_set):
-    return bool(_words(msg) & kw_set) or any(k in msg.lower() for k in kw_set)
+    """True if any keyword in ``kw_set`` is present in ``msg``.
+
+    Matching rules:
+      * Single-word keywords match only as a whole word. "y" does NOT match
+        "apply" (the substring bug that previously turned every message
+        containing the letter "y" into a "yes"). "ok" doesn't match "okra".
+      * Multi-word keywords (containing a space) use a substring match
+        against the lower-cased message so phrases like "go back" still
+        match anywhere in a sentence.
+
+    Tokenisation uses ``\\w+`` so trailing punctuation doesn't matter
+    ("yes." tokenises to ["yes"]).
+    """
+    if not kw_set:
+        return False
+    low = msg.lower()
+    word_tokens = _words(msg)
+    for kw in kw_set:
+        if not kw:
+            continue
+        if " " in kw:
+            # Multi-word phrase — substring is the only sensible match.
+            if kw in low:
+                return True
+        else:
+            # Single word — whole-word match only.
+            if kw in word_tokens:
+                return True
+    return False
 
 
 _TRACKING_RE  = re.compile(r'\b[A-Z]{2,20}-\d{8}-[A-Z0-9]{4,10}\b', re.IGNORECASE)
@@ -312,6 +346,34 @@ async def get_flow_state(session_id: str) -> Dict:
     return await _get_flow(session_id)
 
 
+def ui_hints_for_state(state: Optional[str]) -> Dict[str, bool]:
+    """Map a flow state to the per-turn hints the widget uses to decide
+    which input controls to surface for the user's NEXT turn. Returns
+    `{ expects_upload, expects_image, expects_text }`.
+
+    The widget always allows text input — the hint is about whether to
+    also expose the camera + file-upload affordances. Hiding them when
+    the bot isn't asking for files keeps the input bar uncluttered (the
+    operator's complaint that started this).
+
+    States:
+      * docs_pending / docs_uploading — bot is asking for documents,
+        so both upload and image-capture should show.
+      * everything else — text-only.
+    """
+    if state in ("docs_pending", "docs_uploading"):
+        return {
+            "expects_upload": True,
+            "expects_image":  True,
+            "expects_text":   True,
+        }
+    return {
+        "expects_upload": False,
+        "expects_image":  False,
+        "expects_text":   True,
+    }
+
+
 async def _save_flow(session_id: str, flow: Dict):
     db = await get_database()
     await db.chat_sessions.update_one(
@@ -481,6 +543,59 @@ def _detect_subtype(svc: Service, query: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _info_service_page(svc: Service, channel: str = "web") -> str:
+    """Render an INFO-category service as plain markdown.
+
+    No "type apply to begin" footer, no documents-required block, no
+    consent prompt. Just the description + the configured `info_content`
+    sections + an optional single CTA line. The widget renders these as
+    structured blocks (see ChatWidget / ConsularBot); WhatsApp and other
+    text-only channels fall back to this markdown form.
+    """
+    parts: list = [f"## {svc.name}"]
+    if svc.description:
+        parts.append(svc.description)
+
+    sections = (svc.info_content or {}).get("sections") or []
+    for sec in sections:
+        kind = (sec or {}).get("kind") or "text"
+        title = (sec or {}).get("title") or ""
+        if kind == "bullets":
+            items = sec.get("items") or []
+            bullets = "\n".join(f"- {item}" for item in items)
+            parts.append(f"**{title}**\n{bullets}" if title else bullets)
+        elif kind == "callout":
+            tone = (sec.get("tone") or "info").lower()
+            icon = {"info": "ℹ️", "warning": "⚠️", "success": "✅"}.get(tone, "ℹ️")
+            body = sec.get("body") or ""
+            parts.append(f"{icon} **{title}**\n{body}" if title else f"{icon} {body}")
+        elif kind == "links":
+            items = sec.get("items") or []
+            lines = [f"- [{(it.get('label') or it.get('url') or '').strip()}]({(it.get('url') or '').strip()})" for it in items]
+            parts.append(f"**{title}**\n" + "\n".join(lines) if title else "\n".join(lines))
+        elif kind == "contact":
+            items = sec.get("items") or []
+            lines = []
+            for it in items:
+                label = (it.get("label") or "").strip()
+                value = (it.get("value") or "").strip()
+                href = (it.get("href") or "").strip()
+                rendered = f"[{value}]({href})" if href else value
+                lines.append(f"- **{label}:** {rendered}" if label else f"- {rendered}")
+            parts.append(f"**{title}**\n" + "\n".join(lines) if title else "\n".join(lines))
+        else:  # text or unknown — render body as-is
+            body = sec.get("body") or ""
+            parts.append(f"**{title}**\n{body}" if title else body)
+
+    primary = (svc.info_content or {}).get("primary_action") or None
+    if primary and primary.get("url") and channel != "whatsapp":
+        label = (primary.get("label") or "Open").strip()
+        url = primary.get("url").strip()
+        parts.append(f"---\n[{label}]({url})")
+
+    return "\n\n".join(p for p in parts if p)
+
+
 def _service_info_page(svc: Service, scraped_summary: str = "", user_query: str = "", channel: str = "web") -> str:
     """Full info card shown when a user asks about a service.
     Combines static description + live scraped data + docs required + apply offer.
@@ -491,7 +606,13 @@ def _service_info_page(svc: Service, scraped_summary: str = "", user_query: str 
     info card. Previously this logic was hardcoded for ``service_key ==
     "passport"`` only — now any tenant service can opt in by populating
     ``subtypes``.
+
+    INFO-category services bypass the documents + apply-offer footer
+    entirely; the helper above renders them.
     """
+
+    if svc.is_info_only():
+        return _info_service_page(svc, channel=channel)
 
     # Subtype customisation — tenant-configurable per service.
     subtype_info = _detect_subtype(svc, user_query)
@@ -1377,6 +1498,15 @@ async def process_flow(
         # fallback used the session-stored key, but a fresh lookup is cheap
         # thanks to the registry's TTL cache and keeps the branches simple).
         target_svc = await get_service(tenant_id, svc_key) if svc_key else None
+
+        # INFO services have no application flow — re-render the info page
+        # so the user isn't dropped into a half-broken consent prompt for
+        # something that was never meant to be an "application".
+        if target_svc and target_svc.is_info_only():
+            flow["state"]   = "info_shown"
+            flow["service"] = target_svc.service_key
+            await _save_flow(session_id, flow)
+            return (_service_info_page(target_svc, scraped_summary, user_query=message, channel=channel), False, "info_shown")
 
         if target_svc:
             # ── pre_consent hooks ──────────────────────────────────────

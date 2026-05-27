@@ -4,8 +4,13 @@ import remarkGfm from 'remark-gfm';
 import axios from 'axios';
 // botMessages.js is kept as a historical reference but NO content from it
 // is shown at runtime — tenant config (or empty defaults) replace everything.
-import { fetchBranding } from '../lib/widgetConfig';
+import { fetchBranding, getWidgetTokens } from '../lib/widgetConfig';
 import './ChatWidget.css';
+
+// Module-level constant — resolved once at import time, used by every
+// inline style across the widget. Tenants override individual keys via
+// the embed script tag's data-widget-tokens attribute; see widgetConfig.js.
+const T = getWidgetTokens();
 
 // All links rendered inside chat markdown must open in a new tab.
 const MD_COMPONENTS = {
@@ -264,28 +269,158 @@ const ServiceTabs = ({ services, onPick }) => (
 );
 
 // ── Service info card — shown when user asks about a service ──────────────
-const ServiceInfoCard = ({ svc }) => (
-  <div className="seva-svc-info-card">
-    <div className="seva-svc-info-header">
-      <span className="seva-svc-emoji">{svc.emoji}</span>
-      <h3 className="seva-svc-name">{svc.name}</h3>
-      {svc.category === 'TYPE_A' && (
-        <span className="seva-svc-badge">Gov Portal</span>
+// INFO services get a distinct lightweight variant (no docs block, optional
+// single CTA) so users see at a glance that this is reference content, not
+// an application start.
+const ServiceInfoCard = ({ svc }) => {
+  if (svc.category === 'INFO') {
+    return <WidgetInfoCard svc={svc} />;
+  }
+  return (
+    <div className="seva-svc-info-card">
+      <div className="seva-svc-info-header">
+        <span className="seva-svc-emoji">{svc.emoji}</span>
+        <h3 className="seva-svc-name">{svc.name}</h3>
+        {svc.category === 'TYPE_A' && (
+          <span className="seva-svc-badge">Gov Portal</span>
+        )}
+      </div>
+      {svc.description && <p className="seva-svc-desc">{svc.description}</p>}
+      {svc.documents && svc.documents.length > 0 && (
+        <div>
+          <p className="seva-svc-docs-title">Required Documents</p>
+          <ul className="seva-svc-docs-list">
+            {svc.documents.map((doc, i) => (
+              <li key={i}><span className="seva-svc-dot">•</span>{doc}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
-    {svc.description && <p className="seva-svc-desc">{svc.description}</p>}
-    {svc.documents && svc.documents.length > 0 && (
+  );
+};
+
+const WidgetInfoCard = ({ svc }) => {
+  const sections = svc.info_content?.sections || [];
+  const primary  = svc.info_content?.primary_action;
+  return (
+    <div className="seva-svc-info-card" style={{ borderColor: 'hsl(var(--border))' }}>
+      <div className="seva-svc-info-header">
+        {svc.emoji && <span className="seva-svc-emoji">{svc.emoji}</span>}
+        <h3 className="seva-svc-name">{svc.name}</h3>
+        <span className="seva-svc-badge" style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}>Info</span>
+      </div>
+      {svc.description && <p className="seva-svc-desc">{svc.description}</p>}
+      {sections.map((sec, i) => <WidgetInfoSection key={i} section={sec} />)}
+      {primary?.url && primary?.label && (
+        <a
+          href={primary.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            marginTop: 8,
+            padding: '8px 14px',
+            background: 'hsl(var(--primary))',
+            color: 'hsl(var(--primary-foreground))',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: 'none',
+            width: '100%',
+          }}
+        >
+          {primary.label}
+        </a>
+      )}
+    </div>
+  );
+};
+
+const WidgetInfoSection = ({ section }) => {
+  const kind = section?.kind || 'text';
+  const title = section?.title;
+  const titleEl = title ? <p className="seva-svc-docs-title">{title}</p> : null;
+
+  if (kind === 'bullets') {
+    return (
       <div>
-        <p className="seva-svc-docs-title">Required Documents</p>
+        {titleEl}
         <ul className="seva-svc-docs-list">
-          {svc.documents.map((doc, i) => (
-            <li key={i}><span className="seva-svc-dot">•</span>{doc}</li>
+          {(section.items || []).map((it, i) => (
+            <li key={i}><span className="seva-svc-dot">•</span>{it}</li>
           ))}
         </ul>
       </div>
-    )}
-  </div>
-);
+    );
+  }
+
+  if (kind === 'callout') {
+    const tone = (section.tone || 'info').toLowerCase();
+    const palette = {
+      info:    { bg: 'hsl(var(--primary) / 0.06)', border: 'hsl(var(--primary) / 0.25)' },
+      warning: { bg: T.successBg && 'hsl(var(--warning) / 0.10)', border: 'hsl(var(--warning) / 0.30)' },
+      success: { bg: 'hsl(var(--success) / 0.10)', border: 'hsl(var(--success) / 0.30)' },
+    }[tone] || { bg: 'hsl(var(--primary) / 0.06)', border: 'hsl(var(--primary) / 0.25)' };
+    return (
+      <div style={{
+        borderRadius: 8,
+        border: `1px solid ${palette.border}`,
+        background: palette.bg,
+        padding: '8px 10px',
+      }}>
+        {title && <p style={{ fontSize: 11, fontWeight: 700, margin: 0, marginBottom: 2 }}>{title}</p>}
+        {section.body && <p style={{ fontSize: 12, margin: 0, lineHeight: 1.45 }}>{section.body}</p>}
+      </div>
+    );
+  }
+
+  if (kind === 'links') {
+    return (
+      <div>
+        {titleEl}
+        <ul className="seva-svc-docs-list" style={{ listStyle: 'none', paddingLeft: 0 }}>
+          {(section.items || []).map((it, i) => (
+            <li key={i}>
+              <a href={it.url} target="_blank" rel="noopener noreferrer" style={{ color: 'hsl(var(--primary))', fontSize: 12, textDecoration: 'underline', wordBreak: 'break-all' }}>
+                {it.label || it.url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (kind === 'contact') {
+    return (
+      <div>
+        {titleEl}
+        <ul style={{ listStyle: 'none', paddingLeft: 0, margin: 0, fontSize: 12 }}>
+          {(section.items || []).map((it, i) => (
+            <li key={i} style={{ marginBottom: 2 }}>
+              {it.label && <span style={{ fontWeight: 600, marginRight: 4 }}>{it.label}:</span>}
+              {it.href
+                ? <a href={it.href} style={{ color: 'hsl(var(--primary))', textDecoration: 'underline' }}>{it.value}</a>
+                : <span style={{ color: 'hsl(var(--muted-foreground))' }}>{it.value}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // text / unknown
+  return (
+    <div>
+      {titleEl}
+      {section?.body && <p className="seva-svc-desc" style={{ whiteSpace: 'pre-wrap' }}>{section.body}</p>}
+    </div>
+  );
+};
 
 export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -293,6 +428,28 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const sessionIdRef = useRef(localStorage.getItem('consular_session_id') || null);
+  // Stable per-browser identifier. Sent on every chat request so the
+  // session manager can bucket each visitor into their own session — the
+  // server previously fell back to a hashed-IP key, so two real users on
+  // the same Wi-Fi / NAT would share a session. Persisted in localStorage
+  // so a visitor returning later resumes their own thread.
+  const visitorIdRef = useRef(
+    (() => {
+      try {
+        let v = localStorage.getItem('widget_visitor_id');
+        if (v && v.length >= 8) return v;
+        v = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID()
+          : 'v-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem('widget_visitor_id', v);
+        return v;
+      } catch {
+        // localStorage unavailable (private mode etc.) — fall back to a
+        // per-pageload value; visitor "persists" for one tab session.
+        return 'v-' + Math.random().toString(36).slice(2);
+      }
+    })()
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   // Per-tenant branding loaded from /api/consular/widget-config on mount.
@@ -320,6 +477,23 @@ export default function ChatWidget() {
   const [tenantLanguageCodes, setTenantLanguageCodes] = useState(['en']);
   // Tenant services from /widget-config. Until populated (null), the menu shows nothing.
   const [tenantServices, setTenantServices] = useState(null); // null = still loading
+  // Tenant feature toggles (mic gating). Surfaced via widget-config; the
+  // defaults preserve legacy behaviour for tenants that haven't set the
+  // `features` block on their stored row yet.
+  const [tenantFeatures, setTenantFeatures] = useState({
+    voice_input: true,
+    file_upload: true,
+    camera:      true,
+  });
+  // Per-turn hints from the chat stream's done event. The widget reads
+  // these to decide whether to surface the upload + camera affordances
+  // for the NEXT user turn — hidden by default so the input bar stays
+  // text-only unless the bot has actually asked for a file.
+  const [uiHints, setUiHints] = useState({
+    expects_upload: false,
+    expects_image:  false,
+    expects_text:   true,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -345,6 +519,11 @@ export default function ChatWidget() {
       if (branding.org_short_name)  setOrgShortName(branding.org_short_name);
       if (branding.greeting)        setTenantGreeting(branding.greeting);
       if (Array.isArray(branding.advisories)) setTenantAdvisories(branding.advisories);
+      // Tenant features (mic / upload / camera global enables). Default
+      // each to true if missing so this is opt-out, not opt-in.
+      if (branding.features && typeof branding.features === 'object') {
+        setTenantFeatures((prev) => ({ ...prev, ...branding.features }));
+      }
 
       // Language whitelist — only show languages the operator enabled.
       if (Array.isArray(branding.supported_languages) && branding.supported_languages.length > 0) {
@@ -358,6 +537,9 @@ export default function ChatWidget() {
         key:         s.key,
         name:        s.name,
         category:    s.category || 'TYPE_A',
+        info_content: (s.info_content && typeof s.info_content === 'object')
+          ? s.info_content
+          : { sections: [], primary_action: null },
         emoji:       s.emoji || SERVICE_EMOJI_FALLBACK[s.key] || '',
         gov_url:     s.external_url || null,
         description: s.description || '',
@@ -716,7 +898,7 @@ export default function ChatWidget() {
         time: timeNow(),
       }]);
     }
-  }, [messages, sevaApi]);
+  }, [messages, sevaApi, tenantGreeting, tenantAdvisories]);
 
   // ── Seva auth flow ──────────────────────────────────────────────────────────
   const handleSevaStartAuth = async (service) => {
@@ -1088,10 +1270,25 @@ export default function ChatWidget() {
         await sevaApi('PUT', `/applications/${sevaCurrentApp.application_id}`, { form_data: sevaFormData });
       }
       const res = await sevaApi('POST', `/applications/${sevaCurrentApp.application_id}/confirm`);
+
+      // The processing authority is the system of record: a `submission_pending`
+      // result means it didn't accept yet, so we DON'T claim confirmation or
+      // offer a PDF — we tell the user honestly and let them know we'll retry.
+      if (res.status === 'submission_pending') {
+        setSevaCurrentApp(prev => ({ ...prev, status: 'submission_pending' }));
+        setMessages(prev => [...prev, {
+          id: Date.now(), role: 'bot', html: false,
+          content: `⏳ **Submission pending**\n\nWe've saved your **${sevaCurrentApp.service_name}** details (Reference \`${res.reference_id}\`), but the processing authority hasn't confirmed it yet.\n\nNo confirmation has been issued — we'll keep retrying and email **${sevaUser?.email}** as soon as it goes through.`,
+          time: timeNow(),
+        }]);
+        resetAfterApplicationCompletion(true);
+        return;
+      }
+
       setSevaCurrentApp(prev => ({ ...prev, status: 'confirmed' }));
       setMessages(prev => [...prev, {
         id: Date.now(), role: 'bot', html: false,
-        content: `🎉 **Application Confirmed!**\n\nYour **${sevaCurrentApp.service_name}** application has been confirmed.\n\n**Reference ID:** \`${res.reference_id}\`\n\nA confirmation email with your PDF has been sent to **${sevaUser?.email}**.`,
+        content: `🎉 **Application Confirmed!**\n\nYour **${sevaCurrentApp.service_name}** application has been confirmed.\n\n**Reference ID:** \`${res.reference_id}\`${res.gov_processing_ref ? `\n**Processing ref:** \`${res.gov_processing_ref}\`` : ''}\n\nA confirmation email with your PDF has been sent to **${sevaUser?.email}**.`,
         time: timeNow(),
       }]);
       setTimeout(() => {
@@ -1195,6 +1392,7 @@ export default function ChatWidget() {
           message: trimmed,
           session_id: sessionIdRef.current,
           user_id: sevaUser?.email || 'guest',
+          visitor_id: visitorIdRef.current,
           enable_voice: false,
           language: currentLangRef.current,
         }),
@@ -1234,6 +1432,12 @@ export default function ChatWidget() {
             if (voiceOnRef.current && fullText) speakWithBackend(fullText);
             if (evt.lang_switch) {
               setTimeout(() => changeLang(evt.lang_switch), 800);
+            }
+            // ui_hints tells us which input controls to show for the
+            // user's NEXT turn — populated by the backend based on
+            // flow state (see services.application_flow.ui_hints_for_state).
+            if (evt.ui_hints && typeof evt.ui_hints === 'object') {
+              setUiHints((prev) => ({ ...prev, ...evt.ui_hints }));
             }
           }
         }
@@ -1395,6 +1599,10 @@ export default function ChatWidget() {
       setInput('[Photo captured] Please help me with this document.');
       sendDocToBackend(dataUrl.split(',')[1]);
     }
+    // sendDocToBackend is declared after this callback; the closure
+    // resolves it at call time (which only happens after a user click).
+    // Listing it as a dep would TDZ on the first render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopCamera]);
 
   const sendDocToBackend = async (imageBase64) => {
@@ -1409,6 +1617,7 @@ export default function ChatWidget() {
           image_base64: imageBase64,
           session_id: sessionIdRef.current,
           user_id: sevaUser?.email || 'guest',
+          visitor_id: visitorIdRef.current,
           enable_voice: false,
           language: currentLangRef.current,
         }),
@@ -1439,7 +1648,12 @@ export default function ChatWidget() {
               return updated;
             });
           }
-          if (evt.done && voiceOnRef.current && fullText) speakWithBackend(fullText);
+          if (evt.done) {
+            if (voiceOnRef.current && fullText) speakWithBackend(fullText);
+            if (evt.ui_hints && typeof evt.ui_hints === 'object') {
+              setUiHints((prev) => ({ ...prev, ...evt.ui_hints }));
+            }
+          }
         }
       }
     } catch {
@@ -1538,7 +1752,7 @@ export default function ChatWidget() {
         const res = await fetch(`${API}/consular/chat/stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: 'hello', session_id: null, user_id: 'guest', enable_voice: false, language: code }),
+          body: JSON.stringify({ message: 'hello', session_id: null, user_id: 'guest', visitor_id: visitorIdRef.current, enable_voice: false, language: code }),
           signal: AbortSignal.timeout(30000),
         });
         if (!res.ok) throw new Error();
@@ -1666,8 +1880,8 @@ export default function ChatWidget() {
             <div className="header-info">
               <div className="header-name">{botName}</div>
               <div className="header-status-row">
-                <div className="status-dot" id="status-dot" style={{ background: isOnline ? '#4ADE80' : '#EF4444' }} />
-                <div className="status-text" id="status-text" style={{ color: isOnline ? '#4ADE80' : '#EF4444' }}>
+                <div className="status-dot" id="status-dot" style={{ background: isOnline ? T.statusOnline : T.statusOffline }} />
+                <div className="status-text" id="status-text" style={{ color: isOnline ? T.statusOnline : T.statusOffline }}>
                   {isSwitchingLang ? 'Saving session…' : isSpeaking ? 'Speaking…' : isLoading ? 'Thinking…' : isOnline ? 'Ready to Assist' : 'Offline'}
                 </div>
               </div>
@@ -1753,13 +1967,13 @@ export default function ChatWidget() {
           <div style={{ display: 'flex', gap: '6px', padding: '7px 10px', borderTop: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.15)' }}>
             <button
               onClick={handleSevaFetchApps}
-              style={{ flex: 1, background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
+              style={{ flex: 1, background: 'rgba(255,255,255,0.15)', color: T.buttonInverse, border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
             >
               📂 My Applications
             </button>
             <button
               onClick={() => handleSevaLogout(false)}
-              style={{ flex: 1, background: 'rgba(239,68,68,0.85)', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
+              style={{ flex: 1, background: T.destructiveSoft, color: T.buttonInverse, border: 'none', borderRadius: '8px', padding: '6px 10px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
             >
               🚪 Logout
             </button>
@@ -1865,25 +2079,28 @@ export default function ChatWidget() {
                         window.open(svc.url, '_blank', 'noopener,noreferrer');
                         return;
                       }
-                      setMessages(prev => [
-                        ...prev,
-                        {
-                          id: now,
-                          role: 'user',
-                          content: `${svc.emoji || ''} ${svc.name}`.trim(),
-                          time: timeNow(),
-                        },
-                        {
-                          id: now + 1,
-                          role: 'seva_service_info',
-                          svc,
-                        },
-                        {
-                          id: now + 2,
-                          role: 'seva_service_action',
-                          svc,
-                        },
-                      ]);
+                      // INFO services have no application flow — the
+                      // info card already carries any CTA the operator
+                      // set via `info_content.primary_action`. Suppress
+                      // the extra "Apply Now" card that the application
+                      // services get appended.
+                      const isInfo = svc.category === 'INFO';
+                      setMessages(prev => {
+                        const next = [
+                          ...prev,
+                          {
+                            id: now,
+                            role: 'user',
+                            content: `${svc.emoji || ''} ${svc.name}`.trim(),
+                            time: timeNow(),
+                          },
+                          { id: now + 1, role: 'seva_service_info', svc },
+                        ];
+                        if (!isInfo) {
+                          next.push({ id: now + 2, role: 'seva_service_action', svc });
+                        }
+                        return next;
+                      });
                     }}
                   />
                   )}
@@ -1962,28 +2179,49 @@ export default function ChatWidget() {
                           return (
                             <div key={di} className="seva-doc-item">
                               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <label className={`seva-doc-label ${preview ? 'uploaded' : ''}`} style={{ flex: 1 }}>
-                                <input
-                                  type="file"
-                                  accept=".pdf,.jpg,.jpeg,.png"
-                                  style={{ display: 'none' }}
-                                  onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ''; }}
-                                  disabled={sevaUploadingDocName === doc}
-                                />
-                                <span className="seva-doc-icon">{preview ? '✅' : '📎'}</span>
-                                <span className="seva-doc-name">{doc}</span>
-                                {sevaUploadingDocName === doc
-                                  ? <span className="seva-doc-status uploading">Uploading…</span>
-                                  : preview
-                                    ? <span className="seva-doc-status done">✓ Done</span>
-                                    : <span className="seva-doc-status pending">Upload ↑</span>
-                                }
-                              </label>
-                              {!preview && sevaUploadingDocName !== doc && (
+                              {/* Per-doc affordances respect the tenant feature
+                                * flags, same as the input-bar controls: file
+                                * picker only when file_upload is enabled, camera
+                                * button only when camera is enabled. If a
+                                * required-docs workflow has both disabled (a
+                                * misconfiguration), we still show the doc name so
+                                * the user knows what's needed, with a clear
+                                * "unavailable" status. */}
+                              {tenantFeatures.file_upload ? (
+                                <label className={`seva-doc-label ${preview ? 'uploaded' : ''}`} style={{ flex: 1 }}>
+                                  <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { if (e.target.files[0]) handleSevaUploadDoc(e.target.files[0], doc); e.target.value = ''; }}
+                                    disabled={sevaUploadingDocName === doc}
+                                  />
+                                  <span className="seva-doc-icon">{preview ? '✅' : '📎'}</span>
+                                  <span className="seva-doc-name">{doc}</span>
+                                  {sevaUploadingDocName === doc
+                                    ? <span className="seva-doc-status uploading">Uploading…</span>
+                                    : preview
+                                      ? <span className="seva-doc-status done">✓ Done</span>
+                                      : <span className="seva-doc-status pending">Upload ↑</span>
+                                  }
+                                </label>
+                              ) : (
+                                <div className={`seva-doc-label ${preview ? 'uploaded' : ''}`} style={{ flex: 1 }}>
+                                  <span className="seva-doc-icon">{preview ? '✅' : '📎'}</span>
+                                  <span className="seva-doc-name">{doc}</span>
+                                  {sevaUploadingDocName === doc
+                                    ? <span className="seva-doc-status uploading">Uploading…</span>
+                                    : preview
+                                      ? <span className="seva-doc-status done">✓ Done</span>
+                                      : <span className="seva-doc-status pending">{tenantFeatures.camera ? 'Use camera →' : 'Unavailable'}</span>
+                                  }
+                                </div>
+                              )}
+                              {tenantFeatures.camera && !preview && sevaUploadingDocName !== doc && (
                                 <button
                                   type="button"
                                   title="Take photo"
-                                  style={{ padding: '6px 8px', border: '1px solid #7c3aed', borderRadius: 6, background: '#f5f3ff', color: '#7c3aed', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: '11px', flexShrink: 0 }}
+                                  style={{ padding: '6px 8px', border: `1px solid ${T.cameraAccent}`, borderRadius: 6, background: T.cameraBg, color: T.cameraAccent, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: '11px', flexShrink: 0 }}
                                   onClick={() => {
                                     cameraOnCaptureRef.current = (dataUrl) => {
                                       handleSevaUploadDoc(dataUrlToFile(dataUrl, `${doc}.jpg`), doc);
@@ -2057,17 +2295,17 @@ export default function ChatWidget() {
                   {/* Editable form data summary */}
                   {sevaCurrentApp?.fields?.length > 0 && (
                     <div style={{ marginBottom: 10 }}>
-                      <p style={{ fontSize: '11px', fontWeight: 700, color: '#1A2E40', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                      <p style={{ fontSize: '11px', fontWeight: 700, color: 'hsl(var(--foreground))', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                         Application Details
                       </p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {sevaCurrentApp.fields.map(f => (
-                          <div key={f.key} style={{ background: '#f9fafb', borderRadius: 8, padding: '6px 8px', border: '1px solid #e5e7eb' }}>
+                          <div key={f.key} style={{ background: T.fieldSurface, borderRadius: 8, padding: '6px 8px', border: `1px solid ${T.borderDefault}` }}>
                             {sevaEditingField?.key === f.key ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: 600 }}>{f.label}</span>
+                                <span style={{ fontSize: '10px', color: T.textMuted, fontWeight: 600 }}>{f.label}</span>
                                 {f.field_type === 'file' ? (
-                                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '5px 8px', border: '1px dashed #3b82f6', borderRadius: 6, background: '#eff6ff', fontSize: '11px', color: '#3b82f6' }}>
+                                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '5px 8px', border: `1px dashed ${T.infoAccent}`, borderRadius: 6, background: T.infoBg, fontSize: '11px', color: T.infoAccent }}>
                                     📎 Choose replacement file
                                     <input
                                       type="file"
@@ -2106,7 +2344,7 @@ export default function ChatWidget() {
                                         if (e.key === 'Escape') setSevaEditingField(null);
                                       }}
                                       autoFocus
-                                      style={{ flex: 1, border: '1px solid #3b82f6', borderRadius: 6, padding: '4px 7px', fontSize: '12px', outline: 'none' }}
+                                      style={{ flex: 1, border: `1px solid ${T.infoAccent}`, borderRadius: 6, padding: '4px 7px', fontSize: '12px', outline: 'none' }}
                                     />
                                     <button
                                       onClick={() => {
@@ -2116,11 +2354,11 @@ export default function ChatWidget() {
                                         sevaApi('PUT', `/applications/${sevaCurrentApp.application_id}`, { form_data: newData }).catch(() => {});
                                         setSevaEditingField(null);
                                       }}
-                                      style={{ background: '#22c55e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
+                                      style={{ background: T.successAccent, color: T.buttonInverse, border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}
                                     >Save</button>
                                     <button
                                       onClick={() => setSevaEditingField(null)}
-                                      style={{ background: '#e5e7eb', color: '#374151', border: 'none', borderRadius: 6, padding: '4px 7px', fontSize: '11px', cursor: 'pointer' }}
+                                      style={{ background: T.borderDefault, color: T.textSecondary, border: 'none', borderRadius: 6, padding: '4px 7px', fontSize: '11px', cursor: 'pointer' }}
                                     >✕</button>
                                   </div>
                                 )}
@@ -2128,23 +2366,23 @@ export default function ChatWidget() {
                             ) : (
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
                                 <div>
-                                  <span style={{ fontSize: '10px', color: '#6b7280', display: 'block' }}>{f.label}</span>
+                                  <span style={{ fontSize: '10px', color: T.textMuted, display: 'block' }}>{f.label}</span>
                                   {f.field_type === 'file' ? (
                                     sevaFormData[f.key] ? (
                                       <span
-                                        style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}
+                                        style={{ fontSize: '11px', color: T.infoDeep, fontWeight: 600, cursor: 'pointer' }}
                                         onClick={() => setDocViewModal({ dataUrl: sevaFormData[f.key], name: f.label, isPdf: sevaFormData[f.key]?.startsWith('data:application/pdf') })}
                                       >📎 View document</span>
-                                    ) : <span style={{ fontSize: '11px', color: '#9ca3af' }}>Not uploaded</span>
+                                    ) : <span style={{ fontSize: '11px', color: T.textFaint }}>Not uploaded</span>
                                   ) : (
-                                    <span style={{ fontSize: '12px', color: '#111827', fontWeight: 500 }}>
-                                      {sevaFormData[f.key] || <span style={{ color: '#9ca3af' }}>—</span>}
+                                    <span style={{ fontSize: '12px', color: T.textPrimary, fontWeight: 500 }}>
+                                      {sevaFormData[f.key] || <span style={{ color: T.textFaint }}>—</span>}
                                     </span>
                                   )}
                                 </div>
                                 <button
                                   onClick={() => { setSevaEditingField(f); setSevaEditInput(sevaFormData[f.key] || ''); }}
-                                  style={{ background: 'transparent', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '11px', padding: '2px 4px', flexShrink: 0 }}
+                                  style={{ background: 'transparent', border: 'none', color: T.infoAccent, cursor: 'pointer', fontSize: '11px', padding: '2px 4px', flexShrink: 0 }}
                                   title={`Edit ${f.label}`}
                                 >✏️</button>
                               </div>
@@ -2162,12 +2400,12 @@ export default function ChatWidget() {
                     if (!docs.length) return null;
                     return (
                       <div style={{ marginBottom: 10 }}>
-                        <p style={{ fontSize: '11px', fontWeight: 700, color: '#1A2E40', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                        <p style={{ fontSize: '11px', fontWeight: 700, color: 'hsl(var(--foreground))', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.04em' }}>
                           Uploaded Documents
                         </p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {docs.map(doc => (
-                            <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '5px 8px' }}>
+                            <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.successBg, border: `1px solid ${T.successBorder}`, borderRadius: 8, padding: '5px 8px' }}>
                               {doc.isPdf ? (
                                 <span style={{ fontSize: 18 }}>📄</span>
                               ) : (
@@ -2178,9 +2416,9 @@ export default function ChatWidget() {
                                   onClick={() => setDocViewModal(doc)}
                                 />
                               )}
-                              <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</span>
+                              <span style={{ fontSize: '11px', color: T.successText, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</span>
                               <button
-                                style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 12 }}
+                                style={{ background: 'transparent', border: 'none', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}
                                 onClick={() => setDocViewModal(doc)}
                               >👁</button>
                             </div>
@@ -2211,9 +2449,9 @@ export default function ChatWidget() {
                 <div className={`msg-bot-av${isSpeaking ? ' speaking' : ''}`}>
                   <img src={botAvatarUrl} alt="" />
                 </div>
-                <div className="seva-app-complete-card" style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #f0f9ff 100%)', borderRadius: '12px', padding: '14px', borderLeft: '4px solid #22c55e' }}>
-                  <p style={{ fontSize: '13px', fontWeight: '700', color: '#065f46', margin: '0 0 8px 0' }}>✅ Application successfully completed!</p>
-                  <p style={{ fontSize: '11px', color: '#4b5563', margin: '0 0 12px 0' }}>What would you like to do next?</p>
+                <div className="seva-app-complete-card" style={{ background: `linear-gradient(135deg, ${T.successBg} 0%, ${T.infoBgSoft} 100%)`, borderRadius: '12px', padding: '14px', borderLeft: `4px solid ${T.successAccent}` }}>
+                  <p style={{ fontSize: '13px', fontWeight: '700', color: T.successDeep, margin: '0 0 8px 0' }}>✅ Application successfully completed!</p>
+                  <p style={{ fontSize: '11px', color: T.textSecondary, margin: '0 0 12px 0' }}>What would you like to do next?</p>
                   <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
                     <button
                       onClick={() => {
@@ -2224,13 +2462,13 @@ export default function ChatWidget() {
                           { id: `seva_tabs_${Date.now()}`, role: 'seva_service_tabs' },
                         ]);
                       }}
-                      style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
+                      style={{ background: T.infoAccent, color: T.buttonInverse, border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
                     >
                       📋 Apply for Another Service
                     </button>
                     <button
                       onClick={() => handleSevaFetchApps()}
-                      style={{ background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
+                      style={{ background: T.secondaryAccent, color: T.buttonInverse, border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
                     >
                       📂 View All My Applications
                     </button>
@@ -2238,7 +2476,7 @@ export default function ChatWidget() {
                       onClick={() => {
                         handleSevaLogout(false);
                       }}
-                      style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
+                      style={{ background: T.destructiveAccent, color: T.buttonInverse, border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'Poppins' }}
                     >
                       🚪 Logout
                     </button>
@@ -2340,7 +2578,7 @@ export default function ChatWidget() {
           {sevaAuthStep === 'otp' && (
             <div className="seva-auth-panel">
               <p className="seva-auth-panel-step">Step 2: Verify OTP</p>
-              <p style={{ fontSize: '11px', color: '#666', margin: '0 0 8px 0' }}>Check your email for the OTP code</p>
+              <p style={{ fontSize: '11px', color: T.textOnDark, margin: '0 0 8px 0' }}>Check your email for the OTP code</p>
               {sevaAuthError && <p className="seva-auth-panel-error">⚠️ {sevaAuthError}</p>}
               <div className="seva-auth-otp-row">
                 <input
@@ -2385,16 +2623,16 @@ export default function ChatWidget() {
                 </button>
                 <p className="seva-form-panel-label" style={{ margin: 0, flex: 1, textAlign: 'center' }}>
                   {_sevaFormField.label}
-                  <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
+                  <span style={{ color: T.destructiveAccent, marginLeft: 2 }}>*</span>
                 </p>
-                <span style={{ fontSize: '10px', color: '#9ca3af', flex: 0 }}>
+                <span style={{ fontSize: '10px', color: T.textFaint, flex: 0 }}>
                   {sevaFormFieldIndex + 1} / {(sevaCurrentApp?.fields || []).length}
                 </span>
               </div>
 
               {/* Validation error */}
               {sevaFormError && (
-                <p style={{ fontSize: '11px', color: '#ef4444', margin: '2px 0 6px 0', fontWeight: 500 }}>
+                <p style={{ fontSize: '11px', color: T.destructiveAccent, margin: '2px 0 6px 0', fontWeight: 500 }}>
                   ⚠️ {sevaFormError}
                 </p>
               )}
@@ -2403,7 +2641,7 @@ export default function ChatWidget() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {/* File preview if already selected */}
                   {sevaFormFilePreview && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '6px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.successBg, border: `1px solid ${T.successBorder}`, borderRadius: 8, padding: '6px 10px' }}>
                       {sevaFormFilePreview.isPdf ? (
                         <span style={{ fontSize: 20 }}>📄</span>
                       ) : (
@@ -2414,17 +2652,21 @@ export default function ChatWidget() {
                           onClick={() => setDocViewModal(sevaFormFilePreview)}
                         />
                       )}
-                      <span style={{ fontSize: 11, color: '#15803d', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}>{sevaFormFilePreview.name}</span>
+                      <span style={{ fontSize: 11, color: T.successText, fontWeight: 600, flex: 1, wordBreak: 'break-all' }}>{sevaFormFilePreview.name}</span>
                       <button
                         onClick={() => setSevaFormFilePreview(null)}
-                        style={{ background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14 }}
+                        style={{ background: 'transparent', border: 'none', color: T.textMuted, cursor: 'pointer', fontSize: 14 }}
                       >✕</button>
                     </div>
                   )}
+                  {/* Upload + camera affordances for a file-type form field
+                    * respect the tenant feature flags (same gating as the
+                    * doc-upload card and the input bar). */}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '8px', border: '2px dashed #2563EB', borderRadius: '8px', background: '#EFF6FF' }}>
+                    {tenantFeatures.file_upload && (
+                    <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '8px', border: `2px dashed ${T.infoBorder}`, borderRadius: '8px', background: T.infoBgAlt }}>
                       <span>📎</span>
-                      <span style={{ fontSize: '12px', color: '#2563EB', fontWeight: '500' }}>
+                      <span style={{ fontSize: '12px', color: T.infoBorder, fontWeight: '500' }}>
                         {sevaFormFilePreview ? 'Replace' : 'Upload file'}
                       </span>
                       <input
@@ -2457,10 +2699,12 @@ export default function ChatWidget() {
                         }}
                       />
                     </label>
+                    )}
+                    {tenantFeatures.camera && (
                     <button
                       type="button"
                       title="Take photo"
-                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: '8px', border: '2px solid #7c3aed', borderRadius: '8px', background: '#f5f3ff', color: '#7c3aed', fontWeight: '500', fontSize: '12px' }}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: '8px', border: `2px solid ${T.cameraAccent}`, borderRadius: '8px', background: T.cameraBg, color: T.cameraAccent, fontWeight: '500', fontSize: '12px' }}
                       onClick={() => {
                         const fieldLabel = _sevaFormField.label;
                         const fieldKey = _sevaFormField.key;
@@ -2482,16 +2726,22 @@ export default function ChatWidget() {
                       <CameraIcon size={15} />
                       <span>Take photo</span>
                     </button>
+                    )}
+                    {!tenantFeatures.file_upload && !tenantFeatures.camera && (
+                      <p style={{ flex: 1, fontSize: '11px', color: T.textMuted, margin: 0, padding: '8px' }}>
+                        File upload is disabled for this service.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {/* Hint for date/special fields */}
                   {((_sevaFormField.key === 'dob' || _sevaFormField.key === 'marriage_date')) && (
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '0 0 2px 0' }}>Format: DD/MM/YYYY</p>
+                    <p style={{ fontSize: '10px', color: T.textMuted, margin: '0 0 2px 0' }}>Format: DD/MM/YYYY</p>
                   )}
                   {_sevaFormField.key === 'phone' && (
-                    <p style={{ fontSize: '10px', color: '#6b7280', margin: '0 0 2px 0' }}>Include country code (e.g. +27 82 123 4567)</p>
+                    <p style={{ fontSize: '10px', color: T.textMuted, margin: '0 0 2px 0' }}>Include country code (e.g. +27 82 123 4567)</p>
                   )}
                   <div className="seva-form-panel-row">
                     <input
@@ -2516,10 +2766,18 @@ export default function ChatWidget() {
             </div>
           )}
 
-          {/* Normal Textarea Input — shown when not mid-auth/form AND no active in-progress app */}
+          {/* Normal Textarea Input — shown when not mid-auth/form AND no active in-progress app.
+              Buttons are gated to keep the bar uncluttered:
+                * Upload — visible when the bot signalled `ui_hints.expects_upload`
+                * Camera — visible when the bot signalled `ui_hints.expects_image`
+                * Mic    — visible only if the tenant has `features.voice_input` on
+              Both attach + camera also respect their tenant feature flag, so an
+              operator who never wants either can disable them platform-wide. */}
            {(!sevaAuthStep || sevaAuthStep === 'done') && sevaFormMode === null && !sevaCurrentApp && (
-            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:'#F0F2F5',borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
-              <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:T.chatInputBar,borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
+              {tenantFeatures.file_upload && uiHints.expects_upload && (
+                <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+              )}
               <textarea
                 ref={textareaRef}
                 className="wa-text"
@@ -2533,23 +2791,31 @@ export default function ChatWidget() {
                 disabled={isLoading}
                 style={{flex:'1 1 0',minWidth:0,width:'auto',boxSizing:'border-box'}}
               />
-              <button className="wa-cam" title="Camera" style={{flexShrink:0}} onClick={startCamera}><CameraIcon size={18} /></button>
-              <button className={`wa-mic${isRecording ? ' active' : ''}`} id="micBtn" title="Voice input" style={{flexShrink:0}} onClick={handleVoiceInput}><MicIcon size={18} /></button>
+              {tenantFeatures.camera && uiHints.expects_image && (
+                <button className="wa-cam" title="Camera" style={{flexShrink:0}} onClick={startCamera}><CameraIcon size={18} /></button>
+              )}
+              {tenantFeatures.voice_input && (
+                <button className={`wa-mic${isRecording ? ' active' : ''}`} id="micBtn" title="Voice input" style={{flexShrink:0}} onClick={handleVoiceInput}><MicIcon size={18} /></button>
+              )}
               <button className="wa-send" id="sendBtn" style={{flexShrink:0}} onClick={() => sendMsg()} disabled={isLoading || !input.trim()}><SendIcon size={18} /></button>
               <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleFileUpload} />
             </div>
-          )} 
+          )}
 
-          {/* Form upload mode textarea */}
+          {/* Form upload mode textarea. The attach button respects the tenant
+              file_upload flag (the doc-upload card carries its own per-doc
+              affordances); when disabled the bar is just a text field. */}
           {sevaAuthStep === 'done' && sevaFormMode === 'upload' && (
-            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:'#F0F2F5',borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
-              <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+            <div className="wa-bar" style={{display:'flex',alignItems:'flex-end',gap:6,background:T.chatInputBar,borderRadius:24,padding:'6px 10px',overflow:'hidden',boxSizing:'border-box',width:'100%'}}>
+              {tenantFeatures.file_upload && (
+                <button className="wa-attach" title="Attach document" style={{flexShrink:0}} onClick={() => fileInputRef.current?.click()}><FileTextIcon size={18} /></button>
+              )}
               <textarea
                 ref={textareaRef}
                 className="wa-text"
                 id="msgInput"
                 rows={1}
-                placeholder="Upload your documents..."
+                placeholder={tenantFeatures.file_upload ? "Upload your documents..." : "Type your message ..."}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onInput={autoResize}
@@ -2587,22 +2853,22 @@ export default function ChatWidget() {
           onClick={() => setDocViewModal(null)}
         >
           <div
-            style={{ background: '#fff', borderRadius: 16, padding: 20, maxWidth: '92vw', maxHeight: '88vh', overflow: 'auto', position: 'relative', minWidth: 260 }}
+            style={{ background: T.buttonInverse, borderRadius: 16, padding: 20, maxWidth: '92vw', maxHeight: '88vh', overflow: 'auto', position: 'relative', minWidth: 260 }}
             onClick={e => e.stopPropagation()}
           >
             <button
               onClick={() => setDocViewModal(null)}
-              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: '#666', lineHeight: 1 }}
+              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textOnDark, lineHeight: 1 }}
             >✕</button>
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#1A2E40', marginBottom: 12, paddingRight: 28, wordBreak: 'break-all' }}>{docViewModal.name}</p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--foreground))', marginBottom: 12, paddingRight: 28, wordBreak: 'break-all' }}>{docViewModal.name}</p>
             {docViewModal.isPdf ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '16px 0' }}>
                 <span style={{ fontSize: 64 }}>📄</span>
-                <p style={{ fontSize: 13, color: '#666', margin: 0 }}>PDF Document</p>
+                <p style={{ fontSize: 13, color: T.textOnDark, margin: 0 }}>PDF Document</p>
                 <a
                   href={docViewModal.dataUrl}
                   download={docViewModal.name}
-                  style={{ background: '#E06F2C', color: '#fff', borderRadius: 8, padding: '8px 18px', textDecoration: 'none', fontSize: 12, fontWeight: 600 }}
+                  style={{ background: 'hsl(var(--primary))', color: T.buttonInverse, borderRadius: 8, padding: '8px 18px', textDecoration: 'none', fontSize: 12, fontWeight: 600 }}
                 >
                   ⬇ Download
                 </a>
@@ -2625,21 +2891,21 @@ export default function ChatWidget() {
           onClick={() => setShowDiscardConfirm(false)}
         >
           <div
-            style={{ background: '#fff', borderRadius: 16, padding: 20, maxWidth: '320px', position: 'relative', minWidth: 260 }}
+            style={{ background: T.buttonInverse, borderRadius: 16, padding: 20, maxWidth: '320px', position: 'relative', minWidth: 260 }}
             onClick={e => e.stopPropagation()}
           >
             <button
               onClick={() => setShowDiscardConfirm(false)}
-              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: '#666', lineHeight: 1 }}
+              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textOnDark, lineHeight: 1 }}
             >✕</button>
-            <p style={{ fontSize: 14, fontWeight: 600, color: '#1A2E40', marginBottom: 8, paddingRight: 20 }}>⚠️ Discard Application?</p>
-            <p style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'hsl(var(--foreground))', marginBottom: 8, paddingRight: 20 }}>⚠️ Discard Application?</p>
+            <p style={{ fontSize: 12, color: T.textOnDark, marginBottom: 16 }}>
               Are you sure you want to go back? Any information you've entered will be lost.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => setShowDiscardConfirm(false)}
-                style={{ flex: 1, background: '#e5e7eb', color: '#374151', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
+                style={{ flex: 1, background: T.borderDefault, color: T.textSecondary, border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >
                 Keep Filling
               </button>
@@ -2650,7 +2916,7 @@ export default function ChatWidget() {
                   scrollToTopNextRef.current = true;
                   setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
                 }}
-                style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
+                style={{ flex: 1, background: T.destructiveAccent, color: T.buttonInverse, border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >
                 Discard
               </button>
@@ -2666,21 +2932,21 @@ export default function ChatWidget() {
           onClick={() => setShowAuthDiscardConfirm(false)}
         >
           <div
-            style={{ background: '#fff', borderRadius: 16, padding: 20, maxWidth: '320px', position: 'relative', minWidth: 260 }}
+            style={{ background: T.buttonInverse, borderRadius: 16, padding: 20, maxWidth: '320px', position: 'relative', minWidth: 260 }}
             onClick={e => e.stopPropagation()}
           >
             <button
               onClick={() => setShowAuthDiscardConfirm(false)}
-              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: '#666', lineHeight: 1 }}
+              style={{ position: 'absolute', top: 10, right: 10, background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textOnDark, lineHeight: 1 }}
             >✕</button>
-            <p style={{ fontSize: 14, fontWeight: 600, color: '#1A2E40', marginBottom: 8, paddingRight: 20 }}>⚠️ Discard Verification?</p>
-            <p style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'hsl(var(--foreground))', marginBottom: 8, paddingRight: 20 }}>⚠️ Discard Verification?</p>
+            <p style={{ fontSize: 12, color: T.textOnDark, marginBottom: 16 }}>
               Are you sure you want to go back? Your information will not be saved.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => setShowAuthDiscardConfirm(false)}
-                style={{ flex: 1, background: '#e5e7eb', color: '#374151', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
+                style={{ flex: 1, background: T.borderDefault, color: T.textSecondary, border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >
                 Continue
               </button>
@@ -2691,7 +2957,7 @@ export default function ChatWidget() {
                   scrollToTopNextRef.current = true;
                   setMessages(buildWelcomeMessages({ greeting: tenantGreeting, advisories: tenantAdvisories }));
                 }}
-                style={{ flex: 1, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
+                style={{ flex: 1, background: T.destructiveAccent, color: T.buttonInverse, border: 'none', borderRadius: 8, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins' }}
               >
                 Go Back
               </button>

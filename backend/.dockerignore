@@ -1,0 +1,42 @@
+# Build context exclusions for the backend image.
+# Goal: keep the image lean and never bake secrets / dev junk into a layer.
+
+# Virtualenvs (the dev .venv is ~1.6 GB — never ship it)
+.venv/
+venv/
+env/
+
+# Python caches / compiled artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests (not run inside the runtime image)
+tests/
+
+# Secrets & env files — provided at runtime via compose env_file / -e
+.env
+*.env
+*.env.*
+!.env.example
+
+# Historical scratch / old code
+backup/
+
+# Runtime-writable dirs — mounted as volumes, not baked in
+uploads/
+logs/
+
+# Design notes & docs (code is source of truth; see CLAUDE.md)
+*.md
+
+# Local tooling / misc
+.git/
+.gitignore
+*.log
+.DS_Store
+.vscode/
+.idea/

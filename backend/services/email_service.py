@@ -27,6 +27,12 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 _DEV_MODE = not (SMTP_USER and SMTP_PASS)
 
+# Dev/testing override: when set, EVERY outbound email is redirected to this
+# address regardless of the intended recipient. The original recipient is
+# preserved in the subject (e.g. "[→ user@x] …") so nothing is lost. Clear the
+# env var (and restart) to revert to normal delivery.
+EMAIL_OVERRIDE_TO = (os.environ.get("EMAIL_OVERRIDE_TO") or "").strip()
+
 
 def _brand(bot_name: str, org_name: str) -> str:
     """Return the best brand label for headers/subjects. Falls back to a
@@ -35,6 +41,11 @@ def _brand(bot_name: str, org_name: str) -> str:
 
 
 def _send(to: str, subject: str, html: str, attachment_bytes: Optional[bytes] = None, attachment_name: str = "application.pdf") -> bool:
+    # Global redirect (dev/testing). Keep the intended recipient visible in
+    # the subject so redirected mail is still traceable.
+    if EMAIL_OVERRIDE_TO and to != EMAIL_OVERRIDE_TO:
+        subject = f"[→ {to}] {subject}"
+        to = EMAIL_OVERRIDE_TO
     if _DEV_MODE:
         logger.warning(
             f"[EMAIL DEV MODE] SMTP not configured — email NOT sent.\n"

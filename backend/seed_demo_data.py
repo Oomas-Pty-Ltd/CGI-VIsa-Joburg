@@ -46,6 +46,9 @@ for line in ENV_PATH.read_text().splitlines():
 API = f"http://localhost:{os.environ.get('SERVER_PORT', '8000')}/api"
 SA_EMAIL = "superadmin@sarthak.ai"
 SA_PASS  = "Admin@2025"
+# Console login is 2FA: the fixed dev OTP works only while the platform
+# `dev_auth_mode` flag is ON (its default). See sa_token().
+DEV_OTP  = "123456"
 
 
 # ── Demo blueprint ──────────────────────────────────────────────────────────
@@ -82,9 +85,27 @@ def step(s):
 
 
 def sa_token() -> str:
+    """Console login is now 2FA: ``/auth/login`` no longer returns a token —
+    it issues an OTP challenge, and the JWT is minted at
+    ``/auth/login/verify-otp``. With the platform ``dev_auth_mode`` flag ON
+    (the default) the OTP is the fixed dev code ``123456`` and no email is
+    sent, so the seed can complete the flow unattended."""
     r = requests.post(f"{API}/auth/login", json={"email": SA_EMAIL, "password": SA_PASS})
     r.raise_for_status()
-    return r.json()["token"]
+    data = r.json()
+    if data.get("token"):                       # 2FA disabled — direct token (unlikely)
+        return data["token"]
+    if not data.get("otp_required"):
+        raise SystemExit(f"❌ Unexpected login response (no token, no otp_required): {data}")
+    if not data.get("dev_mode", True):
+        raise SystemExit(
+            "❌ Console 2FA is in PRODUCTION mode (dev_auth_mode=False): the OTP is "
+            "emailed, not 123456, so the seed can't auto-verify. Turn on dev_auth_mode "
+            "in Super Admin → Platform Settings → Auth, then re-run."
+        )
+    v = requests.post(f"{API}/auth/login/verify-otp", json={"email": SA_EMAIL, "otp": DEV_OTP})
+    v.raise_for_status()
+    return v.json()["token"]
 
 
 def mongo() -> MongoClient:
@@ -399,6 +420,9 @@ def cleanup_all():
 
     db.local_admins.delete_many({"email": {"$in": emails + sec_e}})
     db.companies.delete_many({"email": {"$in": emails}})
+    # 2FA challenge rows accrue on every seed run (one per console login,
+    # incl. the super-admin) — drop the ones for our demo + SA emails.
+    db.login_otp_tokens.delete_many({"email": {"$in": emails + sec_e + [SA_EMAIL]}})
 
     if cids:
         db.tenant_services.delete_many({"company_id": {"$in": cids}})
@@ -408,6 +432,11 @@ def cleanup_all():
         db.chat_sessions.delete_many({"id": {"$regex": "^demo_seed::"}})
         db.invalidated_tokens.delete_many({"company_id": {"$in": cids}})
         db.messaging_channel_map.delete_many({"external_id": {"$in": wa_nums}})
+        # New crawler collections — only populated if a demo crawl was run,
+        # but scope-delete them so --cleanup leaves nothing behind.
+        db.crawler_runs.delete_many({"company_id": {"$in": cids}})
+        db.crawler_pages.delete_many({"company_id": {"$in": cids}})
+        db.crawler_frontier.delete_many({"company_id": {"$in": cids}})
 
     print("✅ cleanup complete")
     client.close()

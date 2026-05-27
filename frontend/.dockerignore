@@ -1,0 +1,25 @@
+# Keep the frontend build context small and reproducible.
+
+# Dependencies are reinstalled inside the image from package.json + yarn.lock.
+node_modules/
+
+# Prebuilt output (rebuilt in the image; never trust host artifacts).
+build/
+dist/
+
+# Secrets — REACT_APP_BACKEND_URL is passed as a build ARG, not from .env.
+.env
+*.env
+*.env.*
+!.env.example
+
+# Caches / tooling / docs
+.cache/
+coverage/
+.git/
+.gitignore
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.md

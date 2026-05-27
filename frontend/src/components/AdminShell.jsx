@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut } from "lucide-react";
+import { LogOut, Search, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CommandPalette, useCommandPaletteHotkey } from "@/components/admin/CommandPalette";
 
 /**
  * AdminShell — shared layout for SuperAdminDashboard + LocalAdminDashboard.
@@ -34,9 +35,27 @@ export default function AdminShell({
   pageDescription,
   pageActions,
   topBarSlot,
+  // Command-palette props. Pass `companies` + `onTenantSelect` from the
+  // super-admin shell to get a "Tenants" group in the palette; the local
+  // admin shell leaves both undefined (single-tenant scope).
+  companies = [],
+  onTenantSelect,
+  // Viewer-role flag. When true, a "Read only" chip is rendered in the
+  // topbar so the operator always sees their access scope. The actual
+  // enforcement lives in `auth_utils.verify_admin` — every POST/PUT/
+  // PATCH/DELETE from a viewer token is rejected at the API boundary.
+  readOnly = false,
   children,
 }) {
   const navigate = useNavigate();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteHotkey(setPaletteOpen);
+
+  // Mac users see ⌘, everyone else sees Ctrl. Detected once at module-eval
+  // time — good enough; the only mis-classified case is a Mac mounted via
+  // remote-desktop, which is not worth a runtime check.
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/i.test(navigator.platform);
+  const shortcutLabel = isMac ? "⌘K" : "Ctrl K";
 
   const handleLogout = () => {
     if (onLogout) return onLogout();
@@ -90,10 +109,14 @@ export default function AdminShell({
                         type="button"
                         onClick={() => onTabChange?.(key)}
                         className={cn(
-                          "w-full group flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                          // Left accent bar + tinted fill on the active item.
+                          // Linear/Vercel use the same two-cue pattern (color +
+                          // shape) so a sidebar with 10 items still reads at a
+                          // glance.
+                          "relative w-full group flex items-center gap-2 rounded-md pl-4 pr-3 py-1.5 text-sm transition-colors",
                           active
-                            ? "bg-secondary text-foreground font-medium"
-                            : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                            ? "bg-primary/10 text-primary font-medium before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:bg-primary before:rounded-r"
+                            : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
                         )}
                         aria-current={active ? "page" : undefined}
                       >
@@ -101,7 +124,7 @@ export default function AdminShell({
                           <Icon
                             className={cn(
                               "h-4 w-4 shrink-0",
-                              active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground"
+                              active ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
                             )}
                           />
                         )}
@@ -169,6 +192,29 @@ export default function AdminShell({
             )}
           </nav>
           <div className="flex items-center gap-2">
+            {readOnly && (
+              <span
+                className="hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-warning/30 bg-warning/10 text-xs font-medium text-warning"
+                title="Read-only account — write actions will be rejected"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Read only
+              </span>
+            )}
+            {/* ⌘K hint chip — clickable, also a discoverability cue. We render
+                it text-only on narrow viewports so the topbar still fits. */}
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="hidden sm:inline-flex items-center gap-2 h-8 px-2.5 rounded-md border border-border bg-card text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              aria-label="Open command palette"
+            >
+              <Search className="h-3.5 w-3.5" />
+              <span>Search</span>
+              <kbd className="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded border border-border bg-muted text-[10px] font-medium text-muted-foreground">
+                {shortcutLabel}
+              </kbd>
+            </button>
             {topBarSlot}
           </div>
         </header>
@@ -193,6 +239,15 @@ export default function AdminShell({
           {children}
         </main>
       </div>
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        tabs={tabs}
+        onTabChange={onTabChange}
+        companies={companies}
+        onTenantSelect={onTenantSelect}
+      />
     </div>
   );
 }

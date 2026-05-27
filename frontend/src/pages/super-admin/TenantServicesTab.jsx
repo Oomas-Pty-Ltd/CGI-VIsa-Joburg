@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Plus, Trash2, Edit2, RefreshCw, Workflow, ExternalLink, Inbox,
+  Plus, Trash2, Edit2, RefreshCw, Workflow, ExternalLink, Inbox, Info, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,6 +181,10 @@ export default function TenantServicesTab({ companies, token, singleTenant = fal
                         <Badge variant="secondary" className="gap-1">
                           <ExternalLink className="h-3 w-3" /> Redirect
                         </Badge>
+                      ) : s.category === "INFO" ? (
+                        <Badge variant="outline" className="gap-1 border-primary/30 text-primary bg-primary/5">
+                          <Info className="h-3 w-3" /> Info
+                        </Badge>
                       ) : (
                         <Badge variant="outline">In-house</Badge>
                       )}
@@ -264,28 +268,36 @@ const EMPTY_SERVICE = {
   fields:        [],
   post_confirm_message: "",
   hooks: {},
+  // INFO services use this payload; ignored for TYPE_A/TYPE_B.
+  info_content: { sections: [], primary_action: null },
 };
 
-// Sections in user-facing order: a user landing on this service first
-// sees the consent prompt (built from documents) — so Documents comes
-// before Form fields, which the bot asks one-by-one during collection,
-// followed by the post-submit messaging.
+// Sections in user-facing order. Visibility is category-dependent:
 //
-// TYPE_B services redirect the user to an external portal, so neither
-// Documents (we'd have no chance to enforce them) nor Form fields
-// (we collect nothing — the portal does) make sense. `sectionsFor`
-// hides them for TYPE_B so operators don't fill in fields that the
-// bot will never use.
+//   TYPE_A (in-house collect): Basics, Documents, Form fields, Messaging, Hooks
+//   TYPE_B (redirect):         Basics, Messaging, Hooks
+//   INFO   (reference card):   Basics, Content, Messaging
+//
+// The bot never runs the application state machine for INFO services, so
+// Documents / Form fields / Hooks don't apply.
 const ALL_DIALOG_SECTIONS = [
-  { key: "basics",    label: "Basics",       always: true },
-  { key: "docs",      label: "Documents",    typeAOnly: true },
-  { key: "fields",    label: "Form fields",  typeAOnly: true },
-  { key: "messaging", label: "Messaging",    always: true },
-  { key: "hooks",     label: "Workflow hooks", always: true },
+  { key: "basics",    label: "Basics" },
+  { key: "content",   label: "Content",        infoOnly: true },
+  { key: "docs",      label: "Documents",      typeAOnly: true },
+  { key: "fields",    label: "Form fields",    typeAOnly: true },
+  { key: "messaging", label: "Messaging",      hideForInfo: true },
+  { key: "hooks",     label: "Workflow hooks", hideForInfo: true },
 ];
 
 function sectionsFor(category) {
-  return ALL_DIALOG_SECTIONS.filter((s) => s.always || category !== "TYPE_B");
+  if (category === "INFO") {
+    return ALL_DIALOG_SECTIONS.filter((s) => !s.typeAOnly && !s.hideForInfo);
+  }
+  if (category === "TYPE_B") {
+    return ALL_DIALOG_SECTIONS.filter((s) => !s.typeAOnly && !s.infoOnly);
+  }
+  // TYPE_A
+  return ALL_DIALOG_SECTIONS.filter((s) => !s.infoOnly);
 }
 
 function ServiceDialog({ tenantId, service, token, onClose, onSaved }) {
@@ -303,23 +315,24 @@ function ServiceDialog({ tenantId, service, token, onClose, onSaved }) {
       toast.error("TYPE_B services require an external_url"); return;
     }
 
-    // For TYPE_B (redirect), drop fields + documents from the payload —
-    // the bot never collects them, so persisting them would mislead a
-    // future operator opening this row.
+    // Drop fields the bot never uses for the chosen category — keeps
+    // stored rows free of misleading half-state for a future operator.
     const isRedirect = draft.category === "TYPE_B";
+    const isInfo     = draft.category === "INFO";
     const body = {
       name:          draft.name,
       description:   draft.description,
-      documents:     isRedirect ? [] : (draft.documents || []).map((d) => d.trim()).filter(Boolean),
-      fields:        isRedirect ? [] : draft.fields,
+      documents:     (isRedirect || isInfo) ? [] : (draft.documents || []).map((d) => d.trim()).filter(Boolean),
+      fields:        (isRedirect || isInfo) ? [] : draft.fields,
       category:      draft.category,
       external_url:  draft.external_url || null,
       emoji:         (draft.emoji || "").trim(),
       keywords:      (Array.isArray(draft.keywords) ? draft.keywords : (draft.keywords || "").split(","))
                        .map((k) => String(k).trim()).filter(Boolean),
       enabled:       draft.enabled,
-      post_confirm_message: (draft.post_confirm_message || "").trim(),
-      hooks:         draft.hooks || {},
+      post_confirm_message: isInfo ? "" : (draft.post_confirm_message || "").trim(),
+      hooks:         isInfo ? {} : (draft.hooks || {}),
+      info_content:  isInfo ? (draft.info_content || { sections: [], primary_action: null }) : { sections: [], primary_action: null },
     };
     if (draft.display_order !== null && draft.display_order !== "" && draft.display_order !== undefined) {
       body.display_order = Number(draft.display_order);
@@ -462,10 +475,11 @@ function ServiceDialog({ tenantId, service, token, onClose, onSaved }) {
                     <SelectContent>
                       <SelectItem value="TYPE_A">TYPE_A — collect in-house</SelectItem>
                       <SelectItem value="TYPE_B">TYPE_B — redirect to portal</SelectItem>
+                      <SelectItem value="INFO">INFO — reference card (no application)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                    <strong>TYPE_A</strong>: bot collects all fields here. <strong>TYPE_B</strong>: bot redirects to an external portal.
+                    <strong>TYPE_A</strong>: bot collects all fields here. <strong>TYPE_B</strong>: bot redirects to an external portal. <strong>INFO</strong>: a reference card (status, support, announcement) — no application flow, optional single CTA.
                   </p>
                 </div>
                 <div className="col-span-2">
@@ -477,9 +491,10 @@ function ServiceDialog({ tenantId, service, token, onClose, onSaved }) {
                     onChange={(e) => update({ external_url: e.target.value })}
                     placeholder="https://portal.example.gov"
                     className="mt-1"
+                    disabled={draft.category === "INFO"}
                   />
                   <p className="text-xs text-muted-foreground mt-1 leading-snug">
-                    Where the user is sent for TYPE_B services. Required when category is TYPE_B; ignored otherwise.
+                    Where the user is sent for TYPE_B services. Required when category is TYPE_B; ignored otherwise. INFO services use the Content tab's optional <em>primary action</em> instead.
                   </p>
                 </div>
               </div>
@@ -531,6 +546,13 @@ function ServiceDialog({ tenantId, service, token, onClose, onSaved }) {
                 </div>
               </div>
             </>
+          )}
+
+          {section === "content" && (
+            <InfoContentEditor
+              value={draft.info_content || { sections: [], primary_action: null }}
+              onChange={(next) => update({ info_content: next })}
+            />
           )}
 
           {section === "docs" && (
@@ -780,6 +802,259 @@ function HooksEditor({ hooks, category, onChange }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ─── INFO content editor ─────────────────────────────────────────────────── */
+
+// The five section "kinds" that an INFO card supports. Each renders a
+// slightly different editor (a callout has tone + body, a links section
+// has an array of {label, url} pairs, etc). Keeping the kinds open-ended
+// makes future additions cheap — both the editor and the bot renderer
+// fall through to a plain text body for unknown kinds.
+const SECTION_KIND_OPTIONS = [
+  { value: "text",    label: "Text block" },
+  { value: "bullets", label: "Bullet list" },
+  { value: "callout", label: "Callout (info / warning / success)" },
+  { value: "links",   label: "Link list" },
+  { value: "contact", label: "Contact details" },
+];
+
+function blankSection(kind) {
+  switch (kind) {
+    case "bullets": return { kind, title: "", items: [""] };
+    case "callout": return { kind, tone: "info", title: "", body: "" };
+    case "links":   return { kind, title: "", items: [{ label: "", url: "" }] };
+    case "contact": return { kind, title: "", items: [{ label: "", value: "", href: "" }] };
+    default:        return { kind: "text", title: "", body: "" };
+  }
+}
+
+function InfoContentEditor({ value, onChange }) {
+  const sections = Array.isArray(value?.sections) ? value.sections : [];
+  const primary  = value?.primary_action || null;
+
+  const update = (patch) => onChange({ ...(value || {}), ...patch });
+  const setSection = (idx, next) => {
+    const copy = sections.slice();
+    copy[idx] = next;
+    update({ sections: copy });
+  };
+  const addSection = (kind) => update({ sections: [...sections, blankSection(kind)] });
+  const removeSection = (idx) => {
+    const copy = sections.slice();
+    copy.splice(idx, 1);
+    update({ sections: copy });
+  };
+  const moveSection = (idx, dir) => {
+    const copy = sections.slice();
+    const j = idx + dir;
+    if (j < 0 || j >= copy.length) return;
+    [copy[idx], copy[j]] = [copy[j], copy[idx]];
+    update({ sections: copy });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <Label className="text-xs">Content sections</Label>
+        <p className="text-xs text-muted-foreground mt-1 leading-snug">
+          Stack any number of typed blocks — text, bullets, callouts, links, contacts.
+          The bot renders them in order under the service name and description.
+        </p>
+      </div>
+
+      {sections.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center">
+          <p className="text-sm text-muted-foreground">No content sections yet. Add your first block below.</p>
+        </div>
+      )}
+
+      <ol className="space-y-3">
+        {sections.map((sec, idx) => (
+          <li key={idx} className="rounded-lg border border-border bg-card">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                  #{idx + 1} · {sec.kind || "text"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={idx === 0} onClick={() => moveSection(idx, -1)} aria-label="Move up">
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={idx === sections.length - 1} onClick={() => moveSection(idx, +1)} aria-label="Move down">
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => removeSection(idx)} aria-label="Remove section">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+            <div className="px-3 py-3 space-y-2">
+              <SectionEditor section={sec} onChange={(next) => setSection(idx, next)} />
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex flex-wrap gap-2">
+        {SECTION_KIND_OPTIONS.map((opt) => (
+          <Button key={opt.value} size="sm" variant="outline" onClick={() => addSection(opt.value)}>
+            <Plus className="h-3 w-3 mr-1" />
+            {opt.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="pt-4 border-t border-border">
+        <Label className="text-xs">Primary action (optional)</Label>
+        <p className="text-xs text-muted-foreground mt-1 mb-2 leading-snug">
+          A single CTA rendered at the bottom of the info card. Use for "Open status portal", "Talk to support", etc. Leave blank for a pure-info card with no buttons.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            placeholder="Button label"
+            value={primary?.label || ""}
+            onChange={(e) => update({ primary_action: { ...(primary || {}), label: e.target.value } })}
+          />
+          <Input
+            placeholder="https://…"
+            value={primary?.url || ""}
+            onChange={(e) => update({ primary_action: { ...(primary || {}), url: e.target.value } })}
+          />
+        </div>
+        {(primary?.label || primary?.url) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mt-2 text-muted-foreground hover:text-destructive"
+            onClick={() => update({ primary_action: null })}
+          >
+            <Trash2 className="h-3 w-3 mr-1" /> Remove primary action
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionEditor({ section, onChange }) {
+  const kind = section?.kind || "text";
+  const set = (patch) => onChange({ ...(section || {}), ...patch });
+
+  const titleInput = (
+    <Input
+      placeholder="Section title (optional)"
+      value={section?.title || ""}
+      onChange={(e) => set({ title: e.target.value })}
+      className="h-8 text-sm"
+    />
+  );
+
+  if (kind === "bullets") {
+    const items = section.items || [];
+    const setItem = (i, v) => { const next = items.slice(); next[i] = v; set({ items: next }); };
+    const addItem = () => set({ items: [...items, ""] });
+    const delItem = (i) => { const next = items.slice(); next.splice(i, 1); set({ items: next }); };
+    return (
+      <div className="space-y-2">
+        {titleInput}
+        {items.map((it, i) => (
+          <div key={i} className="flex gap-2">
+            <Input value={it} onChange={(e) => setItem(i, e.target.value)} className="h-8 text-sm" placeholder="Bullet text" />
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => delItem(i)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button size="sm" variant="outline" onClick={addItem}><Plus className="h-3 w-3 mr-1" /> Add bullet</Button>
+      </div>
+    );
+  }
+
+  if (kind === "callout") {
+    return (
+      <div className="space-y-2">
+        <div className="grid grid-cols-[120px_1fr] gap-2">
+          <Select value={section.tone || "info"} onValueChange={(v) => set({ tone: v })}>
+            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="info">Info</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="success">Success</SelectItem>
+            </SelectContent>
+          </Select>
+          {titleInput}
+        </div>
+        <Textarea
+          rows={3}
+          placeholder="Callout body — what should users know?"
+          value={section.body || ""}
+          onChange={(e) => set({ body: e.target.value })}
+          className="text-sm"
+        />
+      </div>
+    );
+  }
+
+  if (kind === "links") {
+    const items = section.items || [];
+    const setItem = (i, patch) => { const next = items.slice(); next[i] = { ...next[i], ...patch }; set({ items: next }); };
+    const addItem = () => set({ items: [...items, { label: "", url: "" }] });
+    const delItem = (i) => { const next = items.slice(); next.splice(i, 1); set({ items: next }); };
+    return (
+      <div className="space-y-2">
+        {titleInput}
+        {items.map((it, i) => (
+          <div key={i} className="flex gap-2">
+            <Input value={it.label || ""} onChange={(e) => setItem(i, { label: e.target.value })} className="h-8 text-sm" placeholder="Label" />
+            <Input value={it.url || ""} onChange={(e) => setItem(i, { url: e.target.value })} className="h-8 text-sm font-mono" placeholder="https://…" />
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => delItem(i)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button size="sm" variant="outline" onClick={addItem}><Plus className="h-3 w-3 mr-1" /> Add link</Button>
+      </div>
+    );
+  }
+
+  if (kind === "contact") {
+    const items = section.items || [];
+    const setItem = (i, patch) => { const next = items.slice(); next[i] = { ...next[i], ...patch }; set({ items: next }); };
+    const addItem = () => set({ items: [...items, { label: "", value: "", href: "" }] });
+    const delItem = (i) => { const next = items.slice(); next.splice(i, 1); set({ items: next }); };
+    return (
+      <div className="space-y-2">
+        {titleInput}
+        {items.map((it, i) => (
+          <div key={i} className="grid grid-cols-[110px_1fr_1fr_32px] gap-2">
+            <Input value={it.label || ""} onChange={(e) => setItem(i, { label: e.target.value })} className="h-8 text-sm" placeholder="Email" />
+            <Input value={it.value || ""} onChange={(e) => setItem(i, { value: e.target.value })} className="h-8 text-sm" placeholder="help@example.com" />
+            <Input value={it.href || ""} onChange={(e) => setItem(i, { href: e.target.value })} className="h-8 text-sm font-mono" placeholder="mailto:… (optional)" />
+            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => delItem(i)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+        <Button size="sm" variant="outline" onClick={addItem}><Plus className="h-3 w-3 mr-1" /> Add contact</Button>
+      </div>
+    );
+  }
+
+  // text (default / unknown)
+  return (
+    <div className="space-y-2">
+      {titleInput}
+      <Textarea
+        rows={4}
+        placeholder="Paragraph text — markdown links allowed."
+        value={section?.body || ""}
+        onChange={(e) => set({ body: e.target.value })}
+        className="text-sm"
+      />
     </div>
   );
 }

@@ -109,8 +109,22 @@ async def create_indexes():
         await db.crawler_runs.create_index([("company_id", 1), ("started_at", -1)])
         await db.crawler_runs.create_index([("company_id", 1), ("status", 1)])
 
+        # Per-page crawl records (raw HTML, extracted content, processing
+        # artifacts, logs, status — one row per URL per run).
+        await db.crawler_pages.create_index(
+            [("company_id", 1), ("run_id", 1), ("url_hash", 1)], unique=True,
+        )
+        await db.crawler_pages.create_index([("company_id", 1), ("run_id", 1), ("status", 1)])
+        await db.crawler_pages.create_index([("company_id", 1), ("url_hash", 1)])
+
         # Per-tenant scraper config
         await db.scraper_config.create_index("company_id", unique=True)
+
+        # Notification settings (one per scenario_key) + delivery log
+        await db.notification_settings.create_index("scenario_key", unique=True)
+        await db.notification_log.create_index([("created_at", -1)])
+        await db.notification_log.create_index([("scenario_key", 1), ("company_id", 1), ("status", 1), ("created_at", -1)])
+        await db.notification_log.create_index("created_at", expireAfterSeconds=7776000)  # 90-day TTL
 
         # Schema migrations registry. The unique index doubles as a
         # multi-replica lock (whichever replica wins the insert owns the run).

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { RefreshCw, Save } from "lucide-react";
 import { Section } from "@/components/admin/Section";
 
@@ -104,7 +105,11 @@ export default function PlatformSettingsTab({ token }) {
     },
     {
       title: "Maintenance loops",
-      keys: ["session_cleanup_interval_seconds"],
+      keys: ["session_cleanup_interval_seconds", "notification_job_interval_seconds"],
+    },
+    {
+      title: "Auth",
+      keys: ["dev_auth_mode"],
     },
     {
       title: "WhatsApp channel",
@@ -132,20 +137,13 @@ export default function PlatformSettingsTab({ token }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-end gap-3 flex-wrap">
-        <p className="text-xs text-muted-foreground max-w-xl leading-relaxed">
-          Platform-level tuning that applies to every tenant. Changes take effect
-          on the next request (cache TTL = 60s in the backend). Env-var overrides,
-          when present, take precedence over what's saved here.
-        </p>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchConfig}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Reload
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
-            <Save className="w-3.5 h-3.5 mr-1.5" /> {saving ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
+      <div className="flex justify-end gap-2 flex-wrap">
+        <Button variant="outline" size="sm" onClick={fetchConfig}>
+          <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Reload
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Save className="w-3.5 h-3.5 mr-1.5" /> {saving ? "Saving…" : "Save changes"}
+        </Button>
       </div>
 
       {groups.map((group) => (
@@ -199,6 +197,24 @@ function PlatformField({ fieldKey, value, defaultValue, envVar, onChange }) {
         />
         <p className="text-xs text-muted-foreground mt-1 leading-snug">
           JSON array. Platform default: <code>{JSON.stringify(defaultValue)}</code>.
+          {envVar && <> Env var: <code>{envVar}</code>.</>}
+        </p>
+      </div>
+    );
+  }
+
+  // Boolean default → toggle switch.
+  if (typeof defaultValue === "boolean") {
+    const on = value === undefined || value === null ? defaultValue : !!value;
+    return (
+      <div>
+        <Label className="text-xs">{label}</Label>
+        <div className="flex items-center gap-2 mt-1">
+          <Switch checked={on} onCheckedChange={(v) => onChange(v)} />
+          <span className="text-sm text-muted-foreground">{on ? "On" : "Off"}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1 leading-snug">
+          Platform default: <code>{String(defaultValue)}</code>.
           {envVar && <> Env var: <code>{envVar}</code>.</>}
         </p>
       </div>

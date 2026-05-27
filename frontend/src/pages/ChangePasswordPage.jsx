@@ -33,9 +33,10 @@ export default function ChangePasswordPage() {
   const userType     = localStorage.getItem("user_type");
   const forced       = localStorage.getItem("password_change_required") === "true";
 
-  // Guard: must be logged in as an admin
+  // Guard: must be logged in as any console role (viewer included — they
+  // also get the forced-first-login password rotation).
   React.useEffect(() => {
-    if (!token || !["super_admin", "local_admin"].includes(userType)) {
+    if (!token || !["super_admin", "local_admin", "viewer"].includes(userType)) {
       navigate("/login");
     }
   }, [token, userType, navigate]);
@@ -69,7 +70,7 @@ export default function ChangePasswordPage() {
       toast.success("Password updated");
 
       if (userType === "super_admin") navigate("/super-admin/dashboard");
-      else if (userType === "local_admin") navigate("/admin/dashboard");
+      else if (userType === "local_admin" || userType === "viewer") navigate("/admin/dashboard");
       else navigate("/");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Password change failed");
@@ -79,21 +80,23 @@ export default function ChangePasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
-      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md" data-testid="change-password-form">
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div className="bg-card border border-border rounded-xl shadow-sm p-8 w-full max-w-md" data-testid="change-password-form">
         <div className="flex justify-center mb-6">
-          <Shield className="w-16 h-16 text-[#E06F2C]" />
+          <div className="h-12 w-12 rounded-lg bg-primary flex items-center justify-center">
+            <Shield className="w-6 h-6 text-primary-foreground" />
+          </div>
         </div>
-        <h1 className="text-3xl font-bold text-center text-[#1A2E40] mb-2">
+        <h1 className="text-2xl font-semibold tracking-tight text-center text-foreground mb-1">
           {forced ? "Set your password" : "Change password"}
         </h1>
-        <p className="text-center text-gray-600 mb-6 text-sm">
+        <p className="text-center text-sm text-muted-foreground mb-8">
           {forced
             ? "Your account was provisioned with a temporary password. Choose a new one before continuing."
             : "Pick a new password for your account."}
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <Label htmlFor="current">{forced ? "Temporary password" : "Current password"}</Label>
             <Input
@@ -120,7 +123,7 @@ export default function ChangePasswordPage() {
               className="mt-1"
               data-testid="new-password-input"
             />
-            <p className="text-xs text-gray-400 mt-1">Minimum 8 characters.</p>
+            <p className="text-xs text-muted-foreground mt-1">Minimum 8 characters.</p>
           </div>
 
           <div>
@@ -139,7 +142,7 @@ export default function ChangePasswordPage() {
 
           <Button
             type="submit"
-            className="w-full bg-[#E06F2C] hover:bg-[#C55D20] text-white"
+            className="w-full"
             disabled={loading}
             data-testid="change-password-submit"
           >
@@ -148,11 +151,11 @@ export default function ChangePasswordPage() {
         </form>
 
         {!forced && (
-          <div className="mt-4 text-center">
+          <div className="mt-6 text-center">
             <Button
               variant="link"
               onClick={() => navigate(userType === "super_admin" ? "/super-admin/dashboard" : "/admin/dashboard")}
-              className="text-[#1A2E40]"
+              className="text-muted-foreground hover:text-foreground"
             >
               Cancel
             </Button>

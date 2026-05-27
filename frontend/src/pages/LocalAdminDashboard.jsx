@@ -14,7 +14,7 @@ import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, MessageSquare, Shield, BookOpen, Files,
   Workflow, Bot, Globe, LogOut, RefreshCw, Building2, Users, FileText,
-  Upload, Clock, AlertCircle, Calendar, Code, Copy,
+  Upload, Clock, AlertCircle, Calendar, Code, Copy, Sparkles, DollarSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,14 @@ import { toast } from "sonner";
 import TenantServicesTab from "./super-admin/TenantServicesTab";
 import BotConfigTab from "./super-admin/BotConfigTab";
 import ScrapersTab from "./super-admin/ScrapersTab";
+import LlmUsageTab from "./super-admin/LlmUsageTab";
 import AdminShell from "@/components/AdminShell";
+import { Section } from "@/components/admin/Section";
+import { StatCard } from "@/components/admin/StatCard";
+import KnowledgeBasePanel from "@/components/admin/KnowledgeBasePanel";
+import { ConversationsTab, AuditLogsTab, SevaApplicationsTab } from "./SuperAdminDashboard";
+import { OnboardingCard } from "@/components/admin/OnboardingCard";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -35,6 +42,7 @@ const TABS = [
   { key: "conversations",     label: "Conversations",   icon: MessageSquare, group: "Activity" },
   { key: "audit-logs",        label: "Audit logs",      icon: Shield,        group: "Activity" },
   { key: "seva-applications", label: "Applications",    icon: Files,         group: "Activity" },
+  { key: "llm-cost",          label: "LLM cost",        icon: DollarSign,    group: "Activity" },
   { key: "tenant-services",   label: "Services",        icon: Workflow,      group: "Content" },
   { key: "knowledge",         label: "Knowledge base",  icon: BookOpen,      group: "Content" },
   { key: "bot-config",        label: "Bot config",      icon: Bot,           group: "Configuration" },
@@ -46,16 +54,31 @@ export default function LocalAdminDashboard() {
   const [token]      = useState(localStorage.getItem("token"));
   const [companyId]  = useState(localStorage.getItem("company_id"));
   const [company, setCompany] = useState(null);
+  const [adminEmail, setAdminEmail] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [dashboardStats, setDashboardStats] = useState(null);
+  const [onboarding, setOnboarding] = useState(null);
 
-  // Auth guard — if no token or wrong role, kick back to login
+  // Dismissal is per-tenant: a super-admin who supports multiple tenants
+  // from one browser shouldn't have one tenant's dismissal hide the guide
+  // on a tenant that still needs setup.
+  const dismissKey = companyId ? `onboarding_dismissed_${companyId}` : null;
+  const [dismissed, setDismissed] = useState(() => {
+    try { return dismissKey ? localStorage.getItem(dismissKey) === "1" : false; }
+    catch { return false; }
+  });
+  const [guideDialogOpen, setGuideDialogOpen] = useState(false);
+
+  // Auth guard — if no token or wrong role, kick back to login. Viewers
+  // share this surface with local_admins (read-only — the shell badge
+  // and backend gating in `verify_admin` handle the distinction).
+  const userType = localStorage.getItem("user_type");
+  const isViewer = userType === "viewer";
   useEffect(() => {
-    const userType = localStorage.getItem("user_type");
-    if (!token || userType !== "local_admin" || !companyId) {
+    if (!token || !["local_admin", "viewer"].includes(userType) || !companyId) {
       navigate("/login");
     }
-  }, [token, companyId, navigate]);
+  }, [token, companyId, navigate, userType]);
 
   // Fetch company + tenant dashboard stats
   const fetchTenant = useCallback(async () => {
@@ -67,16 +90,66 @@ export default function LocalAdminDashboard() {
       if (!res.ok) throw new Error("Failed to load tenant info");
       const data = await res.json();
       setCompany(data.company);
+      setAdminEmail(data.admin_email || "");
       setDashboardStats({
         sessions_today: data.sessions_today,
         total_documents: data.total_documents,
       });
+      setOnboarding(data.onboarding || null);
     } catch (err) {
       toast.error(err.message);
     }
   }, [token, companyId]);
 
   useEffect(() => { fetchTenant(); }, [fetchTenant]);
+
+  const dismissOnboarding = () => {
+    setDismissed(true);
+    try { if (dismissKey) localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
+  };
+
+  // Compute the three onboarding steps from backend signals. Centralised
+  // so the inline card on Overview and the dialog re-opened from the top
+  // bar always show the same state.
+  const onboardingSteps = onboarding
+    ? [
+        {
+          key: "bot-config",
+          title: "Configure your bot",
+          description: "Name, branding, languages, and contact details.",
+          done: onboarding.has_bot_config,
+          onAction: () => { setGuideDialogOpen(false); setActiveTab("bot-config"); },
+        },
+        {
+          key: "services",
+          title: "Add a service",
+          description: "Define an application flow your bot can guide users through.",
+          done: (onboarding.services_count || 0) > 0,
+          onAction: () => { setGuideDialogOpen(false); setActiveTab("tenant-services"); },
+        },
+        {
+          key: "embed",
+          title: "Embed the widget",
+          description: "Copy the snippet below and paste it on your website.",
+          done: !!onboarding.has_sessions,
+          onAction: () => {
+            setGuideDialogOpen(false);
+            setActiveTab("dashboard");
+            // Defer scroll until after the tab transition renders.
+            setTimeout(() => {
+              document.getElementById("embed-snippet")?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }, 100);
+          },
+        },
+      ]
+    : [];
+
+  // The inline guide on Overview only renders if (a) the tenant hasn't
+  // dismissed it AND (b) at least one step is still incomplete. Once
+  // everything's done we hide it automatically — the persistent top-bar
+  // launcher is the way back in if they want a victory lap.
+  const allDone = onboardingSteps.length > 0 && onboardingSteps.every((s) => s.done);
+  const showInlineGuide = !dismissed && onboardingSteps.length > 0 && !allDone;
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -90,18 +163,19 @@ export default function LocalAdminDashboard() {
   // admin it's just a single-entry list of their own tenant.
   const companies = company ? [company] : [];
 
-  const userEmail = (() => {
-    try { return JSON.parse(atob((token || "").split(".")[1] || ""))?.sub || ""; }
-    catch { return ""; }
-  })();
+  // The JWT doesn't carry the admin's email (only user_id), so we read it
+  // from the /local-admin/dashboard response. Shows as a brief "Signed in"
+  // fallback until that call returns.
+  const userEmail = adminEmail;
 
   // Per-tab page-level headers — keeps the shell generic and pulls the
   // human-readable title close to the content it labels.
   const PAGE_META = {
-    "dashboard":         { title: "Overview" },
+    "dashboard":         { title: "Overview",        description: "Your tenant's bot activity and embed snippet." },
     "conversations":     { title: "Conversations",   description: "User conversations from chat, WhatsApp, and Facebook channels." },
     "audit-logs":        { title: "Audit logs",      description: "Authentication, admin actions, and data-access events." },
     "seva-applications": { title: "Applications",    description: "Submitted applications and their PDFs." },
+    "llm-cost":          { title: "LLM cost",        description: "Per-day token spend with budget tracking and projections." },
     "knowledge":         { title: "Knowledge base",  description: "Q&A entries and PDF uploads the bot draws from." },
     "tenant-services":   { title: "Services",        description: "The catalogue of services your bot offers." },
     "bot-config":        { title: "Bot configuration", description: "Identity, branding, languages, contact, and security." },
@@ -117,23 +191,73 @@ export default function LocalAdminDashboard() {
       onTabChange={setActiveTab}
       user={{
         email: userEmail,
-        type: "local_admin",
+        type: userType || "local_admin",
         company_name: company?.name,
       }}
+      readOnly={isViewer}
       onLogout={handleLogout}
       pageTitle={meta.title}
       pageDescription={meta.description}
+      pageActions={
+        activeTab === "dashboard" ? (
+          <Button variant="outline" size="sm" onClick={fetchTenant}>
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
+          </Button>
+        ) : undefined
+      }
+      topBarSlot={
+        onboardingSteps.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setGuideDialogOpen(true)}
+            className="hidden sm:inline-flex items-center gap-2 h-8 px-2.5 rounded-md border border-border bg-card text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            aria-label="Open setup guide"
+            title="Setup guide"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            <span>Setup guide</span>
+            {!allDone && (
+              <span className="ml-1 inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold leading-none">
+                {onboardingSteps.filter((s) => !s.done).length}
+              </span>
+            )}
+          </button>
+        ) : null
+      }
     >
       {activeTab === "dashboard" && (
-        <DashboardOverview company={company} stats={dashboardStats} onRefresh={fetchTenant} />
+        <>
+          {showInlineGuide && (
+            <div className="mb-6">
+              <OnboardingCard
+                steps={onboardingSteps}
+                onDismiss={dismissOnboarding}
+              />
+            </div>
+          )}
+          <DashboardOverview company={company} stats={dashboardStats} />
+        </>
       )}
-      {activeTab === "conversations" && <ConversationsTab token={token} />}
-      {activeTab === "audit-logs" && <AuditLogsTab token={token} />}
-      {activeTab === "seva-applications" && <ApplicationsTab token={token} companyId={companyId} />}
-      {activeTab === "knowledge" && <KnowledgeTab token={token} companyId={companyId} />}
+      {activeTab === "conversations" && <ConversationsTab token={token} singleTenant />}
+      {activeTab === "audit-logs" && <AuditLogsTab token={token} singleTenant />}
+      {activeTab === "seva-applications" && <SevaApplicationsTab token={token} singleTenant companyId={companyId} />}
+      {activeTab === "llm-cost" && <LlmUsageTab token={token} />}
+      {activeTab === "knowledge" && <KnowledgeBasePanel token={token} crossTenant={false} companyId={companyId} />}
       {activeTab === "tenant-services" && <TenantServicesTab companies={companies} token={token} singleTenant />}
       {activeTab === "bot-config" && <BotConfigTab companies={companies} token={token} singleTenant />}
       {activeTab === "scrapers" && <ScrapersTab companies={companies} token={token} singleTenant />}
+
+      {/* "Setup guide" can be re-opened anytime from the top bar, even
+          after dismissal. Renders the same OnboardingCard inside a Dialog
+          using the `compact` variant so the modal supplies its own framing. */}
+      <Dialog open={guideDialogOpen} onOpenChange={setGuideDialogOpen}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Setup guide</DialogTitle>
+          {onboardingSteps.length > 0 && (
+            <OnboardingCard steps={onboardingSteps} compact />
+          )}
+        </DialogContent>
+      </Dialog>
     </AdminShell>
   );
 }
@@ -143,17 +267,11 @@ export default function LocalAdminDashboard() {
 /*  Dashboard overview — tenant-scoped stats card                              */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-function DashboardOverview({ company, stats, onRefresh }) {
+function DashboardOverview({ company, stats }) {
   return (
-    <>
-      <div className="flex justify-end mb-4">
-        <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
-        </Button>
-      </div>
-
+    <div className="space-y-6">
       {company && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <StatCard icon={MessageSquare} label="Sessions today"   value={stats?.sessions_today ?? "—"} />
           <StatCard icon={FileText}      label="Total documents"  value={stats?.total_documents ?? "—"} />
           <StatCard icon={Users}         label="Status"           value={company.status || "active"} valueClass="capitalize" />
@@ -161,25 +279,24 @@ function DashboardOverview({ company, stats, onRefresh }) {
       )}
 
       {company && (
-        <div className="bg-white rounded-xl shadow-md p-6">
-          <h2 className="text-lg font-semibold mb-4">Tenant details</h2>
-          <div className="grid grid-cols-2 gap-y-3 text-sm">
-            <span className="text-muted-foreground">Name</span>
-            <span>{company.name}</span>
-            <span className="text-muted-foreground">Company ID</span>
-            <code className="text-xs font-mono text-foreground">{company.id}</code>
-            <span className="text-muted-foreground">Email</span>
-            <span>{company.email || "—"}</span>
-            <span className="text-muted-foreground">LLM model</span>
-            <span><Badge variant="secondary">{company.llm_model || "—"}</Badge></span>
-            <span className="text-muted-foreground">Created</span>
-            <span className="text-xs text-foreground">{(company.created_at || "").replace("T", " ").slice(0, 19)}</span>
-          </div>
-        </div>
+        <Section title="Tenant details">
+          <dl className="grid grid-cols-[160px_1fr] gap-y-3 text-sm">
+            <dt className="text-muted-foreground">Name</dt>
+            <dd className="text-foreground">{company.name}</dd>
+            <dt className="text-muted-foreground">Company ID</dt>
+            <dd><code className="text-xs font-mono text-foreground">{company.id}</code></dd>
+            <dt className="text-muted-foreground">Email</dt>
+            <dd className="text-foreground">{company.email || "—"}</dd>
+            <dt className="text-muted-foreground">LLM model</dt>
+            <dd><Badge variant="secondary">{company.llm_model || "—"}</Badge></dd>
+            <dt className="text-muted-foreground">Created</dt>
+            <dd className="text-xs text-foreground">{(company.created_at || "").replace("T", " ").slice(0, 19)}</dd>
+          </dl>
+        </Section>
       )}
 
       {company && <EmbedSnippetCard companyId={company.id} />}
-    </>
+    </div>
   );
 }
 
@@ -203,932 +320,29 @@ function EmbedSnippetCard({ companyId }) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-6 mt-6">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex items-center gap-2">
-          <Code className="w-5 h-5 text-primary" />
-          <h2 className="text-lg font-semibold">Embed on your website</h2>
-        </div>
+    <Section
+      // The id is the scroll target for the Onboarding step "Embed the widget".
+      className="scroll-mt-24"
+      title={
+        <span id="embed-snippet" className="flex items-center gap-2">
+          <Code className="w-4 h-4 text-primary" />
+          Embed on your website
+        </span>
+      }
+      description="Paste this just before the closing </body> tag on every page where you want the chatbot to appear. The data-company-id attribute is what routes traffic to your tenant."
+      actions={
         <Button size="sm" variant="outline" onClick={handleCopy}>
           <Copy className="w-4 h-4 mr-1.5" /> Copy
         </Button>
-      </div>
-      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-        Paste this just before the closing <code>&lt;/body&gt;</code> tag on every page
-        where you want the chatbot to appear. The script reads
-        <code className="mx-1">data-company-id</code> to route every request to your tenant,
-        so this is the only thing the host page needs.
-      </p>
-      <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-xs leading-relaxed overflow-x-auto font-mono">
+      }
+    >
+      <pre className="bg-foreground text-background rounded-lg p-4 text-xs leading-relaxed overflow-x-auto font-mono">
 {snippet}
       </pre>
       <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
         Hosting the widget on a CDN? Replace the <code>src</code> URL with your CDN path —
         the <code>data-company-id</code> attribute is what links it to this tenant.
       </p>
-    </div>
-  );
-}
-
-function StatCard({ icon: Icon, label, value, valueClass = "" }) {
-  return (
-    <div className="rounded-lg border border-border bg-card shadow-sm p-5 flex items-center gap-4">
-      <div className="bg-secondary p-3 rounded-md">
-        <Icon className="w-5 h-5 text-foreground" />
-      </div>
-      <div>
-        <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
-        <div className={`text-2xl font-semibold text-foreground ${valueClass}`}>{value}</div>
-      </div>
-    </div>
-  );
-}
-
-
-/* ─────────────────────────────────────────────────────────────────────────── */
-/*  Conversations — list sessions for own tenant                               */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-function ConversationsTab({ token }) {
-  const [rows, setRows] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [detail, setDetail] = useState(null);
-  const limit = 50;
-
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      // The endpoint uses verify_admin + enforce_tenant_scope, so it
-      // automatically restricts to this admin's tenant.
-      const res = await fetch(`${API}/super-admin/sessions?page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      setRows(data.sessions || []);
-      setTotal(data.total || 0);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, page]);
-
-  useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">{total} sessions</div>
-        <Button variant="outline" size="sm" onClick={fetchRows} disabled={loading}>
-          <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </Button>
-      </div>
-      {loading ? (
-        <div className="text-center text-muted-foreground py-8">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No conversations yet for your tenant.</div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-foreground">
-            <tr>
-              <th className="px-3 py-2">Channel</th>
-              <th className="px-3 py-2">User</th>
-              <th className="px-3 py-2">Messages</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2">First message</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.id} className="border-t hover:bg-slate-50">
-                <td className="px-3 py-2"><Badge variant="secondary">{s.channel}</Badge></td>
-                <td className="px-3 py-2 text-xs font-mono">{s.user_identifier?.slice(0, 18) ?? "—"}</td>
-                <td className="px-3 py-2 text-center">{s.message_count}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{(s.created_at || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="px-3 py-2 text-xs text-foreground truncate max-w-xs">{s.first_message}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="ghost" onClick={() => setDetail(s.id)}>View</Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {total > limit && (
-        <Pagination page={page} total={total} limit={limit} onChange={setPage} />
-      )}
-      {detail && <SessionDetailModal token={token} sessionId={detail} onClose={() => setDetail(null)} />}
-    </div>
-  );
-}
-
-function SessionDetailModal({ token, sessionId, onClose }) {
-  const [session, setSession] = useState(null);
-  useEffect(() => {
-    fetch(`${API}/super-admin/sessions/${sessionId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then(setSession)
-      .catch(() => toast.error("Failed to load session"));
-  }, [sessionId, token]);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-3xl max-h-[80vh] w-full overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 py-3 border-b flex items-center justify-between">
-          <div>
-            <div className="font-semibold">Session detail</div>
-            <div className="text-xs text-muted-foreground font-mono">{sessionId}</div>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {!session ? (
-            <div className="text-center text-muted-foreground py-6">Loading…</div>
-          ) : (
-            (session.messages || []).map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`rounded-lg px-3 py-2 max-w-md text-sm ${m.role === "user" ? "bg-orange-500 text-white" : "bg-slate-100"}`}>
-                  <div className="whitespace-pre-wrap">{m.content}</div>
-                  <div className={`text-xs mt-1 ${m.role === "user" ? "text-orange-100" : "text-muted-foreground"}`}>
-                    {m.role} · {(m.timestamp || "").slice(0, 19).replace("T", " ")}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Pagination({ page, total, limit, onChange }) {
-  const pages = Math.ceil(total / limit);
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">Page {page} of {pages}</span>
-      <div className="space-x-1">
-        <Button size="sm" variant="outline" disabled={page === 1} onClick={() => onChange(page - 1)}>Prev</Button>
-        <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</Button>
-      </div>
-    </div>
-  );
-}
-
-
-/* ─────────────────────────────────────────────────────────────────────────── */
-/*  Audit Logs — list for own tenant                                           */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-function AuditLogsTab({ token }) {
-  const [rows, setRows] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const limit = 50;
-
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/super-admin/audit-logs?page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      setRows(data.logs || []);
-      setTotal(data.total || 0);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, page]);
-
-  useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">{total} audit entries</div>
-        <Button variant="outline" size="sm" onClick={fetchRows} disabled={loading}>
-          <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </Button>
-      </div>
-      {loading ? (
-        <div className="text-center text-muted-foreground py-8">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">
-          No audit entries yet for your tenant. Entries appear as actions are taken.
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-foreground">
-            <tr>
-              <th className="px-3 py-2">Timestamp</th>
-              <th className="px-3 py-2">Category</th>
-              <th className="px-3 py-2">Action</th>
-              <th className="px-3 py-2">User</th>
-              <th className="px-3 py-2">Resource</th>
-              <th className="px-3 py-2">OK</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t">
-                <td className="px-3 py-2 text-xs text-muted-foreground">{(r.timestamp || "").slice(0, 19).replace("T", " ")}</td>
-                <td className="px-3 py-2"><Badge variant="secondary">{r.category}</Badge></td>
-                <td className="px-3 py-2 font-mono text-xs">{r.action}</td>
-                <td className="px-3 py-2 text-xs">{r.user_type ? `${r.user_type}` : "—"}</td>
-                <td className="px-3 py-2 text-xs">{r.resource_type || ""}{r.resource_id ? `/${r.resource_id.slice(0,8)}` : ""}</td>
-                <td className="px-3 py-2">{r.success ? "✓" : "✗"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {total > limit && <Pagination page={page} total={total} limit={limit} onChange={setPage} />}
-    </div>
-  );
-}
-
-
-/* ─────────────────────────────────────────────────────────────────────────── */
-/*  Seva Applications — list for own tenant                                    */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-const APPLICATION_STATUSES = ["created", "submitted", "confirmed"];
-
-function ApplicationsTab({ token, companyId }) {
-  const [rows, setRows] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [services, setServices] = useState([]);
-  const [filters, setFilters] = useState({
-    status: "",
-    service_type: "",
-    search: "",
-    from_date: "",
-    to_date: "",
-    with_documents: false,
-  });
-  const limit = 50;
-
-  // Load this tenant's services to populate the Service dropdown
-  useEffect(() => {
-    if (!companyId) return;
-    (async () => {
-      try {
-        const res = await fetch(`${API}/super-admin/services/${companyId}?include_disabled=true`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (res.ok) setServices(data.services || []);
-      } catch {
-        // Service list is a nice-to-have for the filter; ignore failures.
-      }
-    })();
-  }, [companyId, token]);
-
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
-        with_documents: String(filters.with_documents),
-      });
-      if (filters.status)       params.set("status", filters.status);
-      if (filters.service_type) params.set("service_type", filters.service_type);
-      if (filters.search)       params.set("search", filters.search);
-      if (filters.from_date)    params.set("from_date", filters.from_date);
-      if (filters.to_date)      params.set("to_date", filters.to_date);
-
-      const res = await fetch(`${API}/super-admin/seva-setu/applications?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      setRows(data.applications || []);
-      setTotal(data.total || 0);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, page, filters]);
-
-  useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  // Any filter change should drop the user back to page 1; otherwise an
-  // empty page 5 result looks like "no matches" when really we just need to reset.
-  const setFilter = (patch) => {
-    setFilters((f) => ({ ...f, ...patch }));
-    setPage(1);
-  };
-
-  const clearFilters = () => {
-    setFilters({ status: "", service_type: "", search: "", from_date: "", to_date: "", with_documents: false });
-    setPage(1);
-  };
-
-  const hasActiveFilters = Object.entries(filters).some(([k, v]) =>
-    k === "with_documents" ? v : Boolean(v)
-  );
-
-  return (
-    <div className="space-y-3">
-      {/* Filter row */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
-        <div className="md:col-span-2">
-          <label className="text-xs text-muted-foreground block mb-1">Search reference</label>
-          <input
-            type="text"
-            className="w-full border rounded px-2 py-1.5 text-sm"
-            placeholder="e.g. PASS-2024"
-            value={filters.search}
-            onChange={(e) => setFilter({ search: e.target.value })}
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Status</label>
-          <select
-            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-            value={filters.status}
-            onChange={(e) => setFilter({ status: e.target.value })}
-          >
-            <option value="">All</option>
-            {APPLICATION_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Service</label>
-          <select
-            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-            value={filters.service_type}
-            onChange={(e) => setFilter({ service_type: e.target.value })}
-          >
-            <option value="">All</option>
-            {services.map((s) => (
-              <option key={s.service_key} value={s.service_key}>{s.name || s.service_key}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">From</label>
-          <input
-            type="date"
-            className="w-full border rounded px-2 py-1.5 text-sm"
-            value={filters.from_date}
-            onChange={(e) => setFilter({ from_date: e.target.value })}
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">To</label>
-          <input
-            type="date"
-            className="w-full border rounded px-2 py-1.5 text-sm"
-            value={filters.to_date}
-            onChange={(e) => setFilter({ to_date: e.target.value })}
-          />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          <div className="text-sm text-muted-foreground">
-            {total} application{total === 1 ? "" : "s"}
-            {hasActiveFilters && <span className="ml-1 text-xs text-muted-foreground">(filtered)</span>}
-          </div>
-          <label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filters.with_documents}
-              onChange={(e) => setFilter({ with_documents: e.target.checked })}
-            />
-            With documents only
-          </label>
-          {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={clearFilters} className="text-xs h-7">
-              Clear filters
-            </Button>
-          )}
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchRows} disabled={loading}>
-          <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </Button>
-      </div>
-
-      {loading ? (
-        <div className="text-center text-muted-foreground py-8">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">
-          {hasActiveFilters
-            ? "No applications match these filters."
-            : "No applications yet for your tenant."}
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-foreground">
-            <tr>
-              <th className="px-3 py-2">Reference</th>
-              <th className="px-3 py-2">Service</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Documents</th>
-              <th className="px-3 py-2">Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => (
-              <tr key={a.id} className="border-t">
-                <td className="px-3 py-2 font-mono text-xs">{a.reference_id || a.id.slice(0, 8)}</td>
-                <td className="px-3 py-2">{a.service_name || a.service_type}</td>
-                <td className="px-3 py-2"><Badge variant="secondary">{a.status}</Badge></td>
-                <td className="px-3 py-2 text-center">{a.document_count}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{(a.created_at || "").slice(0, 16).replace("T", " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {total > limit && <Pagination page={page} total={total} limit={limit} onChange={setPage} />}
-    </div>
-  );
-}
-
-
-/* ─────────────────────────────────────────────────────────────────────────── */
-/*  Knowledge Base — list + create + edit (per-tenant entries via /api/admin)  */
-/* ─────────────────────────────────────────────────────────────────────────── */
-
-const KB_EVENT_STATUS_STYLES = {
-  past:    { bg: "bg-gray-100 text-gray-600",     icon: Clock,        label: "Past" },
-  present: { bg: "bg-green-100 text-green-700",   icon: AlertCircle,  label: "Live" },
-  future:  { bg: "bg-blue-100 text-blue-700",     icon: Calendar,     label: "Upcoming" },
-  general: { bg: "bg-orange-100 text-orange-700", icon: FileText,     label: "General" },
-};
-
-function EventBadge({ status }) {
-  const cfg = KB_EVENT_STATUS_STYLES[status] || KB_EVENT_STATUS_STYLES.general;
-  const Icon = cfg.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg}`}>
-      <Icon className="w-3 h-3" />
-      {cfg.label}
-    </span>
-  );
-}
-
-function formatDateRange(from, until) {
-  if (!from && !until) return "—";
-  if (!until || from === until) return from || until;
-  return `${from} → ${until}`;
-}
-
-// Neutral platform-default — mirrors backend
-// `services.knowledge_service.DEFAULT_KNOWLEDGE_CATEGORIES`. Tenants override
-// via `tenant_bot_config.knowledge_categories`; backend validates POST
-// /knowledge against the resolved list.
-const KB_PDF_CATEGORIES = [
-  "general", "fees", "emergency", "office", "announcement", "event", "other",
-];
-
-function PdfUploadCard({ token, companyId, onUploaded }) {
-  const [file, setFile] = useState(null);
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("general");
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const pickFile = (f) => {
-    if (!f) return;
-    if (f.type !== "application/pdf") {
-      toast.error("Only PDF files are accepted.");
-      return;
-    }
-    setFile(f);
-    if (!title) setTitle(f.name.replace(/\.pdf$/i, "").replace(/_/g, " "));
-  };
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) { toast.error("Pick a PDF first."); return; }
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("title", title);
-      form.append("category", category);
-      form.append("company_id", companyId);
-
-      const res = await fetch(`${API}/super-admin/knowledge/upload-pdf`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = typeof data.detail === "string"
-          ? data.detail
-          : Array.isArray(data.detail)
-            ? data.detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
-            : "Upload failed";
-        toast.error(msg, { duration: 6000 });
-        return;
-      }
-      const ocrNote = data.ocr_used ? " via OCR" : "";
-      const modeNote = data.faq_mode ? " as FAQ pairs" : "";
-      toast.success(`PDF processed — ${data.sections_created} entries created${modeNote}${ocrNote}.`);
-      setFile(null);
-      setTitle("");
-      setCategory("general");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      onUploaded?.();
-    } catch (err) {
-      toast.error(err.message || "Upload failed.");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl bg-white p-5 shadow-sm border">
-      <div className="flex items-center gap-2 mb-1">
-        <Upload className="h-4 w-4 text-primary" />
-        <h2 className="font-semibold text-foreground">Upload PDF to Knowledge Base</h2>
-      </div>
-      <p className="text-xs text-muted-foreground mb-4">
-        Drop a PDF and it will be split into knowledge entries the bot can search.
-        FAQ-style documents are parsed into Q&amp;A pairs; other PDFs are chunked
-        by section. Dates in the text are detected and used to mark past/upcoming
-        events. Max 50&nbsp;MB.
-      </p>
-
-      <form onSubmit={handleUpload} className="space-y-3">
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            pickFile(e.dataTransfer.files?.[0]);
-          }}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-            dragOver ? "border-primary bg-secondary" : "border-border hover:bg-secondary/50"
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => pickFile(e.target.files?.[0])}
-            className="hidden"
-          />
-          {file ? (
-            <div className="text-sm">
-              <div className="font-medium text-foreground">{file.name}</div>
-              <div className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB — click or drop another to replace</div>
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              <Upload className="h-5 w-5 mx-auto mb-2 text-muted-foreground" />
-              Click or drop a PDF here
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground">Document title (optional)</label>
-            <input
-              type="text"
-              className="w-full border rounded p-2 text-sm"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Auto-filled from filename"
-            />
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-              Label shown alongside each generated entry. Leave blank to use the filename.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground">Category</label>
-            <select
-              className="w-full border rounded p-2 text-sm bg-white"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              {KB_PDF_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-              Topical bucket applied to every entry from this PDF. You can edit it per-entry later.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="submit" disabled={!file || uploading}>
-            {uploading ? "Uploading…" : "Upload PDF"}
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function KnowledgeTab({ token, companyId }) {
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [editing, setEditing] = useState(null); // null | row | "new"
-
-  const fetchEntries = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/admin/knowledge?limit=200`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed");
-      setEntries(data.entries || []);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => { fetchEntries(); }, [fetchEntries]);
-
-  return (
-    <div className="space-y-4">
-      <PdfUploadCard token={token} companyId={companyId} onUploaded={fetchEntries} />
-
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">{entries.length} entries</div>
-        <div className="space-x-2">
-          <Button variant="outline" size="sm" onClick={fetchEntries} disabled={loading}>
-            <RefreshCw className={`mr-2 h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </Button>
-          <Button size="sm" onClick={() => setEditing("new")}>+ New entry</Button>
-        </div>
-      </div>
-      {loading ? (
-        <div className="text-center text-muted-foreground py-8">Loading…</div>
-      ) : entries.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">
-          No knowledge entries yet. Click <strong>New entry</strong> to add one.
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-foreground">
-            <tr>
-              <th className="px-3 py-2">Title</th>
-              <th className="px-3 py-2">Category</th>
-              <th className="px-3 py-2">Date Status</th>
-              <th className="px-3 py-2">Date Range</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Version</th>
-              <th className="px-3 py-2">Updated</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((e) => (
-              <tr key={e.id} className="border-t hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{e.title}</td>
-                <td className="px-3 py-2"><Badge variant="secondary">{e.category}</Badge></td>
-                <td className="px-3 py-2"><EventBadge status={e.event_status} /></td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {formatDateRange((e.valid_from || "").slice(0, 10), (e.valid_until || "").slice(0, 10))}
-                </td>
-                <td className="px-3 py-2 text-xs">{e.status}</td>
-                <td className="px-3 py-2 text-xs">v{e.version}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{(e.updated_at || "").slice(0, 16).replace("T", " ")}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(e)}>Edit</Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {editing && (
-        <KnowledgeDialog
-          token={token}
-          companyId={companyId}
-          entry={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); fetchEntries(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-const EVENT_STATUS_OPTIONS = [
-  { value: "",        label: "(auto / none)" },
-  { value: "general", label: "General — not time-sensitive" },
-  { value: "future",  label: "Future — upcoming event" },
-  { value: "present", label: "Present — happening now" },
-  { value: "past",    label: "Past — archived" },
-];
-
-// Backend stores valid_from/valid_until as ISO datetime strings (e.g. from
-// PDF parsing). The <input type="date"> control only knows YYYY-MM-DD, so
-// trim anything after the date part when populating the form.
-const toDateInput = (iso) => (iso || "").slice(0, 10);
-
-function KnowledgeDialog({ token, companyId, entry, onClose, onSaved }) {
-  const isNew = !entry;
-  const [draft, setDraft] = useState(entry ? {
-    ...entry,
-    keywords:     (entry.keywords || []).join(", "),
-    valid_from:   toDateInput(entry.valid_from),
-    valid_until:  toDateInput(entry.valid_until),
-    event_status: entry.event_status || "",
-  } : {
-    category: "general", title: "", question: "", answer: "", keywords: "", source: "",
-    valid_from: "", valid_until: "", event_status: "",
-  });
-  const [saving, setSaving] = useState(false);
-
-  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
-
-  const handleSave = async () => {
-    if (!draft.title.trim() || !draft.answer.trim()) {
-      toast.error("Title and answer are required"); return;
-    }
-    if (draft.valid_from && draft.valid_until && draft.valid_from > draft.valid_until) {
-      toast.error('"Valid from" cannot be after "valid until".'); return;
-    }
-    setSaving(true);
-    try {
-      const keywords = draft.keywords.split(",").map((s) => s.trim()).filter(Boolean);
-      const dateBits = {
-        valid_from:   draft.valid_from || "",   // empty string clears on update
-        valid_until:  draft.valid_until || "",
-        event_status: draft.event_status || "",
-      };
-      let res;
-      if (isNew) {
-        res = await fetch(`${API}/admin/knowledge?company_id=${companyId}`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            category: draft.category, title: draft.title,
-            question: draft.question, answer: draft.answer,
-            keywords, source: draft.source || "",
-            ...dateBits,
-          }),
-        });
-      } else {
-        res = await fetch(`${API}/admin/knowledge/${entry.id}`, {
-          method: "PUT",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: draft.title, question: draft.question, answer: draft.answer,
-            keywords, source: draft.source || "",
-            ...dateBits,
-          }),
-        });
-      }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Save failed");
-      toast.success(isNew ? "Entry created" : "Entry updated");
-      onSaved();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-semibold mb-1">{isNew ? "New knowledge entry" : `Edit: ${entry.title}`}</h3>
-        <p className="text-xs text-muted-foreground mb-4">
-          Knowledge entries are searched at chat time and used as grounding context for the bot's answers.
-          Each entry should cover one topic — split long material into multiple entries.
-        </p>
-        <div className="space-y-3">
-          <Field
-            label="Title"
-            value={draft.title}
-            onChange={(v) => set("title", v)}
-            hint="Short headline shown in the admin list. Required."
-          />
-          <Field
-            label="Question (FAQ)"
-            value={draft.question}
-            onChange={(v) => set("question", v)}
-            hint="A representative question a user might ask. Helps retrieval match this entry. Optional."
-          />
-          <div>
-            <label className="text-xs text-muted-foreground">Answer</label>
-            <textarea className="w-full border rounded p-2 text-sm" rows={6}
-              value={draft.answer} onChange={(e) => set("answer", e.target.value)} />
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-              The information the bot should use to answer. Write it as you'd want it spoken to the user. Required.
-            </p>
-          </div>
-          <Field
-            label="Category"
-            value={draft.category}
-            onChange={(v) => set("category", v)}
-            placeholder="general"
-            hint="Topical bucket for filtering and analytics (e.g. fees, hours, eligibility). Free-form."
-          />
-          <Field
-            label="Keywords (comma-separated)"
-            value={draft.keywords}
-            onChange={(v) => set("keywords", v)}
-            placeholder="renewal, fees, eligibility"
-            hint="Extra terms that should match this entry during search, beyond what's in the answer."
-          />
-          <Field
-            label="Source URL (optional)"
-            value={draft.source || ""}
-            onChange={(v) => set("source", v)}
-            hint="Where this information came from. Surfaced to users as a citation when available."
-          />
-
-          {/* Optional date metadata — for time-bound events or to override
-              the bot's automatic recency boost. */}
-          <div className="border-t pt-3 mt-2">
-            <div className="text-xs font-medium text-foreground mb-2">Validity window (optional)</div>
-            <p className="text-[11px] text-muted-foreground mb-3 leading-snug">
-              Set these for events with a clear start/end date, or to override the bot's
-              automatic past/future classification. Leave blank for evergreen information.
-            </p>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">Valid from</label>
-                <input
-                  type="date"
-                  className="w-full border rounded p-2 text-sm"
-                  value={draft.valid_from || ""}
-                  onChange={(e) => set("valid_from", e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Valid until</label>
-                <input
-                  type="date"
-                  className="w-full border rounded p-2 text-sm"
-                  value={draft.valid_until || ""}
-                  onChange={(e) => set("valid_until", e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Event status</label>
-                <select
-                  className="w-full border rounded p-2 text-sm bg-white"
-                  value={draft.event_status || ""}
-                  onChange={(e) => set("event_status", e.target.value)}
-                >
-                  {EVENT_STATUS_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
-              Search ranks <code>future</code> events highest and <code>past</code> lowest, so an
-              upcoming registration deadline outranks a finished one for the same keyword.
-            </p>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 mt-4">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : isNew ? "Create" : "Save"}</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, placeholder, hint }) {
-  return (
-    <div>
-      <label className="text-xs text-muted-foreground">{label}</label>
-      <input
-        type="text"
-        className="w-full border rounded p-2 text-sm"
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-      {hint && <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{hint}</p>}
-    </div>
+    </Section>
   );
 }

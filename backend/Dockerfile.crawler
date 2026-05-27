@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+#
+# Crawler / scraper image. This one DOES carry Playwright + chromium and the
+# system libraries the headless browser needs. It is a batch/CLI image, not a
+# long-running service — run it on demand:
+#
+#   docker compose --profile crawler run --rm crawler run --company-id <UUID>
+#
+# (Heads-up: CGI-Joburg crawling is currently Cloudflare-blocked — see
+#  CLAUDE.local.md. This image is here so the capability is ready, not because
+#  it works against that target today.)
+
+FROM python:3.10-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Full requirements (includes playwright + spacy + everything the crawler
+# pipeline touches). Bloat is acceptable for an on-demand job image.
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# chromium + its OS dependencies.
+RUN playwright install --with-deps chromium
+
+COPY . /app
+
+# `python -m crawler.main` must run from the backend root (/app). See
+# backend/CLAUDE.md — backend is on sys.path but is not a package.
+ENTRYPOINT ["python", "-m", "crawler.main"]
+CMD ["--help"]

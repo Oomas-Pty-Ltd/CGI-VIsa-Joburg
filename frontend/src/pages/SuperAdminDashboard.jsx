@@ -5,15 +5,21 @@ import {
   MessageSquare, Shield, Download, ChevronLeft, ChevronRight,
   X, RefreshCw, Copy, Check, BookOpen, Upload, Trash2, FileText,
   Calendar, Clock, AlertCircle, Files, Search, Ban, Unlock,
-  Workflow, Smartphone, Bot, Globe, UserPlus, KeyRound, Settings,
+  Workflow, Smartphone, Bot, Globe, UserPlus, KeyRound, Settings, Bell,
+  DollarSign, Cpu,
 } from "lucide-react";
 import ChannelMappingsTab from "./super-admin/ChannelMappingsTab";
 import TenantServicesTab from "./super-admin/TenantServicesTab";
 import BotConfigTab from "./super-admin/BotConfigTab";
 import ScrapersTab from "./super-admin/ScrapersTab";
+import NotificationsTab from "./super-admin/NotificationsTab";
+import KnowledgeBasePanel from "@/components/admin/KnowledgeBasePanel";
 import PlatformSettingsTab from "./super-admin/PlatformSettingsTab";
+import LlmUsageTab from "./super-admin/LlmUsageTab";
+import ModelsTab from "./super-admin/ModelsTab";
 import AdminShell from "@/components/AdminShell";
 import { Section } from "@/components/admin/Section";
+import { StatCard } from "@/components/admin/StatCard";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -22,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -38,13 +45,13 @@ function CopyId({ id }) {
   return (
     <button
       onClick={copy}
-      className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 transition-colors group"
+      className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted hover:bg-muted/70 transition-colors group"
       title="Copy company ID"
     >
-      <span className="font-mono text-xs text-gray-600 select-all">{id}</span>
+      <span className="font-mono text-xs text-muted-foreground select-all">{id}</span>
       {copied
-        ? <Check className="w-3.5 h-3.5 text-green-600 shrink-0" />
-        : <Copy className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600 shrink-0" />}
+        ? <Check className="w-3.5 h-3.5 text-success shrink-0" />
+        : <Copy className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground shrink-0" />}
     </button>
   );
 }
@@ -53,43 +60,59 @@ function CopyId({ id }) {
 // each cluster so super-admins can find the right section faster than
 // scanning 10 unstructured items.
 const TABS = [
-  { key: "dashboard",         label: "Overview",        icon: TrendingUp,   group: "Overview" },
+  { key: "dashboard",         label: "Overview",        icon: TrendingUp,    group: "Overview" },
   { key: "conversations",     label: "Conversations",   icon: MessageSquare, group: "Activity" },
   { key: "audit-logs",        label: "Audit logs",      icon: Shield,        group: "Activity" },
   { key: "seva-applications", label: "Applications",    icon: Files,         group: "Activity" },
+  { key: "llm-cost",          label: "LLM cost",        icon: DollarSign,    group: "Activity" },
   { key: "tenant-services",   label: "Services",        icon: Workflow,      group: "Content" },
   { key: "knowledge",         label: "Knowledge base",  icon: BookOpen,      group: "Content" },
   { key: "bot-config",        label: "Bot config",      icon: Bot,           group: "Configuration" },
+  { key: "models",            label: "Models",          icon: Cpu,           group: "Configuration" },
   { key: "channel-mappings",  label: "Channels",        icon: Smartphone,    group: "Configuration" },
   { key: "scrapers",          label: "Scrapers",        icon: Globe,         group: "Configuration" },
+  { key: "notifications",     label: "Notifications",   icon: Bell,          group: "Configuration" },
   { key: "platform-settings", label: "Platform",        icon: Settings,      group: "Configuration" },
 ];
 
+// Token-based pill palette. We collapse the previous 18 hand-picked Tailwind
+// shades into four semantic variants — subtle, info, warning, destructive —
+// so a tenant theme override actually does something useful, and so adding a
+// new channel/category doesn't require picking another hue out of thin air.
+const PILL_SUBTLE      = "bg-muted text-muted-foreground border border-border";
+const PILL_INFO        = "bg-primary/10 text-primary border border-primary/20";
+const PILL_SUCCESS     = "bg-success/10 text-success border border-success/20";
+const PILL_WARNING     = "bg-warning/10 text-warning border border-warning/20";
+const PILL_DESTRUCTIVE = "bg-destructive/10 text-destructive border border-destructive/20";
+
 const CHANNEL_COLORS = {
-  web: "bg-blue-100 text-blue-700",
-  whatsapp: "bg-green-100 text-green-700",
-  facebook: "bg-indigo-100 text-indigo-700",
-  widget: "bg-purple-100 text-purple-700",
+  web:      PILL_INFO,
+  whatsapp: PILL_SUCCESS,
+  facebook: PILL_INFO,
+  widget:   PILL_SUBTLE,
 };
 
 const SEVERITY_COLORS = {
-  info: "bg-blue-100 text-blue-700",
-  warning: "bg-yellow-100 text-yellow-800",
-  error: "bg-red-100 text-red-700",
-  critical: "bg-red-200 text-red-900 font-bold",
+  info:     PILL_INFO,
+  warning:  PILL_WARNING,
+  error:    PILL_DESTRUCTIVE,
+  critical: `${PILL_DESTRUCTIVE} font-semibold`,
 };
 
+// Categories collapse to subtle (read events), warning (mutations), and
+// destructive (deletes / security). Icons in the row carry the precise
+// semantic; the pill is just a coarse colour cue.
 const CATEGORY_COLORS = {
-  auth: "bg-gray-100 text-gray-700",
-  data_access: "bg-cyan-100 text-cyan-700",
-  data_modification: "bg-orange-100 text-orange-700",
-  data_deletion: "bg-red-100 text-red-700",
-  data_export: "bg-purple-100 text-purple-700",
-  admin_action: "bg-yellow-100 text-yellow-700",
-  security_event: "bg-red-200 text-red-800",
-  system_event: "bg-gray-100 text-gray-600",
-  consent: "bg-teal-100 text-teal-700",
-  api_access: "bg-blue-100 text-blue-600",
+  auth:              PILL_SUBTLE,
+  data_access:       PILL_SUBTLE,
+  data_modification: PILL_WARNING,
+  data_deletion:     PILL_DESTRUCTIVE,
+  data_export:       PILL_WARNING,
+  admin_action:      PILL_WARNING,
+  security_event:    PILL_DESTRUCTIVE,
+  system_event:      PILL_SUBTLE,
+  consent:           PILL_INFO,
+  api_access:        PILL_SUBTLE,
 };
 
 function formatDate(iso) {
@@ -112,7 +135,7 @@ function shortId(id = "") {
 function Pagination({ page, total, limit, onChange }) {
   const pages = Math.ceil(total / limit) || 1;
   return (
-    <div className="flex items-center gap-3 justify-end mt-4 text-sm text-gray-600">
+    <div className="flex items-center gap-3 justify-end mt-4 text-sm text-muted-foreground">
       <span>{total} records</span>
       <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => onChange(page - 1)} disabled={page <= 1}>
         <ChevronLeft className="w-4 h-4" />
@@ -139,28 +162,25 @@ function SessionDetailModal({ sessionId, onClose, token }) {
       .then((r) => setSession(r.data))
       .catch(() => toast.error("Failed to load session"))
       .finally(() => setLoading(false));
-  }, [sessionId]);
+  }, [sessionId, token]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between p-5 border-b">
-          <div>
-            <h3 className="font-bold text-foreground text-lg">Conversation Detail</h3>
-            {session && (
-              <p className="text-xs text-gray-500 mt-0.5">
-                {session.id} · {session.channel} · {formatDate(session.created_at)}
-              </p>
-            )}
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose}><X className="w-5 h-5" /></Button>
-        </div>
+    <Dialog open={!!sessionId} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] p-0 flex flex-col gap-0">
+        <DialogHeader className="px-5 py-4 border-b border-border">
+          <DialogTitle className="text-base">Conversation detail</DialogTitle>
+          {session && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {session.id} · {session.channel} · {formatDate(session.created_at)}
+            </p>
+          )}
+        </DialogHeader>
 
-        <div className="overflow-y-auto flex-1 p-5 space-y-3">
-          {loading && <p className="text-gray-500 text-center py-8">Loading…</p>}
-          {!loading && !session && <p className="text-red-500 text-center py-8">Session not found.</p>}
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+          {loading && <p className="text-muted-foreground text-center py-8 text-sm">Loading…</p>}
+          {!loading && !session && <p className="text-destructive text-center py-8 text-sm">Session not found.</p>}
           {session && (session.messages || []).length === 0 && (
-            <p className="text-gray-400 text-center py-8">No messages in this session.</p>
+            <p className="text-muted-foreground text-center py-8 text-sm">No messages in this session.</p>
           )}
           {session &&
             (session.messages || []).map((msg, i) => (
@@ -171,25 +191,25 @@ function SessionDetailModal({ sessionId, onClose, token }) {
                 <div
                   className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
                     msg.role === "user"
-                      ? "bg-primary text-white rounded-br-sm"
-                      : "bg-gray-100 text-gray-800 rounded-bl-sm"
+                      ? "bg-primary text-primary-foreground rounded-br-sm"
+                      : "bg-muted text-foreground rounded-bl-sm"
                   }`}
                 >
                   <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                  <p className={`text-xs mt-1 ${msg.role === "user" ? "text-orange-200" : "text-gray-400"}`}>
+                  <p className={`text-[11px] mt-1 ${msg.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                     {msg.role === "user" ? "User" : "Bot"} · {formatDate(msg.timestamp)}
                   </p>
                 </div>
               </div>
             ))}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 // ─── Conversations tab ────────────────────────────────────────────────────────
-function ConversationsTab({ companies, token }) {
+export function ConversationsTab({ companies = [], token, singleTenant = false }) {
   const [sessions, setSessions] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -255,94 +275,97 @@ function ConversationsTab({ companies, token }) {
   };
 
   return (
-    <div>
-      {/* Filters row */}
-      <div className="flex flex-wrap items-end gap-3 mb-5">
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Company</Label>
-          <Select value={filters.company_id} onValueChange={(v) => { setFilters(f => ({ ...f, company_id: v === "all" ? "" : v })); setPage(1); }}>
-            <SelectTrigger className="w-44 h-9 text-sm">
-              <SelectValue placeholder="All companies" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All companies</SelectItem>
-              {companies.map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+    <div className="space-y-4">
+      {/* Filters + actions row */}
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-end">
+          {!singleTenant && (
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Company</Label>
+            <Select value={filters.company_id || "all"} onValueChange={(v) => { setFilters(f => ({ ...f, company_id: v === "all" ? "" : v })); setPage(1); }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All companies" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All companies</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          )}
+          <div className="w-40">
+            <Label className="text-xs text-muted-foreground">Channel</Label>
+            <Select value={filters.channel || "all"} onValueChange={(v) => { setFilters(f => ({ ...f, channel: v === "all" ? "" : v })); setPage(1); }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All channels" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All channels</SelectItem>
+                {["web", "whatsapp", "facebook", "widget"].map((ch) => (
+                  <SelectItem key={ch} value={ch}>{ch}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Channel</Label>
-          <Select value={filters.channel} onValueChange={(v) => { setFilters(f => ({ ...f, channel: v === "all" ? "" : v })); setPage(1); }}>
-            <SelectTrigger className="w-36 h-9 text-sm">
-              <SelectValue placeholder="All channels" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All channels</SelectItem>
-              {["web", "whatsapp", "facebook", "widget"].map((ch) => (
-                <SelectItem key={ch} value={ch}>{ch}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchSessions} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleCsvDownload}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchSessions} className="h-9">
-          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-        </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
-          <Download className="w-4 h-4 mr-1" /> Export CSV
-        </Button>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="px-4 py-3 text-left">Session ID</th>
-              <th className="px-4 py-3 text-left">Channel</th>
-              <th className="px-4 py-3 text-left">User</th>
-              <th className="px-4 py-3 text-left">First Message</th>
-              <th className="px-4 py-3 text-center">Msgs</th>
-              <th className="px-4 py-3 text-left">Started</th>
-              <th className="px-4 py-3 text-left">Last Active</th>
-              <th className="px-4 py-3 text-center">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={8} className="text-center py-10 text-gray-400">Loading…</td></tr>
-            )}
-            {!loading && sessions.length === 0 && (
-              <tr><td colSpan={8} className="text-center py-10 text-gray-400">No sessions found.</td></tr>
-            )}
-            {!loading && sessions.map((s) => (
-              <tr
-                key={s.id}
-                onClick={() => setSelectedSession(s.id)}
-                className="border-t border-gray-100 hover:bg-orange-50 cursor-pointer transition-colors"
-              >
-                <td className="px-4 py-3 font-mono text-xs text-gray-500">{shortId(s.id)}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CHANNEL_COLORS[s.channel] || "bg-gray-100 text-gray-600"}`}>
-                    {s.channel}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-gray-700 max-w-[120px] truncate">{s.user_identifier}</td>
-                <td className="px-4 py-3 text-gray-600 max-w-[240px] truncate">{s.first_message}</td>
-                <td className="px-4 py-3 text-center font-semibold text-foreground">{s.message_count}</td>
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(s.created_at)}</td>
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(s.last_activity)}</td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                    {s.is_active ? "Active" : "Closed"}
-                  </span>
-                </td>
+      <Section
+        title="Sessions"
+        description="Click any row to view the full message history. Filter by tenant or channel to narrow the view."
+        bodyClassName="p-0"
+      >
+        {loading ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : sessions.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">No sessions found for the current filters.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-2.5">Session</th>
+                <th className="px-4 py-2.5">Channel</th>
+                <th className="px-4 py-2.5">User</th>
+                <th className="px-4 py-2.5">First message</th>
+                <th className="px-4 py-2.5 text-right">Msgs</th>
+                <th className="px-4 py-2.5">Started</th>
+                <th className="px-4 py-2.5">Last active</th>
+                <th className="px-4 py-2.5 text-center">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr
+                  key={s.id}
+                  onClick={() => setSelectedSession(s.id)}
+                  className="border-t border-border hover:bg-muted/30 cursor-pointer transition-colors"
+                >
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{shortId(s.id)}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CHANNEL_COLORS[s.channel] || "bg-muted text-muted-foreground"}`}>
+                      {s.channel}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-foreground max-w-[140px] truncate">{s.user_identifier}</td>
+                  <td className="px-4 py-3 text-muted-foreground max-w-[260px] truncate">{s.first_message}</td>
+                  <td className="px-4 py-3 text-right font-medium tabular-nums">{s.message_count}</td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">{formatDate(s.created_at)}</td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">{formatDate(s.last_activity)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${s.is_active ? "bg-success/10 text-success border-success/20" : "bg-muted text-muted-foreground border-border"}`}>
+                      {s.is_active ? "Active" : "Closed"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
 
       <Pagination page={page} total={total} limit={limit} onChange={setPage} />
 
@@ -358,7 +381,7 @@ function ConversationsTab({ companies, token }) {
 }
 
 // ─── Audit Logs tab ───────────────────────────────────────────────────────────
-function AuditLogsTab({ companies, token }) {
+export function AuditLogsTab({ companies = [], token, singleTenant = false }) {
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -416,625 +439,111 @@ function AuditLogsTab({ companies, token }) {
   ];
 
   return (
-    <div>
-      {/* Filters row */}
-      <div className="flex flex-wrap items-end gap-3 mb-5">
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Company</Label>
-          <Select value={filters.company_id} onValueChange={(v) => { setFilters(f => ({ ...f, company_id: v === "all" ? "" : v })); setPage(1); }}>
-            <SelectTrigger className="w-44 h-9 text-sm"><SelectValue placeholder="All companies" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All companies</SelectItem>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Category</Label>
-          <Select value={filters.category} onValueChange={(v) => { setFilters(f => ({ ...f, category: v === "all" ? "" : v })); setPage(1); }}>
-            <SelectTrigger className="w-44 h-9 text-sm"><SelectValue placeholder="All categories" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All categories</SelectItem>
-              {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c.replace(/_/g," ")}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Severity</Label>
-          <Select value={filters.severity} onValueChange={(v) => { setFilters(f => ({ ...f, severity: v === "all" ? "" : v })); setPage(1); }}>
-            <SelectTrigger className="w-32 h-9 text-sm"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {["info","warning","error","critical"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchLogs} className="h-9">
-          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-        </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
-          <Download className="w-4 h-4 mr-1" /> Export CSV
-        </Button>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="px-4 py-3 text-left">Timestamp</th>
-              <th className="px-4 py-3 text-left">Category</th>
-              <th className="px-4 py-3 text-left">Action</th>
-              <th className="px-4 py-3 text-left">User</th>
-              <th className="px-4 py-3 text-left">Resource</th>
-              <th className="px-4 py-3 text-center">Severity</th>
-              <th className="px-4 py-3 text-center">Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
-            )}
-            {!loading && logs.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-10 text-gray-400">No audit logs found.</td></tr>
-            )}
-            {!loading && logs.map((log, i) => (
-              <tr key={log.id || i} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">{formatDate(log.timestamp)}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[log.category] || "bg-gray-100 text-gray-600"}`}>
-                    {(log.category || "—").replace(/_/g," ")}
-                  </span>
-                </td>
-                <td className="px-4 py-3 font-medium text-foreground">{log.action || "—"}</td>
-                <td className="px-4 py-3 text-gray-600 text-xs">
-                  <div>{log.user_id ? shortId(log.user_id) : "—"}</div>
-                  {log.user_type && <div className="text-gray-400">{log.user_type}</div>}
-                </td>
-                <td className="px-4 py-3 text-gray-600 text-xs">
-                  {log.resource_type
-                    ? <><span className="font-medium">{log.resource_type}</span>{log.resource_id && <span className="text-gray-400"> · {shortId(log.resource_id)}</span>}</>
-                    : "—"}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${SEVERITY_COLORS[log.severity] || "bg-gray-100 text-gray-600"}`}>
-                    {log.severity || "—"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${log.success ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                    {log.success ? "OK" : "FAIL"}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <Pagination page={page} total={total} limit={limit} onChange={setPage} />
-    </div>
-  );
-}
-
-// ─── Knowledge Base tab ───────────────────────────────────────────────────────
-
-const EVENT_STATUS_STYLES = {
-  past:    { bg: "bg-gray-100 text-gray-600",    icon: Clock,         label: "Past" },
-  present: { bg: "bg-green-100 text-green-700",  icon: AlertCircle,   label: "Live" },
-  future:  { bg: "bg-blue-100 text-blue-700",    icon: Calendar,      label: "Upcoming" },
-  general: { bg: "bg-orange-100 text-orange-700", icon: FileText,     label: "General" },
-};
-
-function EventBadge({ status }) {
-  const cfg = EVENT_STATUS_STYLES[status] || EVENT_STATUS_STYLES.general;
-  const Icon = cfg.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg}`}>
-      <Icon className="w-3 h-3" />
-      {cfg.label}
-    </span>
-  );
-}
-
-function KnowledgeTab({ token, companies = [] }) {
-  /* ── upload state ── */
-  const [file, setFile]           = useState(null);
-  const [docTitle, setDocTitle]   = useState("");
-  const [category, setCategory]   = useState("general");
-  const [uploadCompanyId, setUploadCompanyId] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver]   = useState(false);
-  const fileInputRef = useRef(null);
-
-  /* ── entries list state ── */
-  const [entries, setEntries]         = useState([]);
-  const [total, setTotal]             = useState(0);
-  const [page, setPage]               = useState(1);
-  const [loadingList, setLoadingList] = useState(false);
-  const [filterStatus, setFilterStatus] = useState("");
-  const [filterCategory, setFilterCategory] = useState("");
-  const [filterCompany, setFilterCompany]   = useState(""); // Sprint 14
-  const [pdfFiles, setPdfFiles]       = useState([]);
-  const [filterFile, setFilterFile]   = useState("");
-
-  /* ── entry preview ── */
-  const [preview, setPreview] = useState(null);
-
-  /* ── delete confirmation ── */
-  const [confirmDelete, setConfirmDelete] = useState(null); // { id, title } | null
-  const [deleting, setDeleting] = useState(false);
-
-  const limit = 50;
-
-  // Neutral platform-default — mirrors backend
-  // `services.knowledge_service.DEFAULT_KNOWLEDGE_CATEGORIES`. Tenants that
-  // configure their own list in `tenant_bot_config.knowledge_categories` can
-  // POST any string from that list; this dropdown is a sensible UI default.
-  const CATEGORIES = [
-    "general","fees","emergency","office","announcement","event","other"
-  ];
-
-  const companyName = (id) => companies.find((c) => c.id === id)?.name ?? id;
-
-  // Default the upload selector to the first tenant once companies loads
-  useEffect(() => {
-    if (!uploadCompanyId && companies.length > 0) setUploadCompanyId(companies[0].id);
-  }, [companies, uploadCompanyId]);
-
-  const fetchEntries = useCallback(async () => {
-    setLoadingList(true);
-    try {
-      const params = new URLSearchParams({ page, limit });
-      if (filterStatus)   params.set("event_status",  filterStatus);
-      if (filterCategory) params.set("category",      filterCategory);
-      if (filterFile)     params.set("pdf_filename",  filterFile);
-      if (filterCompany)  params.set("company_id",    filterCompany);
-      const [entriesRes, filesRes] = await Promise.all([
-        fetch(`${API}/super-admin/knowledge/entries?${params}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API}/super-admin/knowledge/pdf-files`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
-      const entData  = await entriesRes.json();
-      const fileData = await filesRes.json();
-      setEntries(entData.entries || []);
-      setTotal(entData.total   || 0);
-      setPdfFiles(fileData.files || []);
-    } catch {
-      toast.error("Failed to load knowledge entries");
-    } finally {
-      setLoadingList(false);
-    }
-  }, [page, filterStatus, filterCategory, filterFile, filterCompany, token]);
-
-  useEffect(() => { fetchEntries(); }, [fetchEntries]);
-
-  /* ── upload handler ── */
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) { toast.error("Please select a PDF file."); return; }
-    if (!uploadCompanyId) { toast.error("Pick a tenant to upload the PDF under."); return; }
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file",       file);
-      form.append("title",      docTitle);
-      form.append("category",   category);
-      form.append("company_id", uploadCompanyId);
-
-      let res;
-      try {
-        res = await fetch(`${API}/super-admin/knowledge/upload-pdf`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: form,
-        });
-      } catch {
-        toast.error("Network error — could not reach the server. Check your connection.", { duration: 6000 });
-        return;
-      }
-
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        toast.error(`Server error (${res.status}) — unexpected response format.`, { duration: 6000 });
-        return;
-      }
-
-      if (!res.ok) {
-        // FastAPI returns detail as a string for HTTPException, but an array for 422 validation errors
-        let msg = "Upload failed";
-        if (typeof data.detail === "string") {
-          msg = data.detail;
-        } else if (Array.isArray(data.detail)) {
-          msg = data.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
-        } else if (data.message) {
-          msg = data.message;
-        }
-        toast.error(msg, { duration: 8000 });
-        return;
-      }
-
-      const ocrNote = data.ocr_used ? " via OCR" : "";
-      const modeNote = data.faq_mode ? " as FAQ pairs" : "";
-      toast.success(`PDF processed — ${data.sections_created} entries created${modeNote}${ocrNote}.`);
-      setFile(null);
-      setDocTitle("");
-      setCategory("general");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      fetchEntries();
-    } catch (err) {
-      toast.error(err.message || "Upload failed — please try again.", { duration: 6000 });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  /* ── delete handler — opens the styled confirm dialog ── */
-  const handleDelete = (entryId, entryTitle) => {
-    setConfirmDelete({ id: entryId, title: entryTitle });
-  };
-  const handleDeleteConfirmed = async () => {
-    if (!confirmDelete) return;
-    setDeleting(true);
-    try {
-      const res = await fetch(`${API}/super-admin/knowledge/entries/${confirmDelete.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error();
-      toast.success("Entry deleted.");
-      setConfirmDelete(null);
-      fetchEntries();
-    } catch {
-      toast.error("Failed to delete entry.");
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  /* ── drag-and-drop ── */
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const dropped = e.dataTransfer.files[0];
-    if (dropped && dropped.type === "application/pdf") {
-      setFile(dropped);
-      if (!docTitle) setDocTitle(dropped.name.replace(/\.pdf$/i, "").replace(/_/g, " "));
-    } else {
-      toast.error("Only PDF files are accepted.");
-    }
-  };
-
-  return (
-    <div className="space-y-8">
-
-      {/* ── Upload card ── */}
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <h2 className="text-xl font-bold text-foreground mb-4 flex items-center gap-2">
-          <Upload className="w-5 h-5 text-primary" />
-          Upload PDF to Knowledge Base
-        </h2>
-
-        <form onSubmit={handleUpload} className="space-y-4">
-          {/* Drop zone */}
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              dragOver
-                ? "border-primary bg-orange-50"
-                : file
-                ? "border-green-400 bg-green-50"
-                : "border-gray-300 hover:border-primary hover:bg-orange-50"
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files[0];
-                if (f) {
-                  setFile(f);
-                  if (!docTitle) setDocTitle(f.name.replace(/\.pdf$/i, "").replace(/_/g, " "));
-                }
-              }}
-            />
-            {file ? (
-              <div className="flex items-center justify-center gap-2 text-green-700">
-                <FileText className="w-6 h-6" />
-                <span className="font-medium">{file.name}</span>
-                <span className="text-sm text-gray-500">({(file.size / 1024).toFixed(0)} KB)</span>
-              </div>
-            ) : (
-              <div className="text-gray-500">
-                <Upload className="w-10 h-10 mx-auto mb-2 text-gray-400" />
-                <p className="font-medium">Drag &amp; drop a PDF here, or click to browse</p>
-                <p className="text-sm mt-1">Max 50 MB · PDF only</p>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <Label className="text-sm text-gray-600 mb-1 block">Document Title (optional)</Label>
-              <Input
-                value={docTitle}
-                onChange={(e) => setDocTitle(e.target.value)}
-                placeholder="e.g. Visa Policy Update April 2026"
-              />
-            </div>
-            <div>
-              <Label className="text-sm text-gray-600 mb-1 block">Category</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-sm text-gray-600 mb-1 block">Tenant</Label>
-              <Select value={uploadCompanyId} onValueChange={setUploadCompanyId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Pick a tenant" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              type="submit"
-              disabled={uploading || !file}
-              className="bg-primary hover:bg-primary/90 text-white"
-            >
-              {uploading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Processing PDF…
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Upload &amp; Extract
-                </>
-              )}
-            </Button>
-            {file && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => { setFile(null); setDocTitle(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-              >
-                Clear
-              </Button>
-            )}
-          </div>
-
-          {/* How date-awareness works */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-            <p className="font-semibold mb-1">Date-aware extraction</p>
-            <p>
-              Dates found in the PDF are automatically parsed. Each section is labelled:
-              <span className="mx-1 px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-xs font-medium">Past</span> — historical info shown as occurred,
-              <span className="mx-1 px-1.5 py-0.5 rounded bg-green-200 text-green-800 text-xs font-medium">Live</span> — today,
-              <span className="mx-1 px-1.5 py-0.5 rounded bg-blue-200 text-blue-800 text-xs font-medium">Upcoming</span> — future events,
-              <span className="mx-1 px-1.5 py-0.5 rounded bg-orange-200 text-orange-800 text-xs font-medium">General</span> — no date detected.
-              The bot uses this context to answer questions accurately.
-            </p>
-          </div>
-        </form>
-      </div>
-
-      {/* ── Entries list ── */}
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-primary" />
-            Uploaded Knowledge Entries
-            {total > 0 && <span className="text-sm font-normal text-gray-500">({total} total)</span>}
-          </h2>
-          <Button variant="outline" size="sm" onClick={fetchEntries} className="h-8">
-            <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-5">
-          <div>
-            <Label className="text-xs text-gray-500 mb-1 block">Tenant</Label>
-            <Select value={filterCompany || "all"} onValueChange={(v) => { setFilterCompany(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-52 h-9 text-sm"><SelectValue placeholder="All tenants" /></SelectTrigger>
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-end">
+          {!singleTenant && (
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Company</Label>
+            <Select value={filters.company_id || "all"} onValueChange={(v) => { setFilters(f => ({ ...f, company_id: v === "all" ? "" : v })); setPage(1); }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All companies" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All tenants</SelectItem>
+                <SelectItem value="all">All companies</SelectItem>
                 {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label className="text-xs text-gray-500 mb-1 block">Date Status</Label>
-            <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-36 h-9 text-sm"><SelectValue placeholder="All statuses" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="past">Past</SelectItem>
-                <SelectItem value="present">Live / Today</SelectItem>
-                <SelectItem value="future">Upcoming</SelectItem>
-                <SelectItem value="general">General</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs text-gray-500 mb-1 block">Category</Label>
-            <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-36 h-9 text-sm"><SelectValue placeholder="All categories" /></SelectTrigger>
+          )}
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Category</Label>
+            <Select value={filters.category || "all"} onValueChange={(v) => { setFilters(f => ({ ...f, category: v === "all" ? "" : v })); setPage(1); }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All categories" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All categories</SelectItem>
-                {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c.replace(/_/g," ")}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          {pdfFiles.length > 0 && (
-            <div>
-              <Label className="text-xs text-gray-500 mb-1 block">PDF File</Label>
-              <Select value={filterFile} onValueChange={(v) => { setFilterFile(v === "all" ? "" : v); setPage(1); }}>
-                <SelectTrigger className="w-52 h-9 text-sm"><SelectValue placeholder="All files" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All files</SelectItem>
-                  {pdfFiles.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="w-32">
+            <Label className="text-xs text-muted-foreground">Severity</Label>
+            <Select value={filters.severity || "all"} onValueChange={(v) => { setFilters(f => ({ ...f, severity: v === "all" ? "" : v })); setPage(1); }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {["info","warning","error","critical"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleCsvDownload}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+          </Button>
+        </div>
+      </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <Section
+        title="Audit log"
+        description="Authentication, data-access, and admin-action events across all tenants."
+        bodyClassName="p-0"
+      >
+        {loading ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : logs.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">No audit logs found for the current filters.</div>
+        ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+            <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3 text-left">Title</th>
-                <th className="px-4 py-3 text-left">Category</th>
-                <th className="px-4 py-3 text-left">Date Status</th>
-                <th className="px-4 py-3 text-left">Date Range</th>
-                <th className="px-4 py-3 text-left">Source PDF</th>
-                <th className="px-4 py-3 text-left">Added</th>
-                <th className="px-4 py-3 text-center">Actions</th>
+                <th className="px-4 py-2.5">Timestamp</th>
+                <th className="px-4 py-2.5">Category</th>
+                <th className="px-4 py-2.5">Action</th>
+                <th className="px-4 py-2.5">User</th>
+                <th className="px-4 py-2.5">Resource</th>
+                <th className="px-4 py-2.5 text-center">Severity</th>
+                <th className="px-4 py-2.5 text-center">Result</th>
               </tr>
             </thead>
             <tbody>
-              {loadingList && (
-                <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
-              )}
-              {!loadingList && entries.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="text-center py-12 text-gray-400">
-                    <BookOpen className="w-10 h-10 mx-auto mb-2 text-gray-300" />
-                    No entries yet. Upload a PDF to get started.
-                  </td>
-                </tr>
-              )}
-              {!loadingList && entries.map((entry) => (
-                <tr key={entry.id} className="border-t border-gray-100 hover:bg-orange-50 transition-colors">
-                  <td className="px-4 py-3 max-w-[220px]">
-                    <button
-                      className="text-left font-medium text-foreground hover:text-primary hover:underline truncate block max-w-full"
-                      title={entry.title}
-                      onClick={() => setPreview(entry)}
-                    >
-                      {entry.title}
-                    </button>
-                  </td>
+              {logs.map((log, i) => (
+                <tr key={log.id || i} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">{formatDate(log.timestamp)}</td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                      {entry.category}
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_COLORS[log.category] || "bg-muted text-muted-foreground"}`}>
+                      {(log.category || "—").replace(/_/g," ")}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <EventBadge status={entry.event_status} />
+                  <td className="px-4 py-3 font-medium text-foreground">{log.action || "—"}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <div className="text-foreground">{log.user_id ? shortId(log.user_id) : "—"}</div>
+                    {log.user_type && <div className="text-muted-foreground">{log.user_type}</div>}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {entry.valid_from
-                      ? entry.valid_from === entry.valid_until || !entry.valid_until
-                        ? entry.valid_from
-                        : `${entry.valid_from} → ${entry.valid_until}`
+                  <td className="px-4 py-3 text-xs">
+                    {log.resource_type
+                      ? <><span className="font-medium text-foreground">{log.resource_type}</span>{log.resource_id && <span className="text-muted-foreground"> · {shortId(log.resource_id)}</span>}</>
                       : "—"}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px] truncate" title={entry.pdf_filename}>
-                    {entry.pdf_filename || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                    {formatDate(entry.created_at)}
+                  <td className="px-4 py-3 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${SEVERITY_COLORS[log.severity] || "bg-muted text-muted-foreground"}`}>
+                      {log.severity || "—"}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-red-500 hover:bg-red-50 hover:text-red-700"
-                      onClick={() => handleDelete(entry.id, entry.title)}
-                      title="Delete entry"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${log.success ? "bg-success/10 text-success border-success/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}>
+                      {log.success ? "OK" : "FAIL"}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        )}
+      </Section>
 
-        <Pagination page={page} total={total} limit={limit} onChange={setPage} />
-      </div>
-
-      {/* ── Entry preview modal ── */}
-      {preview && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPreview(null)}>
-          <div
-            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between p-5 border-b gap-4">
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-foreground text-lg leading-tight">{preview.title}</h3>
-                <div className="flex items-center gap-2 mt-2">
-                  <EventBadge status={preview.event_status} />
-                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                    {preview.category}
-                  </span>
-                  {preview.valid_from && (
-                    <span className="text-xs text-gray-500">
-                      {preview.valid_from}{preview.valid_until && preview.valid_until !== preview.valid_from ? ` → ${preview.valid_until}` : ""}
-                    </span>
-                  )}
-                </div>
-                {preview.keywords?.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {preview.keywords.map((kw) => (
-                      <span key={kw} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">{kw}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setPreview(null)}><X className="w-5 h-5" /></Button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-5">
-              <p className="text-sm text-gray-400 mb-3">Source: {preview.pdf_filename}</p>
-              <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans leading-relaxed">
-                {preview.answer_preview}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={!!confirmDelete}
-        onOpenChange={(o) => !o && setConfirmDelete(null)}
-        title="Delete knowledge entry?"
-        description={confirmDelete && `This removes "${confirmDelete.title}" from the knowledge base. The bot will stop using it on the next chat request.`}
-        confirmLabel="Delete entry"
-        destructive
-        loading={deleting}
-        onConfirm={handleDeleteConfirmed}
-      />
+      <Pagination page={page} total={total} limit={limit} onChange={setPage} />
     </div>
   );
 }
@@ -1119,12 +628,12 @@ function BlockedKeywordsPanel({ token }) {
   const isAlreadyBlocked = blocked.some(b => b.keyword === query.trim().toLowerCase());
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-6 space-y-6">
+    <div className="bg-card border border-border rounded-lg shadow-sm p-6 space-y-6">
       <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-        <Ban className="w-5 h-5 text-red-500" />
+        <Ban className="w-5 h-5 text-destructive" />
         Keyword Blocker
       </h2>
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-muted-foreground">
         Search for a keyword across all knowledge base entries, then block it. When a user asks
         the bot about a blocked keyword, the bot will return no information.
       </p>
@@ -1132,7 +641,7 @@ function BlockedKeywordsPanel({ token }) {
       {/* Search bar */}
       <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSearchResults(null); }}
@@ -1148,7 +657,7 @@ function BlockedKeywordsPanel({ token }) {
           type="button"
           disabled={blocking || !query.trim() || isAlreadyBlocked}
           onClick={handleBlock}
-          className="h-[38px] bg-red-600 hover:bg-red-700 text-white"
+          className="h-[38px] bg-destructive hover:bg-destructive text-white"
         >
           <Ban className="w-4 h-4 mr-1" />
           {isAlreadyBlocked ? "Already Blocked" : "Block Keyword"}
@@ -1159,21 +668,21 @@ function BlockedKeywordsPanel({ token }) {
       {searchResults && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-gray-700">
+            <p className="text-sm font-semibold text-foreground">
               {searchResults.total} knowledge entries match
-              <span className="ml-1 px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 font-mono text-xs">
+              <span className="ml-1 px-1.5 py-0.5 bg-muted rounded text-muted-foreground font-mono text-xs">
                 "{searchResults.query}"
               </span>
             </p>
             {searchResults.total > 0 && !isAlreadyBlocked && (
-              <span className="text-xs text-red-500">
+              <span className="text-xs text-destructive">
                 Blocking this keyword will suppress all {searchResults.total} entries from the bot.
               </span>
             )}
           </div>
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+              <thead className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-wide">
                 <tr>
                   <th className="px-4 py-3 text-left">Title</th>
                   <th className="px-4 py-3 text-left">Category</th>
@@ -1184,28 +693,28 @@ function BlockedKeywordsPanel({ token }) {
               <tbody>
                 {searchResults.matches.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="text-center py-8 text-gray-400">
+                    <td colSpan={4} className="text-center py-8 text-muted-foreground">
                       No knowledge entries found for this keyword.
                     </td>
                   </tr>
                 )}
                 {searchResults.matches.map((entry) => (
-                  <tr key={entry.id} className="border-t border-gray-100 hover:bg-red-50 transition-colors">
+                  <tr key={entry.id} className="border-t border-border hover:bg-destructive/10 transition-colors">
                     <td className="px-4 py-3 text-foreground font-medium max-w-[220px] truncate" title={entry.title}>
                       {entry.title}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-warning/10 text-warning">
                         {entry.category || "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px] truncate" title={entry.pdf_filename || entry.source}>
+                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate" title={entry.pdf_filename || entry.source}>
                       {entry.pdf_filename || entry.source || "—"}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {(entry.keywords || []).slice(0, 5).map((kw) => (
-                          <span key={kw} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">{kw}</span>
+                          <span key={kw} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-xs">{kw}</span>
                         ))}
                       </div>
                     </td>
@@ -1220,11 +729,11 @@ function BlockedKeywordsPanel({ token }) {
       {/* Blocked keywords list */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
-            <Ban className="w-4 h-4 text-red-400" />
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+            <Ban className="w-4 h-4 text-destructive/70" />
             Blocked Keywords
             {blocked.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+              <span className="ml-1 px-1.5 py-0.5 bg-destructive/10 text-destructive rounded-full text-xs font-medium">
                 {blocked.length}
               </span>
             )}
@@ -1234,18 +743,18 @@ function BlockedKeywordsPanel({ token }) {
           </Button>
         </div>
 
-        {loadingBlocked && <p className="text-gray-400 text-sm py-4 text-center">Loading…</p>}
+        {loadingBlocked && <p className="text-muted-foreground text-sm py-4 text-center">Loading…</p>}
 
         {!loadingBlocked && blocked.length === 0 && (
-          <div className="border border-dashed border-gray-200 rounded-lg p-8 text-center text-gray-400 text-sm">
+          <div className="border border-dashed border-border rounded-lg p-8 text-center text-muted-foreground text-sm">
             No keywords blocked yet. Search and block keywords above.
           </div>
         )}
 
         {!loadingBlocked && blocked.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+              <thead className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-wide">
                 <tr>
                   <th className="px-4 py-3 text-left">Keyword</th>
                   <th className="px-4 py-3 text-center">Entries Suppressed</th>
@@ -1255,26 +764,26 @@ function BlockedKeywordsPanel({ token }) {
               </thead>
               <tbody>
                 {blocked.map((b) => (
-                  <tr key={b.keyword} className="border-t border-gray-100 hover:bg-red-50 transition-colors">
-                    <td className="px-4 py-3 font-mono font-semibold text-red-700">
+                  <tr key={b.keyword} className="border-t border-border hover:bg-destructive/10 transition-colors">
+                    <td className="px-4 py-3 font-mono font-semibold text-destructive">
                       <span className="flex items-center gap-1.5">
-                        <Ban className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                        <Ban className="w-3.5 h-3.5 text-destructive/70 flex-shrink-0" />
                         {b.keyword}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-destructive/10 text-destructive">
                         {b.matches_count ?? "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                       {formatDate(b.blocked_at)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 text-green-600 hover:bg-green-50 hover:text-green-800 gap-1"
+                        className="h-7 text-success hover:bg-success/10 hover:text-success gap-1"
                         onClick={() => handleUnblock(b.keyword)}
                         title="Unblock keyword"
                       >
@@ -1296,7 +805,7 @@ function BlockedKeywordsPanel({ token }) {
 // ─── Seva Setu Applications tab ──────────────────────────────────────────────────
 const SEVA_APP_STATUSES = ["created", "submitted", "confirmed"];
 
-function SevaApplicationsTab({ token, companies = [] }) {
+export function SevaApplicationsTab({ token, companies = [], singleTenant = false, companyId = "" }) {
   const [applications, setApplications] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -1305,7 +814,10 @@ function SevaApplicationsTab({ token, companies = [] }) {
   const [documentPreview, setDocumentPreview] = useState(null);
   const [services, setServices] = useState([]);
   const [filters, setFilters] = useState({
-    company_id: "",
+    // For a tenant admin, scope to their own company up-front so the
+    // service-type filter (which is per-tenant) works and the backend
+    // returns only their applications.
+    company_id: singleTenant ? (companyId || "") : "",
     status: "",
     service_type: "",
     search: "",
@@ -1378,11 +890,11 @@ function SevaApplicationsTab({ token, companies = [] }) {
   };
 
   const clearFilters = () => {
-    setFilters({ company_id: "", status: "", service_type: "", search: "", from_date: "", to_date: "", with_documents: true });
+    setFilters({ company_id: singleTenant ? (companyId || "") : "", status: "", service_type: "", search: "", from_date: "", to_date: "", with_documents: true });
     setPage(1);
   };
 
-  const hasActiveFilters = ["company_id", "status", "service_type", "search", "from_date", "to_date"].some((k) => filters[k]);
+  const hasActiveFilters = [singleTenant ? null : "company_id", "status", "service_type", "search", "from_date", "to_date"].filter(Boolean).some((k) => filters[k]);
 
   const handleCsvDownload = async () => {
     try {
@@ -1408,100 +920,132 @@ function SevaApplicationsTab({ token, companies = [] }) {
     }
   };
 
+  // Token-based status pill palette: subtle for in-progress states, success
+  // for terminal-positive, destructive for rejection. No raw Tailwind shades
+  // so a future theme swap (or per-tenant brand override) Just Works.
   const STATUS_COLORS = {
-    draft: "bg-gray-100 text-gray-700",
-    submitted: "bg-blue-100 text-blue-700",
-    confirmed: "bg-green-100 text-green-700",
-    completed: "bg-green-200 text-green-800",
-    rejected: "bg-red-100 text-red-700",
+    draft:               "bg-muted text-muted-foreground border border-border",
+    submitted:           "bg-primary/10 text-primary border border-primary/20",
+    submission_pending:  "bg-warning/10 text-warning border border-warning/20",
+    confirmed:           "bg-success/10 text-success border border-success/20",
+    completed:           "bg-success/15 text-success border border-success/30",
+    rejected:            "bg-destructive/10 text-destructive border border-destructive/20",
+  };
+
+  const [retrying, setRetrying] = useState(false);
+  const handleRetrySubmission = async (appId) => {
+    setRetrying(true);
+    try {
+      const { data } = await axios.post(
+        `${API}/seva-setu/applications/${appId}/retry-submission`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (data.success) {
+        toast.success(data.message || "Submission accepted on retry.");
+      } else {
+        toast.error(data.message || "Retry failed — still pending.");
+      }
+      // Refresh the list and re-open the same application with fresh data.
+      const { data: listData } = await axios.get(`${API}/super-admin/seva-setu/applications`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: buildParams(),
+      });
+      setApplications(listData.applications);
+      setTotal(listData.total);
+      const fresh = (listData.applications || []).find((a) => a.id === appId);
+      if (fresh) setSelectedApp(fresh);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Retry request failed");
+    } finally {
+      setRetrying(false);
+    }
   };
 
   return (
-    <div>
-      {/* Filters row */}
-      <div className="flex flex-wrap items-end gap-3 mb-3">
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Company</Label>
-          <Select
-            value={filters.company_id || "all"}
-            onValueChange={(v) => setFilter({ company_id: v === "all" ? "" : v })}
-          >
-            <SelectTrigger className="w-44 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All companies</SelectItem>
-              {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-end">
+          {!singleTenant && (
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Company</Label>
+            <Select value={filters.company_id || "all"} onValueChange={(v) => setFilter({ company_id: v === "all" ? "" : v })}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All companies</SelectItem>
+                {companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          )}
+          <div className="w-36">
+            <Label className="text-xs text-muted-foreground">Status</Label>
+            <Select value={filters.status || "all"} onValueChange={(v) => setFilter({ status: v === "all" ? "" : v })}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {SEVA_APP_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Service</Label>
+            <Select
+              value={filters.service_type || "all"}
+              onValueChange={(v) => setFilter({ service_type: v === "all" ? "" : v })}
+              disabled={!filters.company_id}
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder={filters.company_id ? "All services" : "Pick a company first"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All services</SelectItem>
+                {services.map((s) => (
+                  <SelectItem key={s.service_key} value={s.service_key}>{s.name || s.service_key}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-44">
+            <Label className="text-xs text-muted-foreground">Search reference</Label>
+            <Input
+              type="text"
+              placeholder="e.g. PASS-2024"
+              value={filters.search}
+              onChange={(e) => setFilter({ search: e.target.value })}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">From</Label>
+            <Input
+              type="date"
+              value={filters.from_date}
+              onChange={(e) => setFilter({ from_date: e.target.value })}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">To</Label>
+            <Input
+              type="date"
+              value={filters.to_date}
+              onChange={(e) => setFilter({ to_date: e.target.value })}
+              className="mt-1"
+            />
+          </div>
         </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Status</Label>
-          <Select
-            value={filters.status || "all"}
-            onValueChange={(v) => setFilter({ status: v === "all" ? "" : v })}
-          >
-            <SelectTrigger className="w-36 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {SEVA_APP_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchApplications} disabled={loading}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleCsvDownload}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+          </Button>
         </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Service</Label>
-          <Select
-            value={filters.service_type || "all"}
-            onValueChange={(v) => setFilter({ service_type: v === "all" ? "" : v })}
-            disabled={!filters.company_id}
-          >
-            <SelectTrigger className="w-44 h-9 text-sm">
-              <SelectValue placeholder={filters.company_id ? "All services" : "Pick a company first"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All services</SelectItem>
-              {services.map((s) => (
-                <SelectItem key={s.service_key} value={s.service_key}>{s.name || s.service_key}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">Search reference</Label>
-          <input
-            type="text"
-            className="border rounded h-9 px-2 text-sm w-44"
-            placeholder="e.g. PASS-2024"
-            value={filters.search}
-            onChange={(e) => setFilter({ search: e.target.value })}
-          />
-        </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">From</Label>
-          <input
-            type="date"
-            className="border rounded h-9 px-2 text-sm"
-            value={filters.from_date}
-            onChange={(e) => setFilter({ from_date: e.target.value })}
-          />
-        </div>
-        <div>
-          <Label className="text-xs text-gray-500 mb-1 block">To</Label>
-          <input
-            type="date"
-            className="border rounded h-9 px-2 text-sm"
-            value={filters.to_date}
-            onChange={(e) => setFilter({ to_date: e.target.value })}
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchApplications} className="h-9">
-          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-        </Button>
-        <Button onClick={handleCsvDownload} size="sm" className="h-9 bg-success hover:bg-success/90 text-white ml-auto">
-          <Download className="w-4 h-4 mr-1" /> Export CSV
-        </Button>
       </div>
 
-      {/* Second row: with_documents toggle + count + clear */}
-      <div className="flex items-center gap-4 mb-3 text-xs text-gray-600">
+      <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -1510,110 +1054,115 @@ function SevaApplicationsTab({ token, companies = [] }) {
           />
           With documents only
         </label>
-        <span>{total} application{total === 1 ? "" : "s"}{hasActiveFilters && <span className="ml-1 text-gray-400">(filtered)</span>}</span>
+        <span>
+          {total} application{total === 1 ? "" : "s"}
+          {hasActiveFilters && <span className="ml-1">(filtered)</span>}
+        </span>
         {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-xs">
-            Clear filters
-          </Button>
+          <Button variant="ghost" size="sm" onClick={clearFilters}>Clear filters</Button>
         )}
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="px-4 py-3 text-left">Reference ID</th>
-              <th className="px-4 py-3 text-left">Service</th>
-              <th className="px-4 py-3 text-left">User</th>
-              <th className="px-4 py-3 text-center">Status</th>
-              <th className="px-4 py-3 text-center">Docs</th>
-              <th className="px-4 py-3 text-left">Created</th>
-              <th className="px-4 py-3 text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading…</td></tr>
-            )}
-            {!loading && applications.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-10 text-gray-400">
-                {hasActiveFilters ? "No applications match these filters." : "No applications found."}
-              </td></tr>
-            )}
-            {!loading && applications.map((app, i) => (
-              <tr key={app.id || i} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-gray-700">{shortId(app.reference_id)}</td>
-                <td className="px-4 py-3 text-gray-700">{app.service_name || app.service_type}</td>
-                <td className="px-4 py-3 text-xs text-gray-600">{shortId(app.user_id)}</td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[app.status] || "bg-gray-100 text-gray-600"}`}>
-                    {app.status || "—"}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${app.document_count > 0 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
-                    {app.document_count}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(app.created_at)}</td>
-                <td className="px-4 py-3 text-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-blue-600 hover:bg-blue-50"
-                    onClick={() => setSelectedApp(app)}
-                    title="View details"
-                  >
-                    <FileText className="w-4 h-4" />
-                  </Button>
-                </td>
+      <Section
+        title="Applications"
+        description="All applications submitted across the platform. Click the document icon to view the full record."
+        bodyClassName="p-0"
+      >
+        {loading ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : applications.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+            {hasActiveFilters ? "No applications match these filters." : "No applications found."}
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-2.5">Reference</th>
+                <th className="px-4 py-2.5">Service</th>
+                <th className="px-4 py-2.5">User</th>
+                <th className="px-4 py-2.5 text-center">Status</th>
+                <th className="px-4 py-2.5 text-right">Docs</th>
+                <th className="px-4 py-2.5">Created</th>
+                <th className="px-4 py-2.5 text-right">Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {applications.map((app, i) => (
+                <tr key={app.id || i} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-4 py-3 font-mono text-xs text-foreground">{shortId(app.reference_id)}</td>
+                  <td className="px-4 py-3 text-foreground">{app.service_name || app.service_type}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground font-mono">{shortId(app.user_id)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[app.status] || "bg-muted text-muted-foreground"}`}>
+                      {app.status || "—"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <span className={`font-mono text-xs ${app.document_count > 0 ? "text-success font-medium" : "text-muted-foreground"}`}>
+                      {app.document_count}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(app.created_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => setSelectedApp(app)}
+                      title="View details"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
 
       <Pagination page={page} total={total} limit={limit} onChange={setPage} />
 
       {/* Application detail modal */}
       {selectedApp && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedApp(null)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b">
-              <div>
-                <h3 className="font-bold text-foreground text-lg">Application Details</h3>
-                <p className="text-xs text-gray-500 mt-0.5">{selectedApp.reference_id}</p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setSelectedApp(null)}><X className="w-5 h-5" /></Button>
-            </div>
+        <Dialog open={!!selectedApp} onOpenChange={(o) => !o && setSelectedApp(null)}>
+          <DialogContent className="max-w-3xl max-h-[85vh] p-0 flex flex-col gap-0">
+            <DialogHeader className="px-5 py-4 border-b border-border">
+              <DialogTitle className="text-base">Application details</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5 font-mono">{selectedApp.reference_id}</p>
+            </DialogHeader>
 
-            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+            <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold">Service</p>
-                  <p className="text-sm text-gray-800">{selectedApp.service_name}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Service</p>
+                  <p className="text-sm text-foreground mt-0.5">{selectedApp.service_name}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold">Status</p>
-                  <p className={`text-sm px-2 py-0.5 rounded-full inline-block font-medium ${STATUS_COLORS[selectedApp.status] || "bg-gray-100 text-gray-600"}`}>
-                    {selectedApp.status}
-                  </p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Status</p>
+                  <div className="mt-0.5">
+                    <span className={`text-xs px-2 py-0.5 rounded-full inline-block font-medium ${STATUS_COLORS[selectedApp.status] || "bg-muted text-muted-foreground"}`}>
+                      {selectedApp.status}
+                    </span>
+                  </div>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold">User ID</p>
-                  <p className="text-sm text-gray-800 font-mono">{selectedApp.user_id}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">User ID</p>
+                  <p className="text-sm text-foreground font-mono mt-0.5">{selectedApp.user_id}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold">Created</p>
-                  <p className="text-sm text-gray-800">{formatDate(selectedApp.created_at)}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Created</p>
+                  <p className="text-sm text-foreground mt-0.5">{formatDate(selectedApp.created_at)}</p>
                 </div>
               </div>
 
               {selectedApp.form_data_fields > 0 && (
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold mb-2">Form Fields ({selectedApp.form_data_fields})</p>
-                  <div className="bg-gray-50 rounded p-3 text-xs text-gray-700 max-h-48 overflow-y-auto">
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
+                    Form fields ({selectedApp.form_data_fields})
+                  </p>
+                  <div className="bg-muted rounded p-3 text-xs text-foreground max-h-48 overflow-y-auto">
                     <pre>{JSON.stringify(selectedApp.form_data || {}, null, 2).slice(0, 500)}</pre>
                   </div>
                 </div>
@@ -1621,26 +1170,28 @@ function SevaApplicationsTab({ token, companies = [] }) {
 
               {selectedApp.documents && selectedApp.documents.length > 0 && (
                 <div>
-                  <p className="text-xs text-gray-500 font-semibold mb-2">Uploaded Documents ({selectedApp.documents.length})</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
+                    Uploaded documents ({selectedApp.documents.length})
+                  </p>
                   <div className="space-y-2">
                     {selectedApp.documents.map((doc) => (
-                      <div key={doc.id} className="bg-blue-50 border border-blue-200 rounded p-3">
+                      <div key={doc.id} className="bg-muted/50 border border-border rounded p-3">
                         <div className="flex items-center gap-2 justify-between">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                            <FileText className="w-4 h-4 text-primary flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-800 truncate">{doc.name}</p>
-                              <p className="text-xs text-gray-500">{doc.content_type} · {formatDate(doc.uploaded_at)}</p>
+                              <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
+                              <p className="text-xs text-muted-foreground">{doc.content_type} · {formatDate(doc.uploaded_at)}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${doc.status === "uploaded" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                            <Badge variant={doc.status === "uploaded" ? "default" : "secondary"} className={doc.status === "uploaded" ? "bg-success/10 text-success border-success/20 hover:bg-success/10" : ""}>
                               {doc.status}
-                            </span>
+                            </Badge>
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 text-blue-600 hover:bg-blue-100"
+                              className="h-7 w-7"
                               onClick={() => setDocumentPreview(doc)}
                               title="View document"
                             >
@@ -1652,7 +1203,7 @@ function SevaApplicationsTab({ token, companies = [] }) {
                                 download={doc.name}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 p-1.5"
+                                className="text-muted-foreground hover:text-foreground p-1.5"
                                 title="Download document"
                               >
                                 <Download className="w-4 h-4" />
@@ -1665,68 +1216,130 @@ function SevaApplicationsTab({ token, companies = [] }) {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Document preview modal */}
-      {documentPreview && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDocumentPreview(null)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b">
-              <div>
-                <h3 className="font-bold text-foreground text-lg">Document Preview</h3>
-                <p className="text-xs text-gray-500 mt-0.5">{documentPreview.name}</p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setDocumentPreview(null)}><X className="w-5 h-5" /></Button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-5 flex items-center justify-center bg-gray-100">
-              {documentPreview.content_type === "application/pdf" ? (
-                <div className="text-center">
-                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 mb-4">PDF Document</p>
-                  {documentPreview.file_url && (
-                    <a
-                      href={documentPreview.file_url}
-                      download={documentPreview.name}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      <Download className="w-4 h-4" />
-                      Download PDF
-                    </a>
+              {/* External processing-service invocations — the round-trip(s)
+                  to the downstream gov service, recorded at confirm time. */}
+              {selectedApp.service_invocations && selectedApp.service_invocations.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Service API calls ({selectedApp.service_invocations.length})
+                    </p>
+                    {(selectedApp.service_status === "failed" || selectedApp.status === "submission_pending") && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1.5"
+                        disabled={retrying}
+                        onClick={() => handleRetrySubmission(selectedApp.id)}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${retrying ? "animate-spin" : ""}`} />
+                        {retrying ? "Retrying…" : "Retry submission"}
+                      </Button>
+                    )}
+                  </div>
+                  {selectedApp.gov_processing_ref && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Gov processing ref:{" "}
+                      <span className="font-mono text-foreground">{selectedApp.gov_processing_ref}</span>
+                    </p>
                   )}
-                </div>
-              ) : documentPreview.content_type?.startsWith("image/") ? (
-                <img
-                  src={documentPreview.file_url || documentPreview.data_url}
-                  alt={documentPreview.name}
-                  className="max-w-full max-h-full object-contain rounded"
-                />
-              ) : (
-                <div className="text-center">
-                  <FileText className="w-16 h-16 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 mb-2">{documentPreview.content_type}</p>
-                  {documentPreview.file_url && (
-                    <a
-                      href={documentPreview.file_url}
-                      download={documentPreview.name}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      <Download className="w-4 h-4" />
-                      Download File
-                    </a>
-                  )}
+                  <div className="space-y-2">
+                    {selectedApp.service_invocations.map((inv) => (
+                      <div key={inv.id} className="bg-muted/50 border border-border rounded p-3 space-y-2">
+                        <div className="flex items-center gap-2 justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-mono text-muted-foreground">{inv.method}</span>
+                            <span className="text-xs font-mono text-foreground truncate">{inv.endpoint}</span>
+                          </div>
+                          <Badge
+                            variant={inv.ok ? "default" : "secondary"}
+                            className={inv.ok
+                              ? "bg-success/10 text-success border-success/20 hover:bg-success/10"
+                              : "bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/10"}
+                          >
+                            {inv.ok ? "OK" : "Failed"}{inv.status_code != null ? ` · ${inv.status_code}` : ""}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                          {inv.duration_ms != null && <span>{inv.duration_ms} ms</span>}
+                          {inv.invoked_at && <span>{formatDate(inv.invoked_at)}</span>}
+                          {inv.error && <span className="text-destructive">{inv.error}</span>}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Request</p>
+                            <pre className="bg-background border border-border rounded p-2 text-[11px] text-foreground max-h-40 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(inv.request || {}, null, 2)}</pre>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Response</p>
+                            <pre className="bg-background border border-border rounded p-2 text-[11px] text-foreground max-h-40 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(inv.response ?? inv.error ?? {}, null, 2)}</pre>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
+
+      {/* Document preview modal */}
+      <Dialog open={!!documentPreview} onOpenChange={(o) => !o && setDocumentPreview(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] p-0 flex flex-col gap-0">
+          <DialogHeader className="px-5 py-4 border-b border-border">
+            <DialogTitle className="text-base">Document preview</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">{documentPreview?.name}</p>
+          </DialogHeader>
+          <div className="overflow-y-auto flex-1 p-5 flex items-center justify-center bg-muted/40 min-h-[280px]">
+            {documentPreview?.content_type === "application/pdf" ? (
+              <div className="text-center">
+                <FileText className="w-16 h-16 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground mb-4">PDF document</p>
+                {documentPreview?.file_url && (
+                  <Button asChild>
+                    <a
+                      href={documentPreview.file_url}
+                      download={documentPreview.name}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Download className="w-4 h-4 mr-1.5" />
+                      Download PDF
+                    </a>
+                  </Button>
+                )}
+              </div>
+            ) : documentPreview?.content_type?.startsWith("image/") ? (
+              <img
+                src={documentPreview.file_url || documentPreview.data_url}
+                alt={documentPreview.name}
+                className="max-w-full max-h-full object-contain rounded"
+              />
+            ) : documentPreview ? (
+              <div className="text-center">
+                <FileText className="w-16 h-16 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground mb-2">{documentPreview.content_type}</p>
+                {documentPreview.file_url && (
+                  <Button asChild>
+                    <a
+                      href={documentPreview.file_url}
+                      download={documentPreview.name}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Download className="w-4 h-4 mr-1.5" />
+                      Download file
+                    </a>
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1741,32 +1354,47 @@ export default function SuperAdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [adminsForCompany, setAdminsForCompany] = useState(null);  // Sprint 11
+  const [modelsForCompany, setModelsForCompany] = useState(null);  // Sprint 14 — assign models
+  const [statusTarget, setStatusTarget] = useState(null);          // { company, next }
+  const [statusSaving, setStatusSaving] = useState(false);
+  // The Create Company dialog's LLM dropdown is driven by the registry
+  // (`platform_models`), not hardcoded labels — adding a model in the
+  // Models tab makes it pickable here on the next dialog open.
+  const [registryModels, setRegistryModels] = useState([]);
   const [newCompany, setNewCompany] = useState({
-    name: "", email: "", admin_password: "", llm_model: "gpt-5.2",
+    name: "", email: "", admin_password: "", llm_model: "",
   });
 
   const token = localStorage.getItem("token");
 
-  useEffect(() => {
-    if (!token) { navigate("/login"); return; }
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const cfg = { headers: { Authorization: `Bearer ${token}` } };
-      const [companiesRes, analyticsRes] = await Promise.all([
+      const [companiesRes, analyticsRes, modelsRes] = await Promise.all([
         axios.get(`${API}/super-admin/companies`, cfg),
         axios.get(`${API}/super-admin/analytics/overview`, cfg),
+        axios.get(`${API}/super-admin/models`, cfg).catch(() => ({ data: { models: [] } })),
       ]);
       setCompanies(companiesRes.data);
       setAnalytics(analyticsRes.data);
+      const enabled = (modelsRes.data?.models || []).filter((m) => m.enabled);
+      setRegistryModels(enabled);
+      // Seed the Create Company dialog's default to the first enabled
+      // model in the registry rather than a hardcoded "gpt-5.2".
+      if (enabled.length > 0) {
+        setNewCompany((prev) => prev.llm_model ? prev : { ...prev, llm_model: enabled[0].key });
+      }
     } catch {
       toast.error("Failed to load data");
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) { navigate("/login"); return; }
+    fetchData();
+  }, [token, navigate, fetchData]);
 
   const handleCreateCompany = async (e) => {
     e.preventDefault();
@@ -1776,7 +1404,10 @@ export default function SuperAdminDashboard() {
       });
       toast.success("Company created successfully!");
       setShowCreateDialog(false);
-      setNewCompany({ name: "", email: "", admin_password: "", llm_model: "gpt-5.2" });
+      setNewCompany({
+        name: "", email: "", admin_password: "",
+        llm_model: registryModels[0]?.key || "",
+      });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to create company");
@@ -1786,7 +1417,7 @@ export default function SuperAdminDashboard() {
   const handleLogout = () => { localStorage.clear(); navigate("/"); };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen text-gray-500">Loading…</div>;
+    return <div className="flex items-center justify-center min-h-screen text-muted-foreground">Loading…</div>;
   }
 
   // Decode the JWT sub claim for the sidebar user row. Super-admin tokens
@@ -1838,14 +1469,26 @@ export default function SuperAdminDashboard() {
             <Label htmlFor="model">LLM model</Label>
             <Select value={newCompany.llm_model}
               onValueChange={(v) => setNewCompany({ ...newCompany, llm_model: v })}>
-              <SelectTrigger data-testid="llm-model-select" className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger data-testid="llm-model-select" className="mt-1">
+                <SelectValue placeholder={registryModels.length === 0 ? "No models registered yet" : "Pick a model"} />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="gpt-5.2">GPT-5.2 (OpenAI)</SelectItem>
-                <SelectItem value="gpt-5.1">GPT-5.1 (OpenAI)</SelectItem>
-                <SelectItem value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</SelectItem>
-                <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                {registryModels.map((m) => (
+                  <SelectItem key={m.key} value={m.key}>
+                    {m.display_name || m.key}{m.provider ? ` (${m.provider})` : ""}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {registryModels.length === 0 && (
+              <p className="text-xs text-destructive mt-1 leading-snug">
+                No models registered yet. Add one from <strong>Configuration → Models</strong> first.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground mt-1 leading-snug">
+              Sets this tenant's default model. You can adjust the full allowlist after creation
+              via the per-tenant <strong>Models</strong> button.
+            </p>
           </div>
           <Button type="submit" className="w-full" data-testid="submit-create-company">
             Create company
@@ -1860,12 +1503,15 @@ export default function SuperAdminDashboard() {
     "conversations":     { title: "Conversations",  description: "User conversations from chat, WhatsApp, and Facebook channels." },
     "audit-logs":        { title: "Audit logs",     description: "Authentication, admin actions, and data-access events." },
     "seva-applications": { title: "Applications",   description: "Submitted applications across all tenants." },
+    "llm-cost":          { title: "LLM cost",       description: "Per-tenant token spend with budget tracking and projections. Pick a tenant to view." },
+    "models":            { title: "Models",         description: "Platform model registry. Add, price, and toggle models — tenants pick from this list when assigning models." },
     "knowledge":         { title: "Knowledge base", description: "Q&A entries and uploaded PDFs the bot draws from." },
     "tenant-services":   { title: "Services",       description: "The catalogue each tenant's chatbot offers." },
     "channel-mappings":  { title: "Channels",       description: "Map inbound WhatsApp / Facebook webhook identities to tenants." },
     "bot-config":        { title: "Bot config",     description: "Per-tenant identity, branding, languages, contact, and security." },
     "scrapers":          { title: "Scrapers",       description: "Site crawler per tenant — keeps the knowledge base fresh." },
-    "platform-settings": { title: "Platform",       description: "Global tuning that applies to every tenant. Leave a field blank to inherit the platform default." },
+    "notifications":     { title: "Notifications",  description: "Configure email notifications for every platform scenario — who's notified, the copy, thresholds, and cooldowns." },
+    "platform-settings": { title: "Platform",       description: "Global tuning that applies to every tenant. Changes take effect on the next request (cache TTL = 60s). Env-var overrides take precedence over what's saved here." },
   };
   const meta = PAGE_META[activeTab] || {};
 
@@ -1880,15 +1526,24 @@ export default function SuperAdminDashboard() {
       pageTitle={meta.title}
       pageDescription={meta.description}
       pageActions={meta.actions}
+      companies={companies}
+      onTenantSelect={(id) => {
+        // Picking a tenant from the palette: jump to Bot config and seed
+        // localStorage so the BotConfigTab picker opens on that row. The
+        // BotConfigTab already auto-selects companies[0] when its own
+        // state is empty, so this is just a hint.
+        try { localStorage.setItem("super_admin_preferred_tenant", id); } catch { /* ignore */ }
+        setActiveTab("bot-config");
+      }}
     >
 
         {/* ── Dashboard tab ── */}
         {activeTab === "dashboard" && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <StatCard label="Total companies" value={analytics.total_companies ?? 0} testId="stats-companies" />
-              <StatCard label="Total sessions"  value={analytics.total_sessions  ?? 0} testId="stats-sessions" />
-              <StatCard label="Total documents" value={analytics.total_documents ?? 0} testId="stats-documents" />
+              <StatCard icon={Building2}      label="Total companies" value={analytics.total_companies ?? 0} />
+              <StatCard icon={MessageSquare}  label="Total sessions"  value={analytics.total_sessions  ?? 0} />
+              <StatCard icon={Files}          label="Total documents" value={analytics.total_documents ?? 0} />
             </div>
 
             <Section
@@ -1925,13 +1580,44 @@ export default function SuperAdminDashboard() {
                             Created {formatDate(company.created_at)}
                           </p>
                         )}
-                        <Button
-                          size="sm" variant="outline" className="mt-2"
-                          onClick={() => setAdminsForCompany(company)}
-                          data-testid={`manage-admins-${company.id}`}
-                        >
-                          <UserPlus className="w-3 h-3 mr-1" /> Admins
-                        </Button>
+                        <div className="flex items-center gap-1.5 mt-2 justify-end flex-wrap">
+                          {company.status === "suspended" ? (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => setStatusTarget({ company, next: "active" })}
+                              className="border-success/40 text-success hover:bg-success/10 hover:text-success"
+                              data-testid={`activate-tenant-${company.id}`}
+                              title="Re-activate this tenant"
+                            >
+                              <Unlock className="w-3 h-3 mr-1" /> Activate
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => setStatusTarget({ company, next: "suspended" })}
+                              className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              data-testid={`suspend-tenant-${company.id}`}
+                              title="Suspend this tenant — bot will stop responding"
+                            >
+                              <Ban className="w-3 h-3 mr-1" /> Suspend
+                            </Button>
+                          )}
+                          <Button
+                            size="sm" variant="outline"
+                            onClick={() => setModelsForCompany(company)}
+                            data-testid={`manage-models-${company.id}`}
+                            title="Assign LLM models to this tenant"
+                          >
+                            <Cpu className="w-3 h-3 mr-1" /> Models
+                          </Button>
+                          <Button
+                            size="sm" variant="outline"
+                            onClick={() => setAdminsForCompany(company)}
+                            data-testid={`manage-admins-${company.id}`}
+                          >
+                            <UserPlus className="w-3 h-3 mr-1" /> Admins
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </li>
@@ -1948,7 +1634,7 @@ export default function SuperAdminDashboard() {
         {activeTab === "seva-applications" && <SevaApplicationsTab  token={token} companies={companies} />}
         {activeTab === "knowledge" && (
           <div className="space-y-6">
-            <KnowledgeTab token={token} companies={companies} />
+            <KnowledgeBasePanel token={token} crossTenant companies={companies} />
             <BlockedKeywordsPanel token={token} />
           </div>
         )}
@@ -1956,7 +1642,10 @@ export default function SuperAdminDashboard() {
         {activeTab === "channel-mappings"  && <ChannelMappingsTab   companies={companies} token={token} />}
         {activeTab === "bot-config"        && <BotConfigTab         companies={companies} token={token} />}
         {activeTab === "scrapers"          && <ScrapersTab          companies={companies} token={token} />}
+        {activeTab === "notifications"     && <NotificationsTab     token={token} />}
         {activeTab === "platform-settings" && <PlatformSettingsTab  token={token} />}
+        {activeTab === "llm-cost"          && <LlmUsageTab          token={token} companies={companies} />}
+        {activeTab === "models"            && <ModelsTab            token={token} />}
 
       {/* Sprint 11 — admins manager modal */}
       {adminsForCompany && (
@@ -1966,56 +1655,110 @@ export default function SuperAdminDashboard() {
           onClose={() => setAdminsForCompany(null)}
         />
       )}
-    </AdminShell>
-  );
-}
 
-function StatCard({ label, value, testId }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5" data-testid={testId}>
-      <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-2xl font-semibold text-foreground tabular-nums">{value}</div>
-    </div>
+      {/* Sprint 14 — per-tenant model assignment */}
+      {modelsForCompany && (
+        <ModelAssignmentModal
+          company={modelsForCompany}
+          token={token}
+          onClose={() => setModelsForCompany(null)}
+          onSaved={() => { setModelsForCompany(null); fetchData(); }}
+        />
+      )}
+
+      {/* Suspend / Activate confirmation. The suspended-tenant boundary
+          lives in `tenant.get_tenant_id`, which rejects requests with a
+          400 — the bot effectively goes dark without any host-page
+          changes. Cache TTL there is 60s, but the route invalidates the
+          cache so the change is immediate. */}
+      <ConfirmDialog
+        open={!!statusTarget}
+        onOpenChange={(o) => !o && setStatusTarget(null)}
+        title={statusTarget?.next === "suspended" ? "Suspend this tenant?" : "Re-activate this tenant?"}
+        description={
+          statusTarget?.next === "suspended"
+            ? `${statusTarget?.company?.name || "This tenant"} will stop responding immediately. The widget will fail-closed (400 from /widget-config) and any open chat sessions will be rejected on their next message. Existing data is preserved — re-activate at any time to resume service.`
+            : `${statusTarget?.company?.name || "This tenant"} will start responding again. The widget will pick up the change on the next page load, and any visitors who hit the embed will be served normally.`
+        }
+        confirmLabel={statusTarget?.next === "suspended" ? "Suspend tenant" : "Activate tenant"}
+        destructive={statusTarget?.next === "suspended"}
+        loading={statusSaving}
+        onConfirm={async () => {
+          if (!statusTarget) return;
+          setStatusSaving(true);
+          try {
+            const res = await fetch(`${API}/super-admin/companies/${statusTarget.company.id}/status`, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ status: statusTarget.next }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Failed");
+            toast.success(
+              statusTarget.next === "suspended"
+                ? `${statusTarget.company.name} suspended — bot is now offline for this tenant.`
+                : `${statusTarget.company.name} re-activated.`,
+            );
+            setStatusTarget(null);
+            fetchData();
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setStatusSaving(false);
+          }
+        }}
+      />
+    </AdminShell>
   );
 }
 
 /* ─── Sprint 11 — Admins manager modal ─────────────────────────────────── */
 
 function AdminsModal({ company, token, onClose }) {
-  const [admins, setAdmins] = useState([]);
+  // The modal manages two parallel collections — local_admins (full
+  // access) and local_viewers (read-only). They share the same CRUD
+  // shape, so a `kind` switch picks the right backend collection and
+  // the rest of the UI stays identical.
+  const [kind, setKind] = useState("admins"); // "admins" | "viewers"
+  const isViewers = kind === "viewers";
+  const collectionLabel  = isViewers ? "viewer"  : "admin";
+  const collectionLabelP = isViewers ? "viewers" : "admins";
+  const endpointSegment  = isViewers ? "viewers" : "admins";
+
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newPass, setNewPass]   = useState("");
-  const [resetting, setResetting] = useState(null); // admin row when reset prompt open
+  const [resetting, setResetting] = useState(null); // row when reset prompt open
   const [resetPass, setResetPass] = useState("");
-  const [confirmDeleteAdmin, setConfirmDeleteAdmin] = useState(null);
-  const [deletingAdmin, setDeletingAdmin] = useState(false);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState(null);
+  const [deletingRow, setDeletingRow] = useState(false);
 
-  const fetchAdmins = useCallback(async () => {
+  const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins`, {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/${endpointSegment}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed");
-      setAdmins(data.admins || []);
+      setRows(data[endpointSegment] || []);
     } catch (err) {
       toast.error(err.message);
     } finally {
       setLoading(false);
     }
-  }, [company.id, token]);
+  }, [company.id, token, endpointSegment]);
 
-  useEffect(() => { fetchAdmins(); }, [fetchAdmins]);
+  useEffect(() => { fetchRows(); }, [fetchRows]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
     if (newPass.length < 8) { toast.error("Initial password must be at least 8 characters"); return; }
     setAdding(true);
     try {
-      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins`, {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/${endpointSegment}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ email: newEmail.trim(), initial_password: newPass }),
@@ -2024,7 +1767,7 @@ function AdminsModal({ company, token, onClose }) {
       if (!res.ok) throw new Error(data.detail || "Failed");
       toast.success(`Added ${data.email}. They'll be forced to set a new password on first login.`);
       setNewEmail(""); setNewPass("");
-      fetchAdmins();
+      fetchRows();
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -2032,31 +1775,31 @@ function AdminsModal({ company, token, onClose }) {
     }
   };
 
-  const handleDelete = (admin) => setConfirmDeleteAdmin(admin);
+  const handleDelete = (row) => setConfirmDeleteRow(row);
   const handleDeleteConfirmed = async () => {
-    if (!confirmDeleteAdmin) return;
-    setDeletingAdmin(true);
+    if (!confirmDeleteRow) return;
+    setDeletingRow(true);
     try {
-      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${confirmDeleteAdmin.id}`, {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/${endpointSegment}/${confirmDeleteRow.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || "Failed");
-      toast.success("Admin removed");
-      setConfirmDeleteAdmin(null);
-      fetchAdmins();
+      toast.success(`${collectionLabel[0].toUpperCase()}${collectionLabel.slice(1)} removed`);
+      setConfirmDeleteRow(null);
+      fetchRows();
     } catch (err) {
       toast.error(err.message);
     } finally {
-      setDeletingAdmin(false);
+      setDeletingRow(false);
     }
   };
 
   const handleReset = async () => {
     if (resetPass.length < 8) { toast.error("New password must be at least 8 characters"); return; }
     try {
-      const res = await fetch(`${API}/super-admin/companies/${company.id}/admins/${resetting.id}/reset-password`, {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/${endpointSegment}/${resetting.id}/reset-password`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ new_password: resetPass }),
@@ -2065,114 +1808,321 @@ function AdminsModal({ company, token, onClose }) {
       if (!res.ok) throw new Error(data.detail || "Failed");
       toast.success(`Password reset for ${resetting.email}. They'll be forced to change it on next login.`);
       setResetting(null); setResetPass("");
-      fetchAdmins();
+      fetchRows();
     } catch (err) {
       toast.error(err.message);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold">Admins — {company.name}</h3>
-            <p className="text-xs text-muted-foreground">Tenant {company.id.slice(0, 8)}…</p>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
+    <>
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Tenant access — {company.name}</DialogTitle>
+            <p className="text-xs text-muted-foreground">Tenant <code className="font-mono">{company.id.slice(0, 8)}…</code></p>
+          </DialogHeader>
 
-        {loading ? (
-          <div className="text-center text-muted-foreground py-4">Loading…</div>
-        ) : (
-          <table className="w-full text-sm mb-6">
-            <thead className="bg-muted/40 text-left text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Email</th>
-                <th className="px-3 py-2">Created</th>
-                <th className="px-3 py-2">Reset?</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {admins.map((a) => (
-                <tr key={a.id} className="border-t">
-                  <td className="px-3 py-2 font-mono text-xs">{a.email}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{(a.created_at || "").slice(0, 10)}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {a.password_change_required ? <span className="text-amber-600">forced change pending</span> : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right space-x-1">
-                    <Button size="sm" variant="ghost" onClick={() => { setResetting(a); setResetPass(""); }}>
-                      <KeyRound className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => handleDelete(a)} disabled={admins.length <= 1}>
-                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                    </Button>
-                  </td>
+          {/* Role switch — Admins have full read/write, viewers are
+              read-only (backend rejects POST/PUT/PATCH/DELETE from
+              viewer tokens at `auth_utils.verify_admin`). */}
+          <div className="flex gap-1 border-b border-border -mx-6 px-6">
+            {[
+              { key: "admins",  label: "Admins" },
+              { key: "viewers", label: "Viewers (read-only)" },
+            ].map((opt) => {
+              const active = kind === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => { setKind(opt.key); setNewEmail(""); setNewPass(""); }}
+                  className={cn(
+                    "px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors",
+                    active
+                      ? "border-foreground text-foreground font-medium"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {loading ? (
+            <div className="text-center text-muted-foreground py-4 text-sm">Loading…</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-left text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Email</th>
+                  <th className="px-3 py-2 font-medium">Created</th>
+                  <th className="px-3 py-2 font-medium">Reset?</th>
+                  <th />
                 </tr>
-              ))}
-              {admins.length === 0 && (
-                <tr><td colSpan={4} className="text-center py-4 text-muted-foreground">No admins yet</td></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="px-3 py-2 font-mono text-xs">{r.email}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{(r.created_at || "").slice(0, 10)}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.password_change_required ? <span className="text-warning">forced change pending</span> : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right space-x-1">
+                      <Button size="sm" variant="ghost" onClick={() => { setResetting(r); setResetPass(""); }}>
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleDelete(r)}
+                        // Last-admin guard — viewers have no such rule
+                        // (a tenant can have zero viewers).
+                        disabled={!isViewers && rows.length <= 1}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan={4} className="text-center py-4 text-muted-foreground text-sm">
+                    No {collectionLabelP} yet
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
+
+          {/* Add form */}
+          <form onSubmit={handleAdd} className="border-t border-border pt-4 space-y-3">
+            <div className="text-sm font-medium text-foreground">
+              Add {collectionLabel}
+              {isViewers && (
+                <span className="ml-2 text-xs text-muted-foreground font-normal">read-only access</span>
               )}
-            </tbody>
-          </table>
-        )}
-
-        {/* Add admin form */}
-        <form onSubmit={handleAdd} className="border-t pt-4 space-y-3">
-          <div className="text-sm font-medium text-foreground">Add admin</div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs">Email</Label>
-              <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
-                     type="email" required placeholder="admin@example.com" />
             </div>
-            <div>
-              <Label className="text-xs">Initial password (≥8 chars)</Label>
-              <Input value={newPass} onChange={(e) => setNewPass(e.target.value)}
-                     type="text" required placeholder="They'll be forced to change it" />
-            </div>
-          </div>
-          <Button type="submit" disabled={adding} className="bg-primary hover:bg-primary/90 text-white">
-            <UserPlus className="w-4 h-4 mr-2" /> {adding ? "Adding…" : "Add admin"}
-          </Button>
-        </form>
-
-        {/* Reset password sub-modal */}
-        {resetting && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setResetting(null)}>
-            <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-              <h4 className="font-semibold mb-2">Reset password</h4>
-              <p className="text-sm text-muted-foreground mb-3">
-                Set a new bootstrap password for <strong>{resetting.email}</strong>. They'll be forced
-                to change it on next login.
-              </p>
-              <Input
-                value={resetPass}
-                onChange={(e) => setResetPass(e.target.value)}
-                placeholder="New password (≥8 chars)"
-                type="text"
-              />
-              <div className="flex justify-end gap-2 mt-4">
-                <Button variant="outline" onClick={() => setResetting(null)}>Cancel</Button>
-                <Button onClick={handleReset}>Reset password</Button>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs">Email</Label>
+                <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)}
+                       type="email" required placeholder={`${collectionLabel}@example.com`} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Initial password (≥8 chars)</Label>
+                <Input value={newPass} onChange={(e) => setNewPass(e.target.value)}
+                       type="text" required placeholder="They'll be forced to change it" className="mt-1" />
               </div>
             </div>
+            <Button type="submit" disabled={adding}>
+              <UserPlus className="w-4 h-4 mr-2" /> {adding ? "Adding…" : `Add ${collectionLabel}`}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset password sub-dialog */}
+      <Dialog open={!!resetting} onOpenChange={(o) => !o && setResetting(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset password</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Set a new bootstrap password for <strong className="text-foreground">{resetting?.email}</strong>. They'll be forced
+            to change it on next login.
+          </p>
+          <Input
+            value={resetPass}
+            onChange={(e) => setResetPass(e.target.value)}
+            placeholder="New password (≥8 chars)"
+            type="text"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setResetting(null)}>Cancel</Button>
+            <Button onClick={handleReset}>Reset password</Button>
           </div>
-        )}
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
-        open={!!confirmDeleteAdmin}
-        onOpenChange={(o) => !o && setConfirmDeleteAdmin(null)}
-        title="Remove admin?"
-        description={confirmDeleteAdmin && `${confirmDeleteAdmin.email} will lose access to this tenant immediately. Their JWT will be rejected on the next request.`}
-        confirmLabel="Remove admin"
+        open={!!confirmDeleteRow}
+        onOpenChange={(o) => !o && setConfirmDeleteRow(null)}
+        title={`Remove ${collectionLabel}?`}
+        description={confirmDeleteRow && `${confirmDeleteRow.email} will lose access to this tenant immediately. Their JWT will be rejected on the next request.`}
+        confirmLabel={`Remove ${collectionLabel}`}
         destructive
-        loading={deletingAdmin}
+        loading={deletingRow}
         onConfirm={handleDeleteConfirmed}
       />
-    </div>
+    </>
+  );
+}
+
+/* ─── Sprint 14 — per-tenant model assignment modal ───────────────────── */
+
+function ModelAssignmentModal({ company, token, onClose, onSaved }) {
+  const [allModels, setAllModels] = useState([]);   // platform_models (enabled only)
+  const [allowed, setAllowed] = useState([]);       // current allowlist
+  const [defaultKey, setDefaultKey] = useState(""); // current default
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const [modelsRes, assignRes] = await Promise.all([
+          fetch(`${API}/super-admin/models`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API}/super-admin/companies/${company.id}/models`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        const modelsBody = await modelsRes.json();
+        const assignBody = await assignRes.json();
+        if (!modelsRes.ok) throw new Error(modelsBody.detail || "Failed to load models");
+        if (!assignRes.ok) throw new Error(assignBody.detail || "Failed to load assignment");
+        if (cancelled) return;
+        // Only enabled models can be newly assigned; show disabled rows
+        // in the list with a muted hint so the operator knows why they
+        // can't pick them.
+        setAllModels(modelsBody.models || []);
+        setAllowed(assignBody.allowed || []);
+        setDefaultKey(assignBody.default || "");
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [company.id, token]);
+
+  const toggleAllowed = (key) => {
+    setAllowed((prev) => {
+      const set = new Set(prev);
+      if (set.has(key)) {
+        set.delete(key);
+        // If we removed the current default, clear it so the operator
+        // re-picks before save — the backend rejects mismatches anyway.
+        if (defaultKey === key) setDefaultKey("");
+      } else {
+        set.add(key);
+        if (!defaultKey) setDefaultKey(key);
+      }
+      return Array.from(set);
+    });
+  };
+
+  const handleSave = async () => {
+    if (allowed.length === 0) { toast.error("Pick at least one model"); return; }
+    if (!defaultKey || !allowed.includes(defaultKey)) {
+      toast.error("Pick a default from the allowed list"); return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${company.id}/models`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ allowed, default: defaultKey }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Save failed");
+      toast.success(`Models updated · ${allowed.length} allowed · default ${defaultKey}`);
+      // The default flowing through here is what the company-list row
+      // shows under "LLM". Trigger the parent's refresh so the row
+      // reflects the new default immediately, not on next page load.
+      if (onSaved) onSaved();
+      else onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Models — {company.name}</DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Pick which models this tenant can use. The default is what the chat
+            path picks when no model is explicitly requested. Disabled platform
+            models can't be newly assigned.
+          </p>
+        </DialogHeader>
+
+        {loading ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>
+        ) : allModels.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No models registered yet. Add one from the Models tab first.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {allModels.map((m) => {
+              const isAllowed = allowed.includes(m.key);
+              const isDefault = defaultKey === m.key;
+              const isDisabled = !m.enabled && !isAllowed;
+              return (
+                <li
+                  key={m.key}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 flex items-center gap-3",
+                    isAllowed ? "border-primary/30 bg-primary/5" : "border-border bg-card",
+                    isDisabled && "opacity-50",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-primary shrink-0"
+                    checked={isAllowed}
+                    disabled={isDisabled}
+                    onChange={() => toggleAllowed(m.key)}
+                    aria-label={`Allow ${m.key} for ${company.name}`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground truncate">{m.display_name || m.key}</span>
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider">{m.provider}</Badge>
+                      {!m.enabled && (
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Disabled</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-mono">{m.key}</div>
+                    {m.pricing && (
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        In ${Number(m.pricing.input_per_1m_usd).toFixed(2)} · Out ${Number(m.pricing.output_per_1m_usd).toFixed(2)} per 1M tokens
+                      </div>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-xs shrink-0 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="default-model"
+                      checked={isDefault}
+                      disabled={!isAllowed}
+                      onChange={() => setDefaultKey(m.key)}
+                      className="accent-primary"
+                    />
+                    <span className={isDefault ? "text-primary font-medium" : "text-muted-foreground"}>
+                      Default
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <div className="flex justify-end gap-2 pt-4 border-t border-border">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving || loading || !allowed.length || !defaultKey}>
+            {saving ? "Saving…" : "Save assignment"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -19,7 +19,7 @@ from typing import Optional
 
 from database import get_database
 
-from . import frontier, upsert
+from . import frontier, pages, upsert
 from .config import CrawlerConfig, load_config, record_run_summary
 from .fetcher import Fetcher, FetchResult
 from .parser import parse, filter_links
@@ -102,6 +102,11 @@ async def _process_one(
     except Exception as exc:
         logger.exception("Unhandled fetch error for %s", row.url)
         await frontier.mark_failed(row.id, None, f"unhandled:{exc}")
+        await pages.record_failed(
+            company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+            parent_url=row.parent_url, depth=row.depth, attempts=row.attempts,
+            http_status=None, error=f"unhandled:{exc}",
+        )
         counts["failed"] += 1
         return
 
@@ -110,9 +115,18 @@ async def _process_one(
         # Treat policy-driven skips separately from real failures.
         if err.startswith("robots_") or err.startswith("non_html"):
             await frontier.mark_skipped(row.id, err)
+            await pages.record_skipped(
+                company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+                parent_url=row.parent_url, depth=row.depth, attempts=row.attempts, reason=err,
+            )
             counts["skipped"] += 1
             return
         await frontier.mark_failed(row.id, result.http_status, err)
+        await pages.record_failed(
+            company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+            parent_url=row.parent_url, depth=row.depth, attempts=row.attempts,
+            http_status=result.http_status, error=err,
+        )
         counts["failed"] += 1
         # Penalize the KB row (if any) so 404s eventually go stale.
         await upsert.record_failure(cfg.company_id, row.url, result.http_status)
@@ -124,6 +138,11 @@ async def _process_one(
     except Exception as exc:
         logger.exception("Parse error for %s", row.url)
         await frontier.mark_failed(row.id, result.http_status, f"parse:{exc}")
+        await pages.record_failed(
+            company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+            parent_url=row.parent_url, depth=row.depth, attempts=row.attempts,
+            http_status=result.http_status, error=f"parse:{exc}",
+        )
         counts["failed"] += 1
         return
 
@@ -138,6 +157,43 @@ async def _process_one(
         cfg.company_id, row.url, page, result.http_status or 200,
     )
     counts[f"upsert_{outcome}"] += 1
+
+    # Incremental processing: only (re)process pages whose content actually
+    # changed this run. `unchanged` pages skip the pipeline entirely — we just
+    # note we saw them. This keeps embeddings/summaries in sync with the KB
+    # without recomputing work on every crawl.
+    CHANGED = {"inserted", "updated", "resurrected"}
+    if outcome in CHANGED:
+        try:
+            proc = await pages.record_processed(
+                company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+                parent_url=row.parent_url, depth=row.depth, attempts=row.attempts,
+                http_status=result.http_status or 200, raw_html=result.html or "",
+                title=parsed.title, extracted_text=parsed.text,
+                language=parsed.language, category=parsed.category,
+            )
+            # Sync the fresh summary + embedding onto the KB row so the
+            # knowledge base reflects the latest scraped content automatically.
+            await upsert.attach_processing(
+                cfg.company_id, row.url,
+                summary=proc.get("summary", ""),
+                embedding=proc.get("embedding", []),
+                embedding_dim=proc.get("embedding_dim", 0),
+                chunk_count=proc.get("chunk_count", 0),
+            )
+            counts["chunks"] += proc.get("chunk_count", 0)
+            counts["reprocessed"] += 1
+        except Exception:
+            logger.exception("Processing/store error for %s", row.url)
+            counts["process_errors"] += 1
+    else:
+        # Unchanged — record that we saw it, skip reprocessing.
+        await pages.record_unchanged(
+            company_id=cfg.company_id, run_id=row.run_id, url=row.url, url_hash=row.url_hash,
+            parent_url=row.parent_url, depth=row.depth, attempts=row.attempts,
+            http_status=result.http_status or 200,
+        )
+        counts["unchanged_skipped_reprocess"] += 1
 
     # Enqueue discovered links (filtered).
     accepted = filter_links(
@@ -270,6 +326,26 @@ async def run_crawl(company_id: str, triggered_by: str = "manual") -> dict:
     }
     await _finalize_run(run_id, final_status, summary)
     await record_run_summary(company_id, run_id, final_status, summary)
+
+    # Notifications — crawl outcome + stale-page alert.
+    try:
+        from services.notification_dispatcher import notify
+        if final_status == RUN_STATUS_SUCCESS:
+            await notify("crawler.run_succeeded", company_id=company_id, context={
+                "run_id": run_id[:8], "pages": frontier_stats.get("total", 0),
+                "processed": counts.get("reprocessed", 0), "updated": counts.get("upsert_updated", 0),
+                "failed": frontier_stats.get("failed", 0),
+            })
+        else:
+            await notify("crawler.run_failed", company_id=company_id, context={
+                "run_id": run_id[:8], "reason": summary.get("reason") or counts.get("reason_no_seeds") and "no_seeds" or "run_failed",
+                "seeds": len(cfg.seed_urls),
+            })
+        stale = counts.get("sweep_marked_stale", 0)
+        if stale and stale > 0:
+            await notify("crawler.stale_pages", company_id=company_id, context={"count": stale})
+    except Exception:
+        logger.exception("crawl notification failed (non-fatal)")
 
     logger.info("Crawl run=%s finished status=%s summary=%s", run_id, final_status, summary)
     return {"run_id": run_id, "status": final_status, **summary}

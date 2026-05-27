@@ -183,6 +183,42 @@ async def upsert_page(
     return "resurrected" if was_stale else "updated"
 
 
+async def attach_processing(
+    company_id: str,
+    url: str,
+    *,
+    summary: str,
+    embedding: list[float],
+    embedding_dim: int,
+    chunk_count: int,
+) -> bool:
+    """Sync the derived processing artifacts (summary + embedding + chunk
+    count) onto the knowledge_base row for this URL.
+
+    Called only when a page's content actually changed (insert/update/
+    resurrect), so the KB carries the latest summary and vector without
+    recomputing on unchanged pages. The bot's retrieval is keyword-based
+    today, but keeping the embedding on the row means the index is ready for
+    a future vector search and always reflects the current content.
+
+    Returns True if a row was updated.
+    """
+    db = await get_database()
+    url_hash = _sha1(url)
+    res = await db.knowledge_base.update_one(
+        {"company_id": company_id, "url_hash": url_hash},
+        {"$set": {
+            "summary":        summary,
+            "embedding":      embedding,
+            "embedding_dim":  embedding_dim,
+            "chunk_count":    chunk_count,
+            "processed_at":   _now_iso(),
+            "updated_at":     _now_iso(),
+        }},
+    )
+    return res.modified_count == 1
+
+
 async def record_failure(
     company_id: str,
     url: str,

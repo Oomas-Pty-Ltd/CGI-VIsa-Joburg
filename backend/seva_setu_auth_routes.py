@@ -27,6 +27,7 @@ import uuid
 import base64
 import re
 import io
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -43,7 +44,10 @@ from services.email_service import (
 )
 from services.pdf_service import generate_application_pdf
 from services.bot_config import get_bot_config
+from services.processing_service import invoke_processing_service
+from services.notification_dispatcher import notify as _notify
 from tenant import get_tenant_id
+from auth_utils import verify_admin
 
 
 async def _brand_for(company_id: str) -> tuple[str, str]:
@@ -205,6 +209,63 @@ class LogoutRequest(BaseModel):
     chat_history: Optional[List[Dict[str, str]]] = None
 
 
+# ── Mock external processing service ──────────────────────────────────────────
+#
+# Stands in for the downstream "government processing" system the platform
+# notifies when an application is confirmed. `services.processing_service`
+# targets this by default (PROCESSING_SERVICE_URL); production repoints the
+# env var at the real endpoint. Kept here, not in a prod router, because it
+# is dev/test scaffolding — a real deployment never relies on it.
+
+class MockGovSubmitRequest(BaseModel):
+    reference_id:     Optional[str] = None
+    service_type:     Optional[str] = None
+    service_name:     Optional[str] = None
+    applicant_name:   Optional[str] = None
+    applicant_email:  Optional[str] = None
+    document_count:   Optional[int] = 0
+    company_id:       Optional[str] = None
+    idempotency_key:  Optional[str] = None
+    simulate_failure: bool = False
+    model_config = {"extra": "allow"}
+
+
+# In-process idempotency store: key -> gov_processing_ref. A real downstream
+# would persist this; the mock keeps it in memory so a retry that eventually
+# succeeds returns the *same* reference instead of minting a duplicate.
+_MOCK_IDEM_STORE: Dict[str, str] = {}
+
+
+@router.post("/_mock/gov-submit")
+async def mock_gov_submit(req: MockGovSubmitRequest, idempotency_key: str = Header(default="")):
+    """Mock downstream acknowledgement. Returns a processing reference +
+    estimated turnaround on success; returns 503 when the caller sets
+    ``simulate_failure`` so the failure path is deterministically testable.
+
+    Idempotent: repeated successful calls with the same key return the same
+    ``gov_processing_ref`` (no duplicate downstream record on retry)."""
+    if req.simulate_failure:
+        raise HTTPException(
+            status_code=503,
+            detail="Processing service temporarily unavailable. Please retry later.",
+        )
+    key = idempotency_key or req.idempotency_key or req.reference_id or uuid.uuid4().hex
+    gov_ref = _MOCK_IDEM_STORE.get(key)
+    deduped = gov_ref is not None
+    if not gov_ref:
+        gov_ref = f"GOV-{uuid.uuid4().hex[:10].upper()}"
+        _MOCK_IDEM_STORE[key] = gov_ref
+    return {
+        "accepted":         True,
+        "gov_processing_ref": gov_ref,
+        "received_for":     req.reference_id,
+        "idempotent_replay": deduped,
+        "estimated_days":   7,
+        "queue_position":   42,
+        "received_at":      _now().isoformat(),
+    }
+
+
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
 # ── Tenant service lookup ────────────────────────────────────────────────────
@@ -297,8 +358,21 @@ async def start_auth(
 
     # Per-tenant security config (TTL + dev OTP value)
     _sec = await _security_for(company_id)
-    _otp_value  = _sec["otp_dev_value"]
     _otp_ttl    = _sec["otp_ttl_minutes"]
+
+    # Dev auth mode (platform-level toggle). ON → fixed dev OTP, no email.
+    # OFF (production) → real random OTP, emailed; the dev value won't work.
+    from services import platform_config as _pc
+    try:
+        await _pc.ensure_loaded()
+    except Exception:
+        pass
+    dev_mode = bool(_pc.get("dev_auth_mode", True))
+
+    if dev_mode:
+        _otp_value = str(_sec["otp_dev_value"])
+    else:
+        _otp_value = f"{secrets.randbelow(1_000_000):06d}"
 
     # Create OTP record
     otp_id = str(uuid.uuid4())
@@ -307,26 +381,32 @@ async def start_auth(
         "id": otp_id,
         "company_id": company_id,
         "email": email,
-        "otp": _otp_value,  # replace with random in prod — use security_config.otp_dev_value for testing
+        "otp": _otp_value,
         "expires_at": expires_at,
         "used": False,
         "attempts": 0,
     })
 
-    # Send OTP — if email is not configured the fallback dev OTP applies.
     _bot_name, _org_name = await _brand_for(company_id)
-    email_sent = send_otp_email(email, _otp_value, bot_name=_bot_name, org_name=_org_name)
-    if email_sent:
-        msg = f"OTP sent to {email}. Please enter it to continue."
+    if dev_mode:
+        # No email in dev — the fixed code is shown to the user directly.
+        email_sent = False
+        msg = f"Developer mode is on — enter OTP {_otp_value} to continue."
     else:
-        logger.warning(f"[AUTH] OTP email failed for {email}. Using dev OTP: {_otp_value}")
-        msg = f"Email delivery unavailable — use OTP: {_otp_value} to continue."
+        email_sent = send_otp_email(email, _otp_value, bot_name=_bot_name, org_name=_org_name)
+        if email_sent:
+            msg = f"OTP sent to {email}. Please enter it to continue."
+        else:
+            # Real failure — never leak the random OTP. User retries.
+            logger.error(f"[AUTH] OTP email delivery failed for {email} (production mode)")
+            msg = "We couldn't send the verification email just now. Please try again in a moment."
 
     return {
         "success": True,
         "is_new_user": is_new,
         "message": msg,
         "email_sent": email_sent,
+        "dev_mode": dev_mode,
     }
 
 
@@ -657,6 +737,14 @@ async def submit_application(app_id: str, authorization: str = Header(default=""
         org_name=_org_name,
     )
 
+    try:
+        await _notify("application.submitted", company_id=session["company_id"], context={
+            "applicant_name": user.get("name", ""), "applicant_email": user.get("email", ""),
+            "service_name": app.get("service_name", app["service_type"]), "reference_id": app["reference_id"],
+        })
+    except Exception:
+        logger.exception("application.submitted notify failed")
+
     return {
         "success": True,
         "status": "submitted",
@@ -665,27 +753,17 @@ async def submit_application(app_id: str, authorization: str = Header(default=""
     }
 
 
-@router.post("/applications/{app_id}/confirm")
-async def confirm_application(app_id: str, authorization: str = Header(default="")):
-    """
-    Confirm application — generates PDF, sends confirmation email, locks application.
-    """
-    db = await get_database()
-    session = await _get_session(authorization, db)
-
-    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found.")
-    if app["status"] == "confirmed":
-        raise HTTPException(status_code=400, detail="Application already confirmed.")
-
-    user = await db.seva_setu_users.find_one({"id": session["user_id"], "company_id": session["company_id"]})
-    svc = (await _load_tenant_services(db, app["company_id"])).get(app["service_type"], {})
+async def _finalize_confirmed_submission(db, app: Dict[str, Any], invocation: Dict[str, Any]) -> Dict[str, Any]:
+    """Finalize an application that the external system of record has ACCEPTED:
+    generate the PDF, mark it confirmed, record the gov reference, send the
+    confirmation email. Shared by the user confirm flow and the admin retry
+    action so both finalize identically. Returns the gov processing ref."""
+    company_id = app["company_id"]
+    user = await db.seva_setu_users.find_one({"id": app["user_id"], "company_id": company_id})
+    svc = (await _load_tenant_services(db, company_id)).get(app["service_type"], {})
     form_data = app.get("form_data", {})
+    _bot_name, _org_name = await _brand_for(company_id)
 
-    _bot_name, _org_name = await _brand_for(session["company_id"])
-
-    # Generate PDF
     pdf_bytes = generate_application_pdf(
         service_name=app.get("service_name", svc.get("name", app["service_type"])),
         form_data=form_data,
@@ -696,32 +774,156 @@ async def confirm_application(app_id: str, authorization: str = Header(default="
         ],
         required_docs=_filter_required_docs(svc.get("documents", []), form_data),
         org_name=_org_name or _bot_name,
-        branding=await _pdf_branding_for(app["company_id"]),
+        branding=await _pdf_branding_for(company_id),
         field_labels=_field_labels_for(svc),
     )
-
-    # Save PDF to disk
     pdf_filename = f"{app['reference_id']}.pdf"
     pdf_path = os.path.join(UPLOAD_DIR, pdf_filename)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
+    gov_ref = (invocation.get("response") or {}).get("gov_processing_ref")
     await db.seva_setu_applications.update_one(
-        {"id": app_id, "company_id": session["company_id"]},
+        {"id": app["id"], "company_id": company_id},
         {"$set": {
             "status": "confirmed",
             "pdf_path": pdf_path,
+            "confirmed_at": _now().isoformat(),
+            "service_status": "acknowledged",
+            "gov_processing_ref": gov_ref,
             "updated_at": _now().isoformat(),
-        }}
+        }},
+    )
+    if user:
+        send_confirmation_email(
+            user["email"], user["name"], app["reference_id"],
+            svc.get("name", app["service_type"]), pdf_bytes,
+            bot_name=_bot_name, org_name=_org_name,
+        )
+    try:
+        await _notify("application.confirmed", company_id=company_id, context={
+            "applicant_name": (user or {}).get("name", ""), "applicant_email": (user or {}).get("email", ""),
+            "service_name": svc.get("name", app["service_type"]), "reference_id": app["reference_id"],
+            "gov_ref": gov_ref or "",
+        })
+    except Exception:
+        logger.exception("application.confirmed notify failed")
+    return {"gov_processing_ref": gov_ref}
+
+
+@router.post("/applications/{app_id}/confirm")
+async def confirm_application(
+    app_id: str,
+    authorization: str = Header(default=""),
+    simulate_failure: bool = Query(default=False),
+):
+    """
+    Confirm application. The external processing service is the **system of
+    record**: we submit to it FIRST (with inline retry) and only finalize —
+    generate the PDF, send the confirmation email, set status=confirmed — once
+    it accepts. If it doesn't, the application is left in ``submission_pending``
+    (no false confirmation), the failed round-trip is recorded, and it can be
+    retried from the admin console. ``simulate_failure`` forces the service
+    call to fail (for testing the pending path).
+    """
+    db = await get_database()
+    session = await _get_session(authorization, db)
+
+    app = await db.seva_setu_applications.find_one({"id": app_id, "user_id": session["user_id"], "company_id": session["company_id"]})
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if app["status"] == "confirmed":
+        raise HTTPException(status_code=400, detail="Application already confirmed.")
+
+    # Submit to the system of record first (idempotency key = reference_id so
+    # retries never create a duplicate downstream record).
+    invocation = await invoke_processing_service(
+        app, simulate_failure=simulate_failure, idempotency_key=app["reference_id"],
+    )
+    await db.seva_setu_applications.update_one(
+        {"id": app_id, "company_id": session["company_id"]},
+        {"$push": {"service_invocations": invocation}, "$set": {"updated_at": _now().isoformat()}},
     )
 
-    send_confirmation_email(user["email"], user["name"], app["reference_id"], svc.get("name", app["service_type"]), pdf_bytes, bot_name=_bot_name, org_name=_org_name)
+    if not invocation.get("ok"):
+        # NOT submitted — be honest. No PDF, no confirmation email.
+        await db.seva_setu_applications.update_one(
+            {"id": app_id, "company_id": session["company_id"]},
+            {"$set": {"status": "submission_pending", "service_status": "failed", "updated_at": _now().isoformat()}},
+        )
+        try:
+            await _notify("application.submission_failed", company_id=session["company_id"], context={
+                "reference_id": app["reference_id"], "service_name": app.get("service_name", app["service_type"]),
+                "error": invocation.get("error") or "processing service unavailable",
+            })
+        except Exception:
+            logger.exception("application.submission_failed notify failed")
+        return {
+            "success": False,
+            "status": "submission_pending",
+            "reference_id": app["reference_id"],
+            "service_status": "failed",
+            "retryable": bool(invocation.get("retryable")),
+            "message": (
+                "We've saved your details but couldn't complete the submission with "
+                "the processing authority just now. No confirmation has been issued yet "
+                "— we'll keep trying and email you once it goes through."
+            ),
+        }
 
+    result = await _finalize_confirmed_submission(db, app, invocation)
     return {
         "success": True,
         "status": "confirmed",
         "reference_id": app["reference_id"],
+        "service_status": "acknowledged",
+        "gov_processing_ref": result["gov_processing_ref"],
         "message": "Application confirmed! A confirmation email with your PDF has been sent.",
+    }
+
+
+@router.post("/applications/{app_id}/retry-submission")
+async def retry_submission(app_id: str, payload: dict = Depends(verify_admin)):
+    """Admin action: re-submit a ``submission_pending`` application to the
+    external system of record. On acceptance it finalizes exactly like the
+    user confirm flow (PDF + email + status=confirmed). Idempotent via the
+    reference_id key, so a retry never duplicates a downstream record."""
+    db = await get_database()
+    app = await db.seva_setu_applications.find_one({"id": app_id})
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    # Tenant scoping: local admins can only act on their own tenant.
+    if payload.get("user_type") == "local_admin" and app.get("company_id") != payload.get("company_id"):
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if app.get("status") == "confirmed":
+        raise HTTPException(status_code=400, detail="Application already confirmed.")
+
+    invocation = await invoke_processing_service(app, idempotency_key=app["reference_id"])
+    await db.seva_setu_applications.update_one(
+        {"id": app_id, "company_id": app["company_id"]},
+        {"$push": {"service_invocations": invocation}, "$set": {"updated_at": _now().isoformat()}},
+    )
+
+    if not invocation.get("ok"):
+        await db.seva_setu_applications.update_one(
+            {"id": app_id, "company_id": app["company_id"]},
+            {"$set": {"status": "submission_pending", "service_status": "failed", "updated_at": _now().isoformat()}},
+        )
+        return {
+            "success": False,
+            "status": "submission_pending",
+            "service_status": "failed",
+            "retryable": bool(invocation.get("retryable")),
+            "message": f"Retry failed: {invocation.get('error') or 'processing service unavailable'}.",
+        }
+
+    result = await _finalize_confirmed_submission(db, app, invocation)
+    return {
+        "success": True,
+        "status": "confirmed",
+        "service_status": "acknowledged",
+        "gov_processing_ref": result["gov_processing_ref"],
+        "message": "Submission accepted on retry. Application confirmed.",
     }
 
 
@@ -839,6 +1041,12 @@ async def upload_document(
         ocr_fields = await _run_ocr(raw, content_type, company_id=session.get("company_id"))
     except Exception as e:
         logger.warning(f"OCR failed for {saved_name}: {e}")
+        try:
+            await _notify("application.ocr_failed", company_id=session.get("company_id"), context={
+                "reference_id": app.get("reference_id", ""), "doc_name": doc_name,
+            })
+        except Exception:
+            logger.exception("application.ocr_failed notify failed")
 
     # Append document record to application
     doc_record = {

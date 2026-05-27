@@ -1,0 +1,107 @@
+# Compose for a single VM (and local testing).
+#
+# Topology:
+#   - mongo    : containerised MongoDB with a persistent named volume.
+#   - backend  : FastAPI/uvicorn, exposed only to localhost; nginx proxies it.
+#   - frontend : nginx serving the React build + reverse-proxying /api.
+#   - crawler  : on-demand Playwright job (profile "crawler", never auto-starts).
+#
+# Setup before first run:
+#   cp backend/.env.example backend/.env.production    # then fill in secrets
+#   # for a quick local test you can instead: cp backend/.env backend/.env.production
+# MONGO_URL/DB_NAME are set below (pointing at the mongo service) and override
+# whatever is in that env file.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      # Loopback only. Host port is 27018 (not 27017) to avoid clashing with a
+      # host mongod that may already own 27017 — e.g. your migration source.
+      # Connect from the host via mongodb://localhost:27018. Containers still
+      # talk to this service as mongo:27017 internally. Drop this line entirely
+      # to keep Mongo reachable only from the other containers.
+      - "127.0.0.1:27018:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - web
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Local `docker compose build` tags this; the VM pulls it from GHCR (the
+    # deploy sets BACKEND_IMAGE to a pinned :<sha> tag). Default = latest.
+    image: ${BACKEND_IMAGE:-ghcr.io/mobimerz/cgi-visa-joburg-backend:latest}
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "seva_setu"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/logs:/app/logs
+    ports:
+      # Bind to loopback only — the public entrypoint is nginx (frontend).
+      - "127.0.0.1:8000:8000"
+    networks:
+      - web
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty (the default) => the SPA calls same-origin /api and nginx
+        # proxies it. Correct for LOCAL testing (visit http://localhost).
+        # For PROD, export PUBLIC_API_URL=https://your-domain so the embeddable
+        # widget can call your API cross-origin from customer sites.
+        REACT_APP_BACKEND_URL: "${PUBLIC_API_URL:-}"
+    image: ${FRONTEND_IMAGE:-ghcr.io/mobimerz/cgi-visa-joburg-frontend:latest}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      # - "443:443"   # add once TLS is terminated here
+    networks:
+      - web
+
+  crawler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.crawler
+    # Not built by CI (chromium = heavy, rarely run). Build on demand locally,
+    # or add it to the workflow if you want it pulled too.
+    image: ${CRAWLER_IMAGE:-ghcr.io/mobimerz/cgi-visa-joburg-crawler:latest}
+    profiles:
+      - crawler          # only built/run when explicitly requested
+    env_file:
+      - ./backend/.env.production
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "seva_setu"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - web
+
+volumes:
+  mongo-data:
+
+networks:
+  web:
+    driver: bridge

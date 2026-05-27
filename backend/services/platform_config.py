@@ -56,6 +56,14 @@ DEFAULTS: Dict[str, Any] = {
 
     # ── Maintenance loops ─────────────────────────────────────────────
     "session_cleanup_interval_seconds": 3600,   # 1 h
+    "notification_job_interval_seconds": 3600,  # 1 h — notification scheduler
+
+    # ── Auth ──────────────────────────────────────────────────────────
+    # Dev auth mode: when True, the seva services login + apply OTP is the
+    # fixed dev value (security_config.otp_dev_value, default 123456) and no
+    # email is sent — convenient for testing. Turn OFF for production: a real
+    # random OTP is generated and emailed, and the dev value is rejected.
+    "dev_auth_mode": True,
 
     # ── WhatsApp channel ──────────────────────────────────────────────
     "whatsapp_body_char_limit":     1024,
