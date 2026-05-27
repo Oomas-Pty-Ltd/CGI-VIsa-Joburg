@@ -74,8 +74,10 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
-      # - "443:443"   # add once TLS is terminated here
+      # Parallel deploy on a shared box: published on 8080 to avoid the host's
+      # existing :80. Access the app at http://<VM-IP>:8080 (open 8080 in the
+      # firewall). Move back to "80:80" once this box is the sole deployment.
+      - "8080:80"
     networks:
       - web
 
