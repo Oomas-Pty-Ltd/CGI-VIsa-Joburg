@@ -2,7 +2,7 @@
 #
 # Topology:
 #   - mongo    : containerised MongoDB with a persistent named volume.
-#   - backend  : FastAPI/uvicorn, exposed only to localhost; nginx proxies it.
+#   - backend  : FastAPI/uvicorn, no host port; nginx proxies it over the network.
 #   - frontend : nginx serving the React build + reverse-proxying /api.
 #   - crawler  : on-demand Playwright job (profile "crawler", never auto-starts).
 #
@@ -53,9 +53,9 @@ services:
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/logs:/app/logs
-    ports:
-      # Bind to loopback only — the public entrypoint is nginx (frontend).
-      - "127.0.0.1:8000:8000"
+    # No host port published: nginx (frontend) reaches the backend over the
+    # internal `web` network as http://backend:8000. Publishing 8000 on the host
+    # only invited clashes. To debug from the host: `docker compose exec backend ...`.
     networks:
       - web
 
