@@ -92,6 +92,9 @@ async def log(company_id: str, usage: Optional[Dict[str, Any]]) -> None:
         # Don't write empty rows — keeps the collection lean and the
         # daily grouping queries faster.
         return
+    # Cached prompt tokens (OpenAI prompt cache). Billed at ~50% on gpt-4o-mini;
+    # tracking it lets the Cost tab show prompt-cache effectiveness over time.
+    cached = int(usage.get("cached_tokens") or 0)
     model = (usage.get("model") or "unknown")[:64]
     now = datetime.now(timezone.utc)
     # Pull pricing from the registry (TTL-cached) so a super-admin's
@@ -105,6 +108,7 @@ async def log(company_id: str, usage: Optional[Dict[str, Any]]) -> None:
         "model":              model,
         "prompt_tokens":      prompt,
         "completion_tokens":  completion,
+        "cached_tokens":      cached,
         "cost_usd":           cost,
     }
     try:
@@ -144,6 +148,7 @@ async def daily_totals(
             "cost_usd":          {"$sum": "$cost_usd"},
             "prompt_tokens":     {"$sum": "$prompt_tokens"},
             "completion_tokens": {"$sum": "$completion_tokens"},
+            "cached_tokens":     {"$sum": "$cached_tokens"},
             "calls":             {"$sum": 1},
         }},
         {"$sort": {"_id": 1}},
@@ -162,6 +167,7 @@ async def daily_totals(
             "cost_usd":          round(row["cost_usd"], 4) if row else 0.0,
             "prompt_tokens":     row["prompt_tokens"] if row else 0,
             "completion_tokens": row["completion_tokens"] if row else 0,
+            "cached_tokens":     row.get("cached_tokens", 0) if row else 0,
             "calls":             row["calls"] if row else 0,
         })
         cur += timedelta(days=1)
@@ -189,6 +195,7 @@ async def model_breakdown(
             "cost_usd":          {"$sum": "$cost_usd"},
             "prompt_tokens":     {"$sum": "$prompt_tokens"},
             "completion_tokens": {"$sum": "$completion_tokens"},
+            "cached_tokens":     {"$sum": "$cached_tokens"},
             "calls":             {"$sum": 1},
         }},
         {"$sort": {"cost_usd": -1}},
@@ -199,6 +206,7 @@ async def model_breakdown(
             "cost_usd":          round(r["cost_usd"], 4),
             "prompt_tokens":     r["prompt_tokens"],
             "completion_tokens": r["completion_tokens"],
+            "cached_tokens":     r.get("cached_tokens", 0),
             "calls":             r["calls"],
         }
         async for r in db.llm_usage.aggregate(pipeline)
@@ -220,6 +228,7 @@ async def tenant_breakdown(
             "cost_usd":          {"$sum": "$cost_usd"},
             "prompt_tokens":     {"$sum": "$prompt_tokens"},
             "completion_tokens": {"$sum": "$completion_tokens"},
+            "cached_tokens":     {"$sum": "$cached_tokens"},
             "calls":             {"$sum": 1},
         }},
         {"$sort": {"cost_usd": -1}},
@@ -243,7 +252,72 @@ async def tenant_breakdown(
             "cost_usd":          round(r["cost_usd"], 4),
             "prompt_tokens":     r["prompt_tokens"],
             "completion_tokens": r["completion_tokens"],
+            "cached_tokens":     r.get("cached_tokens", 0),
             "calls":             r["calls"],
         }
         for r in rows
     ]
+
+
+def budget_config() -> Dict[str, Any]:
+    """Informational budget/model config for the cost dashboards (read from
+    env). The retired in-memory cost_monitor enforced nothing live; these are
+    surfaced so dashboards can show remaining headroom."""
+    import os
+    return {
+        "daily_budget":   float(os.environ.get("DAILY_TOKEN_BUDGET", "50.0")),
+        "monthly_budget": float(os.environ.get("MONTHLY_TOKEN_BUDGET", "1000.0")),
+        "session_limit":  float(os.environ.get("SESSION_TOKEN_BUDGET", "1.0")),
+        "model":          os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+        "provider":       "openai",
+        # gpt-4o-mini public rates (per 1k tokens) by default; pricing is really
+        # per-model in the platform_models registry — these are indicative.
+        "input_cost_per_1k":  float(os.environ.get("LLM_INPUT_COST_PER_1K", "0.00015")),
+        "output_cost_per_1k": float(os.environ.get("LLM_OUTPUT_COST_PER_1K", "0.0006")),
+    }
+
+
+async def month_to_date_cost(company_id: str) -> float:
+    """Total LLM spend (USD) for one tenant from the 1st of the current month
+    (UTC) through now — the figure the budget gate compares against the tenant's
+    monthly cap. Anchored to the 1st to match the operator's calendar intuition
+    (same window as the local-admin budget gauge). One indexed aggregation;
+    callers on the hot path should cache the result (see services.budget_guard).
+    Returns 0.0 for an empty tenant."""
+    if not company_id:
+        return 0.0
+    now = datetime.now(timezone.utc)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    rows = await daily_totals(company_id, start, now)
+    return round(sum(float(r.get("cost_usd", 0.0) or 0.0) for r in rows), 6)
+
+
+async def today_totals(company_id: Optional[str] = None) -> Dict[str, Any]:
+    """Today's (UTC) usage summary from the ledger — the accurate, all-channel
+    replacement for the retired in-memory ``cost_monitor.get_daily_stats()``.
+    ``company_id=None`` is platform-wide. Shape is compatible with the old
+    dashboard consumers (``total_cost_usd`` / ``total_tokens`` / ``budget``)."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = await daily_totals(company_id, start, now)
+    row = rows[-1] if rows else {}
+    prompt = int(row.get("prompt_tokens", 0) or 0)
+    completion = int(row.get("completion_tokens", 0) or 0)
+    cached = int(row.get("cached_tokens", 0) or 0)
+    cost = round(float(row.get("cost_usd", 0.0) or 0.0), 4)
+    cfg = budget_config()
+    daily_budget = cfg["daily_budget"] or 1.0
+    return {
+        "date": now.strftime("%Y-%m-%d"),
+        "total_cost_usd": cost,
+        "total_tokens": prompt + completion,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "cached_tokens": cached,
+        "calls": int(row.get("calls", 0) or 0),
+        "budget": {
+            "daily_limit": cfg["daily_budget"],
+            "remaining": round(cfg["daily_budget"] - cost, 2),
+            "used_percentage": round(cost / daily_budget * 100, 1),
+        },
+    }
