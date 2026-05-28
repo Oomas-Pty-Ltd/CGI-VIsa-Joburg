@@ -84,7 +84,9 @@ class _StageTimer:
         self._log.info(line)
 from database import get_database
 from auth_utils import verify_token
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, history_len
+from services import response_cache
+from services import budget_guard
 from knowledge_scraper import (
     get_realtime_knowledge,
     search_knowledge,
@@ -103,7 +105,6 @@ from security.session_manager import session_manager
 from security.input_sanitizer import sanitize_user_input, create_safe_system_prompt
 from security.guardrail import guardrail_service, sanitize_logs
 from security.rate_limiter import rate_limiter, check_rate_limit
-from security.cost_monitor import cost_monitor, record_llm_usage
 from tenant import get_tenant_id
 from services.bot_config import get_bot_config
 
@@ -645,6 +646,46 @@ async def chat(
     else:
         # LLM needed (info query, question during pause, etc.)
 
+        # ── Response cache (opt-in): serve a repeat FAQ with no LLM call ──
+        # Same gate as /chat/stream: context-free opening question only (first
+        # turn, idle flow, no upload, no flow text). Voice is still produced
+        # (and itself cached) so voice users aren't penalised on a hit.
+        _cache_lang = request.language or "en"
+        _cache_eligible = (
+            response_cache.enabled()
+            and not request.image_base64
+            and current_state == "idle"
+            and current_step in (None, "idle")
+            and flow_response is None
+            and (await history_len(session_id)) == 0
+        )
+        if _cache_eligible:
+            _cached = await response_cache.get(tenant_id, _cache_lang, sanitized_message)
+            if _cached:
+                _audio = None
+                if request.enable_voice:
+                    try:
+                        _audio = await voice_service.text_to_speech(_cached, _cache_lang, company_id=tenant_id)
+                    except Exception as e:
+                        logger.warning(f"Voice generation failed: {sanitize_logs(str(e))}")
+                await session_manager.add_message(session_id, "user", request.message, {})
+                await session_manager.add_message(session_id, "assistant", _cached, {})
+                return ChatResponse(
+                    session_id=session_id, response=_cached,
+                    step=current_step, audio_base64=_audio,
+                )
+
+        # ── Per-tenant budget gate (opt-in) ──────────────────────────────
+        # A cache hit above still serves when over budget (graceful
+        # degradation); here a cache MISS that would otherwise hit the LLM is
+        # soft-declined so a tenant can't run past its monthly cap. No-op unless
+        # enforcement is enabled AND the tenant has a configured cap it exceeded.
+        if await budget_guard.is_over_budget(tenant_id):
+            _msg = budget_guard.exceeded_message()
+            await session_manager.add_message(session_id, "user", request.message, {})
+            await session_manager.add_message(session_id, "assistant", _msg, {})
+            return ChatResponse(session_id=session_id, response=_msg, step=current_step)
+
         # Detect service for info context
         detected_svc_key = detect_service(sanitized_message)
         detected_svc_obj = await get_service(tenant_id, detected_svc_key) if detected_svc_key else None
@@ -684,6 +725,9 @@ async def chat(
             _bot_cfg.fallback("out_of_scope"), _ns_svc_names
         )
         _org_label_ns = _bot_cfg.org_name or _bot_cfg.bot_name
+        # STABLE system message (per tenant+language) so OpenAI prompt caching
+        # can hit the [system + history] prefix. Per-request material rides as
+        # ephemeral context on the user turn (sent this turn, never persisted).
         _base_system_message = f"""You are {_bot_cfg.bot_name}, the official assistant for {_org_label_ns}.
 {_prohibition}
 {_lang_instruction(request.language or "en")}
@@ -697,14 +741,17 @@ RESPONSE STYLE:
 - Do NOT ask clarifying questions like "What information do you need?" — provide the complete relevant answer directly.
 - Use bullet points only when listing multiple items.
 - Do NOT repeat information already shown in the conversation.
-- When an INTENDED RESPONSE is provided below, translate it completely and faithfully — do not summarise, shorten, or omit any field.
+- When an INTENDED RESPONSE is provided with the user's message, translate it completely and faithfully — do not summarise, shorten, or omit any field.
 {f'''
 OFFICIAL DATA — always use the facts below to answer questions. This is the authoritative source.
 
 ORGANISATION FACTS:
 {_consulate_facts}
 ''' if _consulate_facts else ''}
-{_clean_svc_hint}
+(Per-request context, service-specific details, and the relevant knowledge appear with the user's message below.)"""
+
+        # Per-request material — sent this turn, never persisted to history.
+        _dynamic_context = f"""{_clean_svc_hint}
 ADDITIONAL KNOWLEDGE (from uploaded documents, knowledge base, and web sources):
 {_clean_ctx}
 
@@ -725,24 +772,18 @@ IF the answer is not in any of the data above, say so briefly and direct the use
 
         user_message = UserMessage(
             text=sanitized_message,
-            file_contents=user_msg_content if user_msg_content else None
+            file_contents=user_msg_content if user_msg_content else None,
+            context=_dynamic_context or None,
         )
 
         try:
             bot_response = await chat_instance.send_message(user_message)
-            # Fire-and-forget: don't block the response on usage tracking
-            asyncio.create_task(record_llm_usage(
-                session_id=session_id,
-                input_text=sanitized_message,
-                output_text=bot_response,
-                model=llm_model
-            ))
-            # Per-tenant cost ledger (Sprint 14 — Cost dashboard). Uses
-            # the actual OpenAI usage from `LlmChat.last_usage` rather
-            # than the char-count estimate above, so the tenant view is
-            # billing-grade accurate.
+            # Per-tenant cost ledger from the actual OpenAI usage
+            # (`LlmChat.last_usage`) — billing-grade, all-channel. Awaited (not
+            # fire-and-forget) so it isn't dropped on serverless, where CPU is
+            # frozen after the response is sent.
             from services import llm_usage as _llm_usage
-            asyncio.create_task(_llm_usage.log(tenant_id, chat_instance.last_usage))
+            await _llm_usage.log(tenant_id, chat_instance.last_usage)
         except Exception as e:
             logger.error(f"AI service error: {sanitize_logs(str(e))}")
             try:
@@ -763,6 +804,11 @@ IF the answer is not in any of the data above, say so briefly and direct the use
             if suffix:
                 bot_response += suffix
 
+        # Populate the cache for context-free opening questions (see gate above).
+        # Awaited so the write isn't dropped on serverless (post-response freeze).
+        if _cache_eligible and bot_response:
+            await response_cache.put(tenant_id, _cache_lang, sanitized_message, bot_response)
+
     # Generate voice response if requested
     audio_base64 = None
     if request.enable_voice:
@@ -773,20 +819,21 @@ IF the answer is not in any of the data above, say so briefly and direct the use
         except Exception as e:
             logger.warning(f"Voice generation failed: {sanitize_logs(str(e))}")
     
-    # Store both messages in parallel — no need to wait before returning
-    asyncio.create_task(session_manager.add_message(
+    # Persist the transcript. Awaited (not fire-and-forget) so turns aren't
+    # dropped on serverless, where CPU is frozen once the response is sent.
+    await session_manager.add_message(
         session_id=session_id,
         role="user",
         content=request.message,
         metadata={"sanitized": sanitized_message != request.message}
-    ))
-    asyncio.create_task(session_manager.add_message(
+    )
+    await session_manager.add_message(
         session_id=session_id,
         role="assistant",
         content=bot_response,
         metadata={"has_audio": audio_base64 is not None}
-    ))
-    
+    )
+
     return ChatResponse(
         session_id=session_id,
         response=bot_response,
@@ -970,8 +1017,8 @@ async def chat_stream(
 
     if _FLOW_ENABLED and flow_response is not None and not needs_llm:
         full_text = flow_response
-        asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
-        asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
+        await session_manager.add_message(session_id, "user", request.message, {})
+        await session_manager.add_message(session_id, "assistant", full_text, {})
         pdf_url = None
         if current_step == "submitted":
             _tid_match = re.search(r"`([A-Z]+-\d{8}-[A-Z0-9]+)`", full_text)
@@ -981,6 +1028,41 @@ async def chat_stream(
         return _sse(
             _stream_deterministic(full_text, session_id, current_step, pdf_url=pdf_url)
         )
+
+    # ── Response cache (opt-in): serve a repeat FAQ with no LLM call ──────
+    # Restricted to context-free opening questions — first turn in this
+    # process, idle flow, no upload, no flow-supplied text — so a cached
+    # answer can't depend on prior conversation context. Key is
+    # (tenant, language, normalized_query); never crosses tenants.
+    _cache_lang = request.language or "en"
+    _cache_eligible = (
+        response_cache.enabled()
+        and not _validated_pages
+        and not request.image_base64
+        and current_state == "idle"
+        and current_step in (None, "idle")
+        and flow_response is None
+        and (await history_len(session_id)) == 0
+    )
+    if _cache_eligible:
+        _cached_answer = await response_cache.get(tenant_id, _cache_lang, sanitized_message)
+        if _cached_answer:
+            await session_manager.add_message(session_id, "user", request.message, {})
+            await session_manager.add_message(session_id, "assistant", _cached_answer, {})
+            _t.flush(extra="path=response_cache_hit")
+            return _sse(_stream_deterministic(_cached_answer, session_id, current_step or "idle"))
+
+    # ── Per-tenant budget gate (opt-in) ───────────────────────────────
+    # Cache hits above still serve when over budget (graceful degradation);
+    # a cache MISS that would hit the LLM is soft-declined so a tenant can't
+    # run past its monthly cap. No-op unless enforcement is enabled AND the
+    # tenant has a configured cap it exceeded.
+    if await budget_guard.is_over_budget(tenant_id):
+        _msg = budget_guard.exceeded_message()
+        await session_manager.add_message(session_id, "user", request.message, {})
+        await session_manager.add_message(session_id, "assistant", _msg, {})
+        _t.flush(extra="path=budget_exceeded")
+        return _sse(_stream_deterministic(_msg, session_id, current_step or "idle"))
 
     # ── Build LLM context ─────────────────────────────────────────────
     llm_context = context_info or ""
@@ -998,7 +1080,11 @@ async def chat_stream(
     # translation context so the LLM translates it rather than searching from scratch.
     _stream_flow_translate_hint = ""
     if request.language and request.language != "en":
-        _stream_translate_source = flow_response if flow_response is not None else deterministic
+        # Only flow_response is a known-good English answer here; /chat/stream
+        # has no separate deterministic_response (unlike /chat). The old
+        # `else deterministic` referenced an undefined name and 500'd every
+        # non-English turn that reached here with flow_response=None.
+        _stream_translate_source = flow_response
         if _stream_translate_source:
             _stream_flow_translate_hint = (
                 f"\nINTENDED RESPONSE (translate this exactly into the user's selected language, "
@@ -1058,7 +1144,7 @@ OFFICIAL DATA — always use the facts below to answer questions. This is the au
 ORGANISATION FACTS:
 {_s_facts}
 ''' if _s_facts else ''}
-(Per-request context, prohibition rules, service-specific details, and additional knowledge follow below.)"""
+(Per-request context, service-specific details, and the relevant knowledge appear with the user's message below.)"""
 
     dynamic_suffix_parts: list[str] = [""]
     if _s_prohibition:
@@ -1079,7 +1165,13 @@ ORGANISATION FACTS:
         "IF the answer is not in any of the data above, say so briefly and direct the user to:\n"
         f"{_s_footer}{_stream_flow_translate_hint}"
     )
-    system_msg = static_prefix + "\n\n" + "\n\n".join(p for p in dynamic_suffix_parts if p)
+    # System message = the STABLE static prefix only (stable per tenant+language)
+    # so OpenAI's automatic prompt cache can hit the [system + history] prefix.
+    # All per-request material (prohibition, walkthrough override, service hint,
+    # retrieved knowledge, footer) rides as ephemeral context on the user turn —
+    # sent this turn, never persisted to history. See chat.UserMessage.
+    system_msg = static_prefix
+    dynamic_context = "\n\n".join(p for p in dynamic_suffix_parts if p)
 
     # Walkthroughs need more output room; brevity-tuned answers stay well under 300.
     _max_tokens = 800 if _is_walkthrough else 300
@@ -1099,7 +1191,8 @@ ORGANISATION FACTS:
     ]
     user_message = UserMessage(
         text=sanitized_message,
-        file_contents=user_msg_content if user_msg_content else None
+        file_contents=user_msg_content if user_msg_content else None,
+        context=dynamic_context or None,
     )
 
     _t.mark("pre_llm")
@@ -1141,15 +1234,16 @@ ORGANISATION FACTS:
         yield f"data: {json.dumps(_done)}\n\n"
         _t.flush(extra=f"path=llm step={current_step} model={llm_model} out_len={len(full_text)}")
 
-        # Fire-and-forget persistence + usage tracking
-        asyncio.create_task(record_llm_usage(
-            session_id=session_id, input_text=sanitized_message,
-            output_text=full_text, model=llm_model
-        ))
+        # Fire-and-forget persistence + per-tenant cost ledger (real usage).
         from services import llm_usage as _llm_usage
-        asyncio.create_task(_llm_usage.log(tenant_id, chat_instance.last_usage))
-        asyncio.create_task(session_manager.add_message(session_id, "user", request.message, {}))
-        asyncio.create_task(session_manager.add_message(session_id, "assistant", full_text, {}))
+        await _llm_usage.log(tenant_id, chat_instance.last_usage)
+        await session_manager.add_message(session_id, "user", request.message, {})
+        await session_manager.add_message(session_id, "assistant", full_text, {})
+        # Populate the response cache for context-free opening questions so a
+        # future identical question (any user, same tenant+language) skips the
+        # LLM entirely. Gated by the same eligibility computed above.
+        if _cache_eligible and full_text:
+            await response_cache.put(tenant_id, _cache_lang, sanitized_message, full_text)
 
     return _sse(_llm_stream())
 

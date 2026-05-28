@@ -49,7 +49,7 @@ from services.intent_classifier import intent_classifier
 
 logger = logging.getLogger(__name__)
 from security.rate_limiter import rate_limiter
-from security.cost_monitor import cost_monitor
+from services import llm_usage
 from security.guardrail import guardrail_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -417,7 +417,7 @@ async def get_ai_observability(payload: dict = Depends(verify_super_admin)):
     """Get comprehensive AI observability metrics"""
     intent_stats = intent_classifier.get_stats()
     rate_stats = rate_limiter.get_stats()
-    cost_stats = cost_monitor.get_daily_stats()
+    cost_stats = await llm_usage.today_totals()  # accurate, all-channel ledger
     guardrail_stats = guardrail_service.get_stats()
     escalation_stats = await escalation_service.get_escalation_stats()
     knowledge_stats = await knowledge_service.get_stats()
@@ -467,21 +467,22 @@ async def get_intent_stats(payload: dict = Depends(verify_super_admin)):
 @router.get("/observability/cost-breakdown")
 async def get_cost_breakdown(payload: dict = Depends(verify_super_admin)):
     """Get detailed cost breakdown"""
-    daily_stats = cost_monitor.get_daily_stats()
-    
+    daily_stats = await llm_usage.today_totals()
+    cfg = llm_usage.budget_config()
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "daily": daily_stats,
         "model_info": {
-            "model": cost_monitor.config["default_model"],
-            "provider": cost_monitor.config["provider"],
-            "input_cost_per_1k": cost_monitor.config["input_cost_per_1k"],
-            "output_cost_per_1k": cost_monitor.config["output_cost_per_1k"]
+            "model": cfg["model"],
+            "provider": cfg["provider"],
+            "input_cost_per_1k": cfg["input_cost_per_1k"],
+            "output_cost_per_1k": cfg["output_cost_per_1k"]
         },
         "budget_config": {
-            "daily_budget": cost_monitor.config["daily_budget"],
-            "monthly_budget": cost_monitor.config["monthly_budget"],
-            "session_limit": cost_monitor.config["per_session_limit"]
+            "daily_budget": cfg["daily_budget"],
+            "monthly_budget": cfg["monthly_budget"],
+            "session_limit": cfg["session_limit"]
         }
     }
 
@@ -510,8 +511,8 @@ async def get_admin_dashboard(payload: dict = Depends(verify_super_admin)):
     # Get escalation summary
     escalation_stats = await escalation_service.get_escalation_stats()
     
-    # Get cost summary
-    cost_stats = cost_monitor.get_daily_stats()
+    # Get cost summary (accurate, all-channel ledger)
+    cost_stats = await llm_usage.today_totals()
     
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),

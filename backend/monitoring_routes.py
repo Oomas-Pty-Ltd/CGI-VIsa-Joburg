@@ -17,7 +17,7 @@ from monitoring_service import monitoring_service, MONITORING_CONFIG
 from security.guardrail import guardrail_service
 from security.session_manager import session_manager
 from security.rate_limiter import rate_limiter
-from security.cost_monitor import cost_monitor
+from services import llm_usage
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -193,7 +193,7 @@ async def get_security_metrics() -> Dict[str, Any]:
     """
     guardrail_stats = guardrail_service.get_stats()
     rate_limit_stats = rate_limiter.get_stats()
-    cost_stats = cost_monitor.get_daily_stats()
+    cost_stats = await llm_usage.today_totals()  # accurate, all-channel ledger
     
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -240,25 +240,30 @@ async def get_cost_stats() -> Dict[str, Any]:
     """
     Get AI cost monitoring statistics.
     """
+    cfg = llm_usage.budget_config()
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "daily_stats": cost_monitor.get_daily_stats(),
+        "daily_stats": await llm_usage.today_totals(),
         "config": {
-            "daily_budget": cost_monitor.config['daily_budget'],
-            "monthly_budget": cost_monitor.config['monthly_budget'],
-            "session_limit": cost_monitor.config['per_session_limit'],
-            "model": cost_monitor.config['default_model'],
-            "provider": cost_monitor.config['provider']
+            "daily_budget": cfg['daily_budget'],
+            "monthly_budget": cfg['monthly_budget'],
+            "session_limit": cfg['session_limit'],
+            "model": cfg['model'],
+            "provider": cfg['provider']
         }
     }
 
 
 @router.get("/costs/session/{session_id}")
 async def get_session_cost_stats(session_id: str) -> Dict[str, Any]:
-    """
-    Get cost statistics for a specific session.
-    """
+    """Per-session cost is no longer tracked: the accurate ledger
+    (``services.llm_usage``) aggregates by tenant + day, not by session. Use the
+    per-tenant cost view instead. Kept for API compatibility."""
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "session_stats": cost_monitor.get_session_stats(session_id)
+        "session_stats": {
+            "session_id": session_id,
+            "tracked": False,
+            "note": "Per-session cost retired; see per-tenant usage via /api/local-admin/llm-usage.",
+        },
     }

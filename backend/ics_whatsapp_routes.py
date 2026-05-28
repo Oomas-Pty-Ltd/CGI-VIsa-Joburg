@@ -653,13 +653,16 @@ async def _llm_response(user_message: str, session_id: str, context: str = "", l
     _tenant_prompt = _cfg.system_prompt() if _cfg else ""
     _lang_line = await _wa_lang_instruction(lang_code, company_id=tenant)
 
+    # STABLE system message (per tenant+language) — no per-message data here, so
+    # OpenAI prompt caching can hit the [system + history] prefix. The retrieved
+    # OFFICIAL DATA + service-doc hint ride as ephemeral context on the user turn.
     system_prompt = f"""You are {_bot_name}, an automated assistant replying via WhatsApp.
 {_tenant_prompt}
 {_prohibition}
 CRITICAL — DATA SOURCE RULE:
-Answer ONLY using the OFFICIAL DATA provided below.
+Answer ONLY using the OFFICIAL DATA provided with the user's message.
 The data comes from admin-uploaded documents (FAQs, events, notices) and official sources.
-Do NOT use general training knowledge. Do NOT invent or add information not in the data below.
+Do NOT use general training knowledge. Do NOT invent or add information not in that data.
 If the answer is not in the data, say so and direct the user to contact us directly.
 
 {_lang_line}
@@ -672,11 +675,11 @@ RESPONSE STYLE:
 - Do NOT repeat information already shown in the conversation.
 - Use *bold* for emphasis (WhatsApp format). Do NOT use markdown ** double-asterisks.
 - Never ask for money or claim the organisation calls asking for payments.
-{_clean_hint}
-OFFICIAL DATA:
-{_clean_ctx}
 
 IF NOT IN OFFICIAL DATA: Say "This information is not available in our current records. Please contact us directly using the contact details provided." """
+
+    # Per-message material — sent this turn, never persisted to history.
+    _dynamic_context = f"{_clean_hint}OFFICIAL DATA:\n{_clean_ctx}"
 
     # Resolve LLM model: env default → tenant company.llm_model override.
     _llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -693,12 +696,23 @@ IF NOT IN OFFICIAL DATA: Say "This information is not available in our current r
             session_id=session_id,
             system_message=system_prompt,
         ).with_model("openai", _llm_model)
-        return await chat.send_message(UserMessage(text=user_message))
+        response = await chat.send_message(
+            UserMessage(text=user_message, context=_dynamic_context or None)
+        )
     except Exception as exc:
         logger.error("LLM error: %s", exc)
         return (
             "I'm having trouble right now. Please try again shortly or contact us directly."
         )
+
+    # Per-tenant cost logging from the real OpenAI usage (`tenant` resolved
+    # above). Isolated so it never affects the reply.
+    try:
+        from services import llm_usage as _llm_usage
+        await _llm_usage.log(tenant, chat.last_usage)
+    except Exception:
+        pass
+    return response
 
 
 # =====================================================================
@@ -732,12 +746,14 @@ async def _log_message(
 # =====================================================================
 # HELPER: Get flow state early (for context-aware numbered reply handling)
 # =====================================================================
-async def _get_flow_safe(phone: str) -> dict:
-    """Get the current flow state for a phone number, safely handling errors."""
+async def _get_flow_safe(phone: str, company_id: Optional[str] = None) -> dict:
+    """Get the current flow state for a phone number, safely handling errors.
+    ``company_id`` scopes the session to the resolved tenant (else default)."""
     try:
         session = await session_manager.get_or_create_session(
             channel="whatsapp",
             user_identifier=phone,
+            metadata={"company_id": company_id} if company_id else None,
         )
         from services.application_flow import _get_flow
         flow = await _get_flow(session["id"])
@@ -1449,7 +1465,7 @@ async def _handle_message(
     await _log_message(phone, "inbound", user_text, {"reply_type": reply_type, "media_id": media_id}, db)
 
     # ── Get current flow state for context-aware numbered reply handling ────
-    _current_flow = await _get_flow_safe(phone)
+    _current_flow = await _get_flow_safe(phone, company_id)
 
     # When collecting form data (names, dates, passport numbers, etc.), skip PII
     # redaction — the guardrail aggressively mangles valid form values (e.g. dates
@@ -1465,7 +1481,7 @@ async def _handle_message(
     session = await session_manager.get_or_create_session(
         channel="whatsapp",
         user_identifier=phone,
-        metadata={"waba_number": waba_number},
+        metadata={"waba_number": waba_number, "company_id": company_id},
     )
     session_id         = session["id"]
     _meta              = session.get("metadata", {})
@@ -1671,7 +1687,8 @@ async def _handle_message(
                 clean_text = f"apply {_svc_key}"
                 # Pre-set the service in the flow so process_flow() picks it up even from idle state
                 _pre_session = await session_manager.get_or_create_session(
-                    channel="whatsapp", user_identifier=phone, metadata={"waba_number": waba_number}
+                    channel="whatsapp", user_identifier=phone,
+                    metadata={"waba_number": waba_number, "company_id": company_id},
                 )
                 from services.application_flow import _get_flow, _save_flow
                 _pre_flow = await _get_flow(_pre_session["id"])
@@ -1974,8 +1991,10 @@ async def _handle_message(
     try:
         knowledge_base = await get_realtime_knowledge(company_id)
 
-        # hybrid_search always runs — same as web bot (context_info goes to LLM)
-        context_info = await hybrid_search(clean_text, knowledge_base)
+        # hybrid_search always runs — same as web bot (context_info goes to LLM).
+        # tenant_id is REQUIRED (the call previously omitted it and threw every
+        # time, leaving WhatsApp answers ungrounded).
+        context_info = await hybrid_search(clean_text, knowledge_base, company_id or config.COMPANY_ID)
 
         # Blocked keyword: reply with canned message and skip LLM entirely
         if context_info == BLOCKED_SENTINEL:
@@ -2078,10 +2097,35 @@ async def _handle_message(
                 llm_context = flow_response
         # Use a language-scoped LLM session so history from a previous language
         # (e.g. Tamil) does not bleed into a newly selected language (e.g. Hindi).
-        raw_llm = await _llm_response(
-            clean_text, f"{session_id}_{_lang_code}", llm_context,
-            lang_code=_lang_code, company_id=company_id or config.COMPANY_ID,
+        from services import response_cache as _rc
+        from emergentintegrations.llm.chat import history_len as _hlen
+        _wa_sess = f"{session_id}_{_lang_code}"
+        _tenant = company_id or config.COMPANY_ID
+        # Response cache (opt-in): serve a repeat FAQ with no LLM call. Restricted
+        # to context-free opening questions — first turn in this language, idle
+        # flow, no flow-supplied text, no media — so a cached answer can't depend
+        # on prior conversation context. Key is (tenant, language, query).
+        _cache_eligible = (
+            _rc.enabled()
+            and not has_doc
+            and flow_response is None
+            and step in (None, "idle")
+            and current_flow.get("state", "idle") == "idle"
+            and (await _hlen(_wa_sess)) == 0
         )
+        from services import budget_guard as _bg
+        raw_llm = await _rc.get(_tenant, _lang_code, clean_text) if _cache_eligible else None
+        if raw_llm is None and await _bg.is_over_budget(_tenant):
+            # Over the monthly cap → soft-decline with no LLM call. The cache
+            # serve above still answers repeat FAQs (graceful degradation).
+            raw_llm = _bg.exceeded_message()
+        elif raw_llm is None:
+            raw_llm = await _llm_response(
+                clean_text, _wa_sess, llm_context,
+                lang_code=_lang_code, company_id=_tenant,
+            )
+            if _cache_eligible and raw_llm:
+                await _rc.put(_tenant, _lang_code, clean_text, raw_llm)
         # Append flow guidance suffix (same as web bot)
         suffix = await flow_suffix(
             step, detect_service(clean_text),

@@ -40,12 +40,16 @@ _CACHE_HIT_THRESHOLD = 3
 # ── LLM context budget ───────────────────────────────────────────────
 # How many KB entries are sent to the LLM. Top-N by relevance, the rest are dropped.
 # Smaller = faster TTFT and lower input cost; too small risks losing on-topic info.
-_LLM_KB_TOP_N = 5
-# Per-entry char cap (≈300 tokens). Long PDF chunks get truncated; head content
-# matters most because _calculate_relevance already ranked the entries.
-_LLM_KB_MAX_CHARS_PER_ENTRY = 1200
-# Ceiling for total Layer-2 (PDF / scraped page) lines passed to the LLM.
-_LLM_L2_MAX_LINES = 25
+# Trimmed 5→3: entries 4-5 are the lowest-ranked of the set and rarely carry the
+# answer, so dropping them roughly halves KB input tokens with no quality loss on
+# the focused-FAQ traffic this bot serves.
+_LLM_KB_TOP_N = 3
+# Per-entry char cap (≈200 tokens). Long PDF chunks get truncated; head content
+# matters most because _calculate_relevance already ranked the entries. Trimmed
+# 1200→800 — the answer almost always lives in the entry head.
+_LLM_KB_MAX_CHARS_PER_ENTRY = 800
+# Ceiling for total Layer-2 (PDF / scraped page) lines passed to the LLM. 25→15.
+_LLM_L2_MAX_LINES = 15
 
 # ── Per-process result cache (TTL) ───────────────────────────────────
 # Same query within _CACHE_TTL seconds skips KB scan + formatting entirely.
@@ -166,12 +170,19 @@ def _format_kb_entries(entries: List[Dict], max_per_entry: int = _LLM_KB_MAX_CHA
     if not entries:
         return ""
     parts = []
+    seen: set = set()
     for e in entries:
         title  = e.get("title", "")
         answer = (e.get("answer", "") or "").strip()
         source = e.get("source", "")
         if not answer:
             continue
+        # Skip near-duplicate entries (e.g. an [Auto] crawl copy of a manual FAQ
+        # on the same topic) so we don't spend tokens repeating the same context.
+        sig = re.sub(r"\s+", " ", answer[:200].lower()).strip()
+        if sig in seen:
+            continue
+        seen.add(sig)
         if max_per_entry and len(answer) > max_per_entry:
             answer = answer[:max_per_entry].rstrip() + "…"
         block = f"**{title}**\n{answer}"

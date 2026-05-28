@@ -233,7 +233,10 @@ async def create_indexes():
         await db.ics_whatsapp_messages.create_index("timestamp")
         await db.ics_whatsapp_messages.create_index("ics_mid", sparse=True)
 
-        # Rate limit indexes (for persistence when Redis is available)
+        # Rate limit indexes — distributed fixed-window counters (see
+        # security/rate_limiter.py). `key` = "<dim>:<id>:<window_start>" (unique
+        # so concurrent upserts dedup to one doc); TTL on `expires_at` evicts
+        # old windows automatically.
         await db.rate_limits.create_index("key", unique=True)
         await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)  # TTL index
         
@@ -285,6 +288,19 @@ async def create_indexes():
         await db.seva_setu_applications.create_index("edit_token", sparse=True)
         await db.seva_setu_applications.create_index("status")
         await db.seva_setu_applications.create_index([("user_id", 1), ("created_at", -1)])
+
+        # Response cache (services/response_cache.py) — exact-match FAQ answers
+        # keyed by a (company_id, lang, query) hash. The TTL index on
+        # expires_at lets Mongo auto-delete stale entries so KB edits propagate
+        # within the configured window.
+        await db.response_cache.create_index("expires_at", expireAfterSeconds=0)
+        await db.response_cache.create_index("company_id")
+
+        # LLM conversation history (emergentintegrations/llm/chat.py). One doc per
+        # session_id (_id); the TTL on updated_at auto-expires abandoned sessions
+        # so the collection stays bounded (replaces the old in-memory _sessions
+        # dict, which never shared across workers and grew without limit).
+        await db.llm_chat_sessions.create_index("updated_at", expireAfterSeconds=604800)  # 7 days
 
         logger.info("Database indexes created successfully")
         

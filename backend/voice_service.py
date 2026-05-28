@@ -13,12 +13,59 @@ Text-to-Speech with:
 from emergentintegrations.llm.openai import OpenAITextToSpeech
 import os
 import re
+import time
+import hashlib
 import logging
 from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+# ── TTS model + audio cache ──────────────────────────────────────────
+# Default to tts-1: half the price of tts-1-hd ($15 vs $30 / 1M chars) and
+# standard quality is fine for chatbot/IVR replies. Set TTS_MODEL=tts-1-hd to
+# restore HD audio.
+_TTS_MODEL = os.environ.get("TTS_MODEL", "tts-1")
+
+# Transparent in-process cache of synthesised audio keyed by
+# (model, voice, speed, language, text). Identical text → identical audio, so a
+# hit returns the same clip without re-paying OpenAI's per-character TTS charge
+# (greetings, fallbacks, and cached FAQ answers recur a lot). Per-process,
+# size-capped, TTL'd — same pattern as services.hybrid_retrieval's cache.
+_TTS_CACHE_TTL = float(os.environ.get("TTS_CACHE_TTL_SECONDS", "3600"))
+_TTS_CACHE_MAX = int(os.environ.get("TTS_CACHE_MAX_ENTRIES", "256"))
+_TTS_CACHE: dict = {}
+
+
+def _tts_cache_enabled() -> bool:
+    return os.environ.get("TTS_CACHE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _tts_key(model: str, voice: str, speed: float, language: str, text: str) -> str:
+    raw = f"{model}\x00{voice}\x00{speed}\x00{language}\x00{text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _tts_cache_get(key: str):
+    entry = _TTS_CACHE.get(key)
+    if not entry:
+        return None
+    ts, val = entry
+    if (time.time() - ts) > _TTS_CACHE_TTL:
+        _TTS_CACHE.pop(key, None)
+        return None
+    return val
+
+
+def _tts_cache_put(key: str, val: str) -> None:
+    if not val:
+        return
+    if len(_TTS_CACHE) >= _TTS_CACHE_MAX:
+        oldest = min(_TTS_CACHE, key=lambda k: _TTS_CACHE[k][0])  # cheap LRU-ish evict
+        _TTS_CACHE.pop(oldest, None)
+    _TTS_CACHE[key] = (time.time(), val)
 
 
 # Platform-default voice mapping used when a tenant hasn't set
@@ -221,18 +268,28 @@ class EnhancedVoiceService:
         # Resolve voice: tenant override → platform default.
         tenant_voice = await self.resolve_tenant_voice(language, company_id)
         voice = self.get_voice_for_language(language, tenant_voice=tenant_voice)
-        
+
+        # Serve identical audio from cache without re-charging for synthesis.
+        cache_key = _tts_key(_TTS_MODEL, voice, 1.0, language, text) if _tts_cache_enabled() else None
+        if cache_key:
+            cached = _tts_cache_get(cache_key)
+            if cached is not None:
+                logger.info(f"[TTS] cache hit for {len(text)} chars in {language} (voice {voice})")
+                return cached
+
         try:
             audio_base64 = await self.tts.generate_speech_base64(
                 text=text,
-                model="tts-1-hd",
+                model=_TTS_MODEL,
                 voice=voice,
                 speed=1.0
             )
-            
-            logger.info(f"[TTS] Generated speech for {len(text)} chars in {language} using voice {voice}")
+
+            logger.info(f"[TTS] Generated speech for {len(text)} chars in {language} using voice {voice} ({_TTS_MODEL})")
+            if cache_key:
+                _tts_cache_put(cache_key, audio_base64)
             return audio_base64
-            
+
         except Exception as e:
             logger.error(f"[TTS] Error: {e}")
             return None

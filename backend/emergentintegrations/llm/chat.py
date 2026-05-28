@@ -3,13 +3,87 @@ Local shim for emergentintegrations.llm.chat
 Wraps the OpenAI library to provide LlmChat, UserMessage, ImageContent.
 """
 import openai
+import os
 import logging
 from typing import List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-# In-memory chat history keyed by session_id
-_sessions: dict = {}
+# Per-session history cap. 0 = unlimited (replay everything — default, no
+# behaviour change). When >0, _build_messages evicts the oldest turns in a
+# chunk (down to half the cap) once a session exceeds it, bounding both the
+# replayed input tokens and the stored history doc size. Chunked (not a
+# per-turn slide) so the [system + history] prefix stays stable between
+# evictions and OpenAI prompt caching keeps hitting during the growth phase.
+_MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "0"))
+
+
+def _evict_history(history: list) -> None:
+    """Trim a session's history in place to the configured cap (chunked)."""
+    if _MAX_HISTORY_MESSAGES > 0 and len(history) > _MAX_HISTORY_MESSAGES:
+        keep = max(1, _MAX_HISTORY_MESSAGES // 2)
+        del history[:-keep]
+
+
+def _extract_cached_tokens(u) -> int:
+    """Cached prompt tokens for a call, for prompt-cache hit-rate tracking.
+
+    OpenAI reports these under ``usage.prompt_tokens_details.cached_tokens``
+    (cached input is billed at 50% on gpt-4o-mini). Gemini has no equivalent,
+    so this returns 0 there. Best-effort; never raises."""
+    try:
+        details = getattr(u, "prompt_tokens_details", None)
+        return int(getattr(details, "cached_tokens", 0) or 0)
+    except Exception:
+        return 0
+
+
+# Conversation history is persisted in MongoDB (collection below), NOT in
+# process memory — so it survives restarts and is shared across workers /
+# serverless instances (Cloud Run, Lambda). With in-process state, a multi-turn
+# conversation whose turns land on different workers would lose its context.
+_HISTORY_COLLECTION = "llm_chat_sessions"
+
+
+async def _load_history(session_id: str) -> list:
+    """Load a session's replay history (list of {role, content}) from Mongo.
+    Returns [] on a new session or any error (never breaks the chat path)."""
+    if not session_id:
+        return []
+    try:
+        from database import get_database
+        db = await get_database()
+        doc = await db[_HISTORY_COLLECTION].find_one({"_id": session_id}, {"messages": 1})
+        return list((doc or {}).get("messages") or [])
+    except Exception as e:
+        logger.warning("[LlmChat] history load failed for %s: %s", session_id, e)
+        return []
+
+
+async def _save_history(session_id: str, messages: list) -> None:
+    """Persist a session's replay history. ``updated_at`` drives the TTL index
+    (see database.create_indexes) so abandoned sessions auto-expire — which also
+    fixes the unbounded session-count growth of the old in-memory dict."""
+    if not session_id:
+        return
+    try:
+        from datetime import datetime, timezone
+        from database import get_database
+        db = await get_database()
+        await db[_HISTORY_COLLECTION].update_one(
+            {"_id": session_id},
+            {"$set": {"messages": messages, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning("[LlmChat] history save failed for %s: %s", session_id, e)
+
+
+async def history_len(session_id: str) -> int:
+    """Number of stored turns for a session (0 = no prior turn). Async because
+    history now lives in Mongo. Used by the response cache to restrict caching
+    to context-free opening questions."""
+    return len(await _load_history(session_id))
 
 # Legacy hardcoded model map. Kept only as a last-resort fallback when
 # the `platform_models` collection is empty (fresh install before
@@ -29,9 +103,17 @@ class ImageContent:
 
 
 class UserMessage:
-    def __init__(self, text: str, file_contents: Optional[List[Any]] = None):
+    def __init__(self, text: str, file_contents: Optional[List[Any]] = None,
+                 context: Optional[str] = None):
         self.text = text
         self.file_contents = file_contents or []
+        # Ephemeral per-turn context (retrieved KB, per-request instructions).
+        # It is sent to the model WITH this turn but NOT persisted to history.
+        # Keeping it out of both the (stable) system message and the persisted
+        # history means the [system + history] prefix stays byte-identical
+        # across turns, so OpenAI's automatic prompt cache hits it — and history
+        # doesn't accumulate large per-turn knowledge blobs.
+        self.context = context
 
 
 class LlmChat:
@@ -57,8 +139,6 @@ class LlmChat:
         # Streaming responses surface usage via the OpenAI
         # `stream_options={"include_usage": True}` final chunk.
         self.last_usage: Optional[dict] = None
-        if session_id not in _sessions:
-            _sessions[session_id] = []
 
     def with_model(self, provider: str, model: str) -> "LlmChat":
         # Stash the tenant-facing platform key. The real api_model gets
@@ -95,19 +175,33 @@ class LlmChat:
         self.max_tokens = max_tokens
         return self
 
-    def _build_messages(self, message: UserMessage) -> tuple:
-        """Return (history, openai_messages_list).
+    def _build_messages(self, message: UserMessage, history: list) -> tuple:
+        """Return (history, openai_messages_list) for the loaded ``history``.
+
+        Pure (no global state): evicts to the cap, builds the outgoing messages,
+        and appends the bare user text to ``history`` for the caller to persist.
 
         The outgoing request contains the full multimodal content for THIS turn,
         but only the text portion is persisted to history. Replaying image_url
         parts on every follow-up turn poisons the whole conversation if any
         single upload happens to be in a format OpenAI rejects.
+
+        ``message.context`` (ephemeral per-turn knowledge/instructions) is sent
+        to the model this turn but never persisted — see UserMessage.
         """
-        history = _sessions.get(self.session_id, [])
+        _evict_history(history)  # bound replay + stored size (no-op when cap is 0)
+        # Text the model sees this turn = ephemeral context (if any) + user text.
+        # Only the bare user text is persisted to history below.
+        text_for_model = message.text or ""
+        if message.context:
+            text_for_model = (
+                f"{message.context}\n\n{text_for_model}" if text_for_model
+                else message.context
+            )
         if message.file_contents:
             content: Any = []
-            if message.text:
-                content.append({"type": "text", "text": message.text})
+            if text_for_model:
+                content.append({"type": "text", "text": text_for_model})
             for item in message.file_contents:
                 if isinstance(item, ImageContent):
                     content.append({
@@ -117,7 +211,7 @@ class LlmChat:
                         }
                     })
         else:
-            content = message.text
+            content = text_for_model
         messages = []
         if self.system_message:
             messages.append({"role": "system", "content": self.system_message})
@@ -140,7 +234,8 @@ class LlmChat:
         provider = await self._resolve_provider()
         if provider == "google":
             return await self._send_via_gemini(message, stream=False)
-        history, messages = self._build_messages(message)
+        history = await _load_history(self.session_id)
+        history, messages = self._build_messages(message, history)
         client = openai.AsyncOpenAI(api_key=self.api_key)
         try:
             response = await client.chat.completions.create(
@@ -156,6 +251,7 @@ class LlmChat:
                     self.last_usage = {
                         "prompt_tokens":     int(getattr(u, "prompt_tokens", 0) or 0),
                         "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0),
+                        "cached_tokens":     _extract_cached_tokens(u),
                         # Record the tenant-facing platform key so the
                         # cost dashboard groups by what the operator
                         # actually picked, not the underlying API alias.
@@ -168,7 +264,7 @@ class LlmChat:
             logger.error(f"[LlmChat] API error: {e}")
             raise
         history.append({"role": "assistant", "content": assistant_text})
-        _sessions[self.session_id] = history
+        await _save_history(self.session_id, history)
         return assistant_text
 
     async def send_message_stream(self, message: UserMessage):
@@ -185,7 +281,8 @@ class LlmChat:
             async for chunk in self._stream_via_gemini(message):
                 yield chunk
             return
-        history, messages = self._build_messages(message)
+        history = await _load_history(self.session_id)
+        history, messages = self._build_messages(message, history)
         client = openai.AsyncOpenAI(api_key=self.api_key)
         full_response = ""
         try:
@@ -209,10 +306,11 @@ class LlmChat:
                         self.last_usage = {
                             "prompt_tokens":     int(getattr(u, "prompt_tokens", 0) or 0),
                             "completion_tokens": int(getattr(u, "completion_tokens", 0) or 0),
-                            # Record the tenant-facing platform key so the
-                        # cost dashboard groups by what the operator
-                        # actually picked, not the underlying API alias.
-                        "model":             self.platform_key or self.model,
+                            "cached_tokens":     _extract_cached_tokens(u),
+                            # Record the tenant-facing platform key so the cost
+                            # dashboard groups by what the operator actually
+                            # picked, not the underlying API alias.
+                            "model":             self.platform_key or self.model,
                         }
                     except Exception:
                         pass
@@ -220,7 +318,7 @@ class LlmChat:
             logger.error(f"[LlmChat] stream error: {e}")
             raise
         history.append({"role": "assistant", "content": full_response})
-        _sessions[self.session_id] = history
+        await _save_history(self.session_id, history)
 
     # ── Google Gemini provider ────────────────────────────────────────────
     #
@@ -257,11 +355,11 @@ class LlmChat:
             )
         return genai.Client(api_key=api_key)
 
-    def _build_gemini_payload(self, message: "UserMessage"):
-        """Return (history, contents_for_this_turn). The Gemini SDK
-        wants the system message as a separate config field, so we
-        strip it from the per-turn payload."""
-        history = _sessions.setdefault(self.session_id, [])
+    def _build_gemini_payload(self, message: "UserMessage", history: list):
+        """Return (history, contents_for_this_turn) for the loaded ``history``.
+        The Gemini SDK wants the system message as a separate config field, so
+        we strip it from the per-turn payload."""
+        _evict_history(history)  # bound replay + stored size (no-op when cap is 0)
         # Build the user content. Text-only is a plain string; images
         # need to be wrapped as Part objects with inline_data.
         try:
@@ -269,8 +367,14 @@ class LlmChat:
         except ImportError:
             raise RuntimeError("google-genai SDK not installed")
         parts = []
-        if message.text:
-            parts.append(types.Part.from_text(text=message.text))
+        text_for_model = message.text or ""
+        if message.context:
+            text_for_model = (
+                f"{message.context}\n\n{text_for_model}" if text_for_model
+                else message.context
+            )
+        if text_for_model:
+            parts.append(types.Part.from_text(text=text_for_model))
         for item in (message.file_contents or []):
             if isinstance(item, ImageContent):
                 import base64
@@ -305,7 +409,8 @@ class LlmChat:
     async def _send_via_gemini(self, message: "UserMessage", stream: bool = False) -> str:
         from google.genai import types  # noqa: F401
         client = self._gemini_client()
-        history, contents = self._build_gemini_payload(message)
+        history = await _load_history(self.session_id)
+        history, contents = self._build_gemini_payload(message, history)
         try:
             from google.genai import types as gt
             config = gt.GenerateContentConfig(
@@ -324,7 +429,7 @@ class LlmChat:
             logger.error(f"[LlmChat/Gemini] API error: {e}")
             raise
         history.append({"role": "assistant", "content": text})
-        _sessions[self.session_id] = history
+        await _save_history(self.session_id, history)
         return text
 
     async def _stream_via_gemini(self, message: "UserMessage"):
@@ -333,7 +438,8 @@ class LlmChat:
         objects; we accumulate text + capture usage from the last
         chunk in the stream."""
         client = self._gemini_client()
-        history, contents = self._build_gemini_payload(message)
+        history = await _load_history(self.session_id)
+        history, contents = self._build_gemini_payload(message, history)
         full = ""
         last_chunk = None
         try:
@@ -359,4 +465,4 @@ class LlmChat:
         if last_chunk is not None:
             self._gemini_capture_usage(last_chunk)
         history.append({"role": "assistant", "content": full})
-        _sessions[self.session_id] = history
+        await _save_history(self.session_id, history)

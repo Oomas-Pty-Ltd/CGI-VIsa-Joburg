@@ -152,6 +152,12 @@ async def generate_ai_response(user_message: str, session_id: str, company_id: s
     """Generate AI response for WhatsApp user. System prompt is per-tenant
     (resolved from tenant_bot_config) and wrapped with security hardening
     on every call."""
+    # Per-tenant budget gate (opt-in): over the monthly cap → soft-decline with
+    # no LLM call. No-op unless enforcement is enabled and the cap is exceeded.
+    from services import budget_guard
+    if await budget_guard.is_over_budget(company_id):
+        return budget_guard.exceeded_message()
+
     cfg = await get_bot_config(company_id)
 
     if not LLM_AVAILABLE or not EMERGENT_LLM_KEY:
@@ -182,10 +188,18 @@ async def generate_ai_response(user_message: str, session_id: str, company_id: s
         ).with_model("openai", llm_model)
 
         response = await chat.send_message(UserMessage(text=user_message))
-        return response
     except Exception as e:
         logger.error(f"AI response error: {e}")
         return cfg.fallback("error") or "I apologize, I'm having trouble processing your request. Please try again or visit our web portal."
+
+    # Per-tenant cost logging from the real OpenAI usage. Isolated in its own
+    # try so a logging hiccup never downgrades a good reply.
+    try:
+        from services import llm_usage as _llm_usage
+        await _llm_usage.log(company_id, chat.last_usage)
+    except Exception:
+        pass
+    return response
 
 
 # =====================================================================

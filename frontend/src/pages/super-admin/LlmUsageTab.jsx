@@ -13,13 +13,17 @@
  * component (the API endpoint already serves both roles).
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, TrendingUp, TrendingDown, Sparkles, Building2 } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, Sparkles, Building2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Section } from "@/components/admin/Section";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 const ALL_TENANTS = "all";
@@ -57,6 +61,11 @@ export default function LlmUsageTab({ token, companies }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [days, setDays] = useState(DEFAULT_DAYS);
+  // Budget editing (super-admin only, single tenant selected). The cap drives
+  // the enforced pre-flight gate server-side; 0 / blank = unlimited.
+  const [editOpen, setEditOpen] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState("");
+  const [savingBudget, setSavingBudget] = useState(false);
 
   const fetchUsage = useCallback(async () => {
     if (isSuperAdmin && !tenantId) return;
@@ -78,6 +87,40 @@ export default function LlmUsageTab({ token, companies }) {
   }, [token, days, tenantId, isSuperAdmin]);
 
   useEffect(() => { fetchUsage(); }, [fetchUsage]);
+
+  // Super-admin can set a tenant's monthly cap, but only with a single tenant
+  // selected (there's no platform-wide budget). The endpoint is super-admin-only.
+  const canEditBudget = isSuperAdmin && tenantId && tenantId !== ALL_TENANTS;
+
+  const openEditBudget = useCallback((current) => {
+    setBudgetDraft(current != null ? String(current) : "");
+    setEditOpen(true);
+  }, []);
+
+  const saveBudget = useCallback(async () => {
+    const val = parseFloat(budgetDraft);
+    if (Number.isNaN(val) || val < 0) {
+      toast.error("Enter a budget of 0 or more (0 = unlimited).");
+      return;
+    }
+    setSavingBudget(true);
+    try {
+      const res = await fetch(`${API}/super-admin/companies/${tenantId}/llm-budget`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ llm_monthly_budget_usd: val }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || "Failed to save budget");
+      toast.success(val > 0 ? `Monthly budget set to ${fmtUSD(val)}` : "Budget cleared (unlimited)");
+      setEditOpen(false);
+      fetchUsage();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingBudget(false);
+    }
+  }, [budgetDraft, tenantId, token, fetchUsage]);
 
   const tenantPicker = isSuperAdmin ? (
     <div className="w-72">
@@ -139,10 +182,23 @@ export default function LlmUsageTab({ token, companies }) {
           "platform-wide totals" headline since there's no tenant budget to
           pace against. */}
       {budget
-        ? <BudgetGauge mtd={mtd} budget={budget} />
+        ? <BudgetGauge
+            mtd={mtd}
+            budget={budget}
+            action={canEditBudget ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => openEditBudget(budget.monthly_usd)}
+              >
+                <Pencil className="w-3.5 h-3.5 mr-1.5" /> Edit budget
+              </Button>
+            ) : null}
+          />
         : <PlatformTotals mtd={mtd} projected={projected} calendarPct={calendar_pct} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <MetricCard
           label="Calls this month"
           value={(mtd.calls || 0).toLocaleString()}
@@ -155,6 +211,13 @@ export default function LlmUsageTab({ token, companies }) {
           label="Completion tokens"
           value={fmtTokens(mtd.completion_tokens)}
         />
+        <MetricCard
+          label="Cached input"
+          value={fmtTokens(mtd.cached_tokens || 0)}
+          hint={mtd.prompt_tokens > 0
+            ? `${((mtd.cached_tokens || 0) / mtd.prompt_tokens * 100).toFixed(0)}% of prompt · billed ~50% off`
+            : "prompt-cache hits"}
+        />
       </div>
 
       <DailyBars daily={daily} days={days} onDaysChange={setDays} />
@@ -162,22 +225,59 @@ export default function LlmUsageTab({ token, companies }) {
       {aggregate && <TenantRanking tenants={tenants} totalCost={mtd.cost_usd} />}
 
       <ModelBreakdown models={models} totalCost={mtd.cost_usd} />
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Monthly LLM budget</DialogTitle>
+            <DialogDescription>
+              Cap this tenant's monthly OpenAI spend. When budget enforcement is
+              enabled, chat replies with a polite "limit reached" message once the
+              cap is hit (cached answers still serve). Set 0 for unlimited.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="llm-budget-input" className="text-xs text-muted-foreground">
+              Monthly budget (USD)
+            </Label>
+            <Input
+              id="llm-budget-input"
+              type="number"
+              min="0"
+              step="1"
+              value={budgetDraft}
+              onChange={(e) => setBudgetDraft(e.target.value)}
+              placeholder="e.g. 50"
+              onKeyDown={(e) => { if (e.key === "Enter") saveBudget(); }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(false)} disabled={savingBudget}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={saveBudget} disabled={savingBudget}>
+              {savingBudget ? "Saving…" : "Save budget"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function MetricCard({ label, value }) {
+function MetricCard({ label, value, hint }) {
   return (
     <div className="rounded-lg border border-border bg-card px-5 py-4 shadow-sm">
       <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{label}</p>
       <p className="text-2xl font-semibold tracking-tight text-foreground mt-0.5 tabular-nums">{value}</p>
+      {hint && <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{hint}</p>}
     </div>
   );
 }
 
 /* ─── Budget gauge ──────────────────────────────────────────────────────── */
 
-function BudgetGauge({ mtd, budget }) {
+function BudgetGauge({ mtd, budget, action }) {
   const usedPct = Math.min(100, budget.used_pct ?? 0);
   const calPct  = Math.min(100, budget.calendar_pct ?? 0);
   const overPace = !!budget.over_pace;
@@ -195,6 +295,7 @@ function BudgetGauge({ mtd, budget }) {
     <Section
       title="Monthly LLM cost"
       description={`Month-to-date spend against the ${fmtUSD(budget.monthly_usd)} budget. The tick marks where you'd be on pure calendar pacing (today is ${calPct.toFixed(0)}% of the way through the month).`}
+      actions={action}
     >
       <div className="space-y-4">
         <div className="flex items-baseline justify-between gap-4">

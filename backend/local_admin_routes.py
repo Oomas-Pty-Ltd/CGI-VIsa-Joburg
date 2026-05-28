@@ -90,6 +90,7 @@ async def get_llm_usage(
     mtd_calls = sum(m["calls"] for m in models)
     mtd_prompt_tokens = sum(m["prompt_tokens"] for m in models)
     mtd_completion_tokens = sum(m["completion_tokens"] for m in models)
+    mtd_cached_tokens = sum(m.get("cached_tokens", 0) for m in models)
 
     # Calendar pace (0–100) — current day-of-month / days-in-month.
     if now.month == 12:
@@ -144,6 +145,7 @@ async def get_llm_usage(
             "calls":             mtd_calls,
             "prompt_tokens":     mtd_prompt_tokens,
             "completion_tokens": mtd_completion_tokens,
+            "cached_tokens":     mtd_cached_tokens,
         },
         "budget": budget_block,
     }

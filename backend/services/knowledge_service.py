@@ -23,6 +23,17 @@ from knowledge_scraper import scrape_cgi_joburg
 logger = logging.getLogger(__name__)
 
 
+async def _bust_response_cache(company_id: Optional[str]) -> None:
+    """Drop the tenant's cached chat answers after a KB content change so a
+    correction can't be masked by a stale cached answer. No-op when the response
+    cache is disabled. Never raises — cache hygiene must not break a KB write."""
+    try:
+        from services import response_cache
+        await response_cache.invalidate_tenant(company_id)
+    except Exception:
+        logger.debug("[KB] response_cache invalidate skipped for %s", company_id)
+
+
 class KnowledgeCategory(Enum):
     """Knowledge base categories — platform fallback set.
 
@@ -409,6 +420,7 @@ class KnowledgeService:
         )
 
         await db.knowledge_base.insert_one(entry.to_dict())
+        await _bust_response_cache(company_id)
 
         logger.info(f"Created knowledge entry: {entry.id} - {title} (tenant={company_id})")
 
@@ -456,6 +468,7 @@ class KnowledgeService:
             query,
             {"$set": updates}
         )
+        await _bust_response_cache(current.get("company_id"))
 
         logger.info(f"Updated knowledge entry: {entry_id} to version {updates['version']}")
 
