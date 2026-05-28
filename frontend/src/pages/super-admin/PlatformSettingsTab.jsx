@@ -112,6 +112,19 @@ export default function PlatformSettingsTab({ token }) {
       keys: ["dev_auth_mode"],
     },
     {
+      // Master switches + knobs for the cost features. Toggling here takes
+      // effect without a redeploy (env vars remain as deploy-time fallback).
+      title: "AI cost controls",
+      keys: [
+        "response_cache_enabled",
+        "response_cache_ttl_seconds",
+        "budget_enforcement_enabled",
+        "budget_hard_multiplier",
+        "budget_cache_ttl_seconds",
+        "budget_exceeded_message",
+      ],
+    },
+    {
       title: "WhatsApp channel",
       keys: [
         "whatsapp_body_char_limit",

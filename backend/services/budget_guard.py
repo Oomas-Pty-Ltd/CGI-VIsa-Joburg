@@ -23,15 +23,14 @@ Design / safety:
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import Dict, Optional, Tuple
 
 from database import get_database
+from services import platform_config
 
 logger = logging.getLogger("services.budget_guard")
 
-_CACHE_TTL = int(os.environ.get("BUDGET_CACHE_TTL_SECONDS", "60"))
 _DEFAULT_MSG = (
     "We've reached the current usage limit for this assistant. Please try again "
     "later, or contact the office directly if your matter is urgent."
@@ -42,25 +41,35 @@ _decision_cache: Dict[str, Tuple[bool, float]] = {}
 
 
 def enabled() -> bool:
-    """Master switch — default OFF so rollout is opt-in per environment."""
-    return os.environ.get("BUDGET_ENFORCEMENT_ENABLED", "false").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    """Master switch — default OFF so rollout is opt-in. Read from
+    platform_config (DB → env ``BUDGET_ENFORCEMENT_ENABLED`` → default), so a
+    super-admin can toggle it in the UI without a redeploy."""
+    return bool(platform_config.get("budget_enforcement_enabled", False))
 
 
 def exceeded_message() -> str:
-    """The message returned to the user when a tenant is over budget. Override
-    per deployment via ``BUDGET_EXCEEDED_MESSAGE``."""
-    return os.environ.get("BUDGET_EXCEEDED_MESSAGE") or _DEFAULT_MSG
+    """The message returned to the user when a tenant is over budget. Editable
+    in the UI (platform_config) or via env ``BUDGET_EXCEEDED_MESSAGE``; blank
+    falls back to the built-in default."""
+    msg = platform_config.get("budget_exceeded_message", "") or ""
+    return msg.strip() or _DEFAULT_MSG
 
 
 def _hard_multiplier() -> float:
     """Block at ``budget * multiplier``. 1.0 = decline exactly at the configured
-    cap; set >1.0 to allow a grace band before hard-declining."""
+    cap; >1.0 allows a grace band. From platform_config / env."""
     try:
-        return float(os.environ.get("BUDGET_HARD_MULTIPLIER", "1.0"))
-    except ValueError:
+        return float(platform_config.get("budget_hard_multiplier", 1.0) or 1.0)
+    except (TypeError, ValueError):
         return 1.0
+
+
+def _cache_ttl() -> int:
+    """Seconds to cache the per-tenant decision. From platform_config / env."""
+    try:
+        return int(platform_config.get("budget_cache_ttl_seconds", 60) or 60)
+    except (TypeError, ValueError):
+        return 60
 
 
 def invalidate_cache(company_id: Optional[str] = None) -> None:
@@ -107,5 +116,5 @@ async def is_over_budget(company_id: str) -> bool:
         logger.warning("budget_guard.is_over_budget failed for %s (failing open): %s", company_id, e)
         return False
 
-    _decision_cache[company_id] = (decision, now + _CACHE_TTL)
+    _decision_cache[company_id] = (decision, now + _cache_ttl())
     return decision

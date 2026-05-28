@@ -12,6 +12,10 @@ import importlib
 
 def _fresh(monkeypatch, enabled):
     monkeypatch.setenv("RESPONSE_CACHE_ENABLED", "true" if enabled else "false")
+    # enabled() now reads platform_config; clear its cache so the env-var
+    # fallback path is what's exercised (no DB in offline tests).
+    import services.platform_config as pc
+    monkeypatch.setattr(pc, "_cache_value", None)
     import services.response_cache as rc
     return importlib.reload(rc)
 
@@ -35,6 +39,16 @@ def test_enabled_reads_env(monkeypatch):
     rc = _fresh(monkeypatch, enabled=False)
     assert rc.enabled() is False
     rc = _fresh(monkeypatch, enabled=True)
+    assert rc.enabled() is True
+
+
+def test_enabled_reads_platform_config(monkeypatch):
+    # A super-admin toggling the flag in the UI = a platform_config value,
+    # which must win regardless of the env var.
+    import services.response_cache as rc
+    import services.platform_config as pc
+    monkeypatch.setenv("RESPONSE_CACHE_ENABLED", "false")
+    monkeypatch.setattr(pc, "get", lambda key, default=None: True if key == "response_cache_enabled" else default)
     assert rc.enabled() is True
 
 

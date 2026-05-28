@@ -37,6 +37,10 @@ def _wire(monkeypatch, *, enabled, budget, spent):
     """Point the guard at a fake company budget + fake MTD spend."""
     monkeypatch.setenv("BUDGET_ENFORCEMENT_ENABLED", "true" if enabled else "false")
     monkeypatch.setattr(bg, "_decision_cache", {})  # fresh cache per test
+    # enabled()/knobs now read platform_config; clear its cache so the env-var
+    # fallback path is exercised deterministically (no DB in offline tests).
+    import services.platform_config as pc
+    monkeypatch.setattr(pc, "_cache_value", None)
 
     async def _fake_get_db():
         return _FakeDB(budget)
@@ -49,6 +53,15 @@ def _wire(monkeypatch, *, enabled, budget, spent):
         return spent
 
     monkeypatch.setattr(llm_usage, "month_to_date_cost", _fake_mtd)
+
+
+def test_enabled_reads_platform_config(monkeypatch):
+    # A super-admin toggling the flag in the UI = a platform_config value.
+    import services.platform_config as pc
+    monkeypatch.setattr(pc, "get", lambda key, default=None: True if key == "budget_enforcement_enabled" else default)
+    assert bg.enabled() is True
+    monkeypatch.setattr(pc, "get", lambda key, default=None: False if key == "budget_enforcement_enabled" else default)
+    assert bg.enabled() is False
 
 
 def test_noop_when_disabled(monkeypatch):

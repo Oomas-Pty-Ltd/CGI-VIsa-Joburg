@@ -80,6 +80,17 @@ DEFAULTS: Dict[str, Any] = {
     "frontend_inactivity_check_ms":     30000,
     "frontend_tts_chunk_size_chars":    250,
 
+    # ── AI cost controls (response cache + per-tenant budget gate) ────
+    # Master switches + knobs for the cost features. Default OFF so they
+    # stay opt-in. The matching env vars below still work as the deploy-
+    # time override layer (DB value set via the UI wins).
+    "response_cache_enabled":       False,
+    "response_cache_ttl_seconds":   21600,   # 6 h
+    "budget_enforcement_enabled":   False,
+    "budget_hard_multiplier":       1.0,     # decline at cap * this (>1 = grace band)
+    "budget_cache_ttl_seconds":     60,
+    "budget_exceeded_message":      "",      # blank → built-in polite default
+
     # ── Rate limits (platform-wide, enforced on /chat + /chat/stream) ──
     # Distributed fixed-window counters in Mongo (security/rate_limiter.py).
     # 0 on any row disables that dimension. The per-IP minute cap is
@@ -102,6 +113,13 @@ _ENV_OVERRIDES: Dict[str, str] = {
     "kb_crawl_interval_seconds":    "KB_CRAWL_INTERVAL_SECONDS",
     "kb_cache_ttl_seconds":         "KB_CACHE_TTL_SECONDS",
     "session_cleanup_interval_seconds": "SESSION_CLEANUP_INTERVAL_SECONDS",
+    # AI cost controls — existing env-var names stay as the deploy-time layer.
+    "response_cache_enabled":       "RESPONSE_CACHE_ENABLED",
+    "response_cache_ttl_seconds":   "RESPONSE_CACHE_TTL_SECONDS",
+    "budget_enforcement_enabled":   "BUDGET_ENFORCEMENT_ENABLED",
+    "budget_hard_multiplier":       "BUDGET_HARD_MULTIPLIER",
+    "budget_cache_ttl_seconds":     "BUDGET_CACHE_TTL_SECONDS",
+    "budget_exceeded_message":      "BUDGET_EXCEEDED_MESSAGE",
     # Rate limits keep their existing env-var names as the deploy-time
     # override layer (DB value set via the UI still wins over these).
     "rate_limit_ip_per_sec":        "RATE_LIMIT_IP_PER_SEC",

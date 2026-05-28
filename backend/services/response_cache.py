@@ -22,21 +22,29 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import get_database
+from services import platform_config
 
 logger = logging.getLogger("services.response_cache")
 
-_DEFAULT_TTL_SECONDS = int(os.environ.get("RESPONSE_CACHE_TTL_SECONDS", "21600"))
-
 
 def enabled() -> bool:
-    """Master switch — default OFF so rollout is opt-in per environment."""
-    return os.environ.get("RESPONSE_CACHE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+    """Master switch — default OFF so rollout is opt-in. Read from
+    platform_config (DB → env ``RESPONSE_CACHE_ENABLED`` → default), so a
+    super-admin can toggle it in the UI without a redeploy."""
+    return bool(platform_config.get("response_cache_enabled", False))
+
+
+def _ttl_seconds() -> int:
+    """Cache TTL, resolved at call time (platform_config → env → default 6h)."""
+    try:
+        return int(platform_config.get("response_cache_ttl_seconds", 21600) or 21600)
+    except (TypeError, ValueError):
+        return 21600
 
 
 def _normalize(query: str) -> str:
@@ -68,10 +76,13 @@ async def get(company_id: str, lang: Optional[str], query: str) -> Optional[str]
 
 
 async def put(company_id: str, lang: Optional[str], query: str, answer: str,
-              ttl_seconds: int = _DEFAULT_TTL_SECONDS) -> None:
-    """Store an answer. No-ops when disabled or any field is empty."""
+              ttl_seconds: Optional[int] = None) -> None:
+    """Store an answer. No-ops when disabled or any field is empty. TTL falls
+    back to the platform_config / env value when the caller doesn't specify."""
     if not enabled() or not company_id or not (query or "").strip() or not (answer or "").strip():
         return
+    if ttl_seconds is None:
+        ttl_seconds = _ttl_seconds()
     try:
         db = await get_database()
         now = datetime.now(timezone.utc)
