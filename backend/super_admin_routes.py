@@ -544,6 +544,11 @@ async def update_company_llm_budget(
         {"id": company_id},
         {"$set": {"llm_monthly_budget_usd": float(update.llm_monthly_budget_usd)}},
     )
+    # Drop the cached over-budget decision so the new cap applies immediately
+    # instead of after budget_guard's ~60s TTL (effective in this process; other
+    # instances catch up within the TTL).
+    from services import budget_guard
+    budget_guard.invalidate_cache(company_id)
     await _audit_safe(
         db,
         category=AuditCategory.ADMIN_ACTION,
@@ -1357,6 +1362,9 @@ async def upload_pdf_to_knowledge(
 
     # Invalidate the scraper cache so the next chat request picks up the new content
     invalidate_knowledge_cache()
+    # Bust the tenant's cached chat answers so freshly uploaded content can surface.
+    from services import response_cache as _rc
+    await _rc.invalidate_tenant(company_id)
 
     return {
         "success": True,
@@ -1485,17 +1493,18 @@ async def delete_knowledge_entry(
     """Permanently delete a knowledge entry. Local-admins can only delete
     entries belonging to their own tenant."""
     db = await get_database()
+    # Resolve the owning tenant up front: enforces scope for non-super-admins
+    # and lets us bust that tenant's response cache after the delete.
+    entry = await db.knowledge_base.find_one({"id": entry_id}, {"_id": 0, "company_id": 1})
     if payload.get("user_type") != "super_admin":
-        # Scope the delete to the caller's tenant.
         tenant = enforce_tenant_scope(payload, None)
-        entry = await db.knowledge_base.find_one({"id": entry_id}, {"_id": 0, "company_id": 1})
-        if not entry:
-            raise HTTPException(status_code=404, detail="Entry not found.")
-        if entry.get("company_id") != tenant:
+        if not entry or entry.get("company_id") != tenant:
             raise HTTPException(status_code=404, detail="Entry not found.")
     result = await db.knowledge_base.delete_one({"id": entry_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Entry not found.")
+    from services import response_cache as _rc
+    await _rc.invalidate_tenant((entry or {}).get("company_id"))
     return {"success": True, "deleted_id": entry_id}
 
 
@@ -2910,6 +2919,20 @@ _VALID_CHANNEL_TYPES = {"whatsapp_twilio", "ics_waba", "facebook"}
 class ChannelMappingUpsert(BaseModel):
     company_id: str
     metadata:   Optional[Dict[str, Any]] = None
+    # Optional per-tenant ICS WABA sending credentials. The password is stored
+    # Fernet-encrypted; omit both to leave existing credentials untouched.
+    send_user:  Optional[str] = None
+    send_pass:  Optional[str] = None
+
+
+def _redact_mapping(row: Optional[dict]) -> Optional[dict]:
+    """Strip the encrypted credential before returning a mapping to the UI;
+    expose only a boolean so operators can see whether creds are configured."""
+    if not row:
+        return row
+    out = {k: v for k, v in row.items() if k != "send_pass_enc"}
+    out["has_credentials"] = bool(row.get("send_user") and row.get("send_pass_enc"))
+    return out
 
 
 @router.get("/channel-mappings")
@@ -2936,7 +2959,7 @@ async def list_channel_mappings_endpoint(
 
     return {
         "mappings": [
-            {**r, "company_name": name_by_id.get(r.get("company_id"))}
+            {**_redact_mapping(r), "company_name": name_by_id.get(r.get("company_id"))}
             for r in rows
         ],
         "count": len(rows),
@@ -2963,7 +2986,7 @@ async def get_channel_mapping(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Channel mapping not configured")
-    return row
+    return _redact_mapping(row)
 
 
 @router.put("/channel-mappings/{channel_type}/{external_id:path}")
@@ -2986,9 +3009,20 @@ async def upsert_channel_mapping(
     if not await _company_exists(db, body.company_id):
         raise HTTPException(status_code=404, detail=f"company_id {body.company_id!r} not found")
 
+    # Per-tenant sending credentials are optional; the password is stored
+    # Fernet-encrypted. Fail clearly if a secret was supplied without a key.
+    if body.send_pass is not None:
+        from security.crypto import is_configured as _crypto_ok
+        if not _crypto_ok():
+            raise HTTPException(
+                status_code=400,
+                detail="CHANNEL_CRED_KEY is not set — cannot store channel credentials "
+                       "securely. Set a Fernet key in the environment first.",
+            )
     from services.messaging_channel_resolver import map_channel_to_company
     await map_channel_to_company(
-        channel_type, external_id, body.company_id, metadata=body.metadata
+        channel_type, external_id, body.company_id,
+        metadata=body.metadata, send_user=body.send_user, send_pass=body.send_pass,
     )
     # Sprint 12 — audit channel-mapping changes since they route real
     # inbound traffic to a tenant. Severity=WARNING because mis-routing
@@ -3006,9 +3040,9 @@ async def upsert_channel_mapping(
         ip_address=http_request.client.host if http_request.client else None,
         severity=AuditSeverity.WARNING,
     )
-    return await db.messaging_channel_map.find_one(
+    return _redact_mapping(await db.messaging_channel_map.find_one(
         {"channel_type": channel_type, "external_id": external_id}, {"_id": 0}
-    )
+    ))
 
 
 @router.delete("/channel-mappings/{channel_type}/{external_id:path}")

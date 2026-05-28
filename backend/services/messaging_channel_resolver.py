@@ -42,6 +42,12 @@ CHANNEL_FACEBOOK = "facebook"
 # TTL is platform-config driven (cache_messaging_channel_ttl_seconds).
 _resolver_cache: Dict[Tuple[str, str], Tuple[float, str]] = {}
 
+# Separate cache for per-channel SENDING credentials (decrypted {user,pass,from}
+# or None). Kept apart from the company-id cache because it's read on the
+# outbound hot path (possibly several sends per inbound message) and holds
+# decrypted secrets only in-process. Same TTL + invalidation contract.
+_creds_cache: Dict[Tuple[str, str], Tuple[float, Optional[dict]]] = {}
+
 
 def _cache_ttl() -> int:
     try:
@@ -63,17 +69,21 @@ def invalidate_cache(channel_type: Optional[str] = None, external_id: Optional[s
     up to ``_cache_ttl()``)."""
     if channel_type is None and external_id is None:
         _resolver_cache.clear()
+        _creds_cache.clear()
     elif channel_type is not None and external_id is not None:
-        _resolver_cache.pop(_cache_key(channel_type, external_id), None)
+        k = _cache_key(channel_type, external_id)
+        _resolver_cache.pop(k, None)
+        _creds_cache.pop(k, None)
     else:
         # Partial-key invalidation — drop every entry matching the given dimension
-        keys_to_drop = [
-            k for k in _resolver_cache
-            if (channel_type is None or k[0] == channel_type)
-            and (external_id is None or k[1] == external_id)
-        ]
-        for k in keys_to_drop:
-            _resolver_cache.pop(k, None)
+        for cache in (_resolver_cache, _creds_cache):
+            keys_to_drop = [
+                k for k in cache
+                if (channel_type is None or k[0] == channel_type)
+                and (external_id is None or k[1] == external_id)
+            ]
+            for k in keys_to_drop:
+                cache.pop(k, None)
 
 
 async def resolve_company_from_channel(channel_type: str, external_id: str) -> str:
@@ -128,22 +138,72 @@ async def resolve_company_from_channel(channel_type: str, external_id: str) -> s
     return config.COMPANY_ID
 
 
+async def resolve_channel_credentials(channel_type: str, external_id: str) -> Optional[dict]:
+    """Return the SENDING credentials for this channel/number, or None when no
+    per-tenant credentials are configured (caller falls back to env globals).
+
+    Shape: ``{"user": str, "pass": str, "from": external_id}``. The password is
+    stored Fernet-encrypted (``send_pass_enc``) and decrypted here; a missing
+    key or undecryptable value yields None (→ env fallback, logged once).
+    TTL-cached per-process like :func:`resolve_company_from_channel`."""
+    if not external_id:
+        return None
+    key = _cache_key(channel_type, external_id)
+    now = time.monotonic()
+    cached = _creds_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    creds: Optional[dict] = None
+    try:
+        db = await get_database()
+        row = await db.messaging_channel_map.find_one(
+            {"channel_type": channel_type, "external_id": external_id},
+            {"_id": 0, "send_user": 1, "send_pass_enc": 1},
+        )
+        if row and row.get("send_user") and row.get("send_pass_enc"):
+            from security.crypto import decrypt_secret
+            pw = decrypt_secret(row.get("send_pass_enc"))
+            if pw:
+                creds = {"user": row["send_user"], "pass": pw, "from": external_id}
+    except Exception as e:
+        logger.warning("resolve_channel_credentials failed for %s:%s — %s", channel_type, external_id, e)
+
+    _creds_cache[key] = (now + _cache_ttl(), creds)
+    return creds
+
+
 async def map_channel_to_company(
     channel_type: str,
     external_id: str,
     company_id: str,
     *,
     metadata: dict | None = None,
+    send_user: str | None = None,
+    send_pass: str | None = None,
 ) -> None:
     """Register a (channel_type, external_id) → company_id mapping.
 
+    Optional per-tenant sending credentials: pass ``send_user`` + ``send_pass``
+    (the raw password is Fernet-encrypted before storage). Either both or
+    neither — omit to leave existing credentials untouched. ``encrypt_secret``
+    raises if no ``CHANNEL_CRED_KEY`` is configured, so a plaintext secret is
+    never persisted.
+
     Invalidates the resolver cache so the change takes effect on the very
     next inbound message rather than waiting for the TTL to expire."""
+    set_doc: dict = {"company_id": company_id, "metadata": metadata or {}}
+    if send_user is not None:
+        set_doc["send_user"] = send_user
+    if send_pass is not None:
+        from security.crypto import encrypt_secret
+        set_doc["send_pass_enc"] = encrypt_secret(send_pass)
+
     db = await get_database()
     await db.messaging_channel_map.update_one(
         {"channel_type": channel_type, "external_id": external_id},
         {
-            "$set":         {"company_id": company_id, "metadata": metadata or {}},
+            "$set":         set_doc,
             "$setOnInsert": {"channel_type": channel_type, "external_id": external_id},
         },
         upsert=True,

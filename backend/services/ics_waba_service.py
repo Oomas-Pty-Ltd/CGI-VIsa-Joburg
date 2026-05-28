@@ -6,12 +6,20 @@ Wraps the ICS Production WhatsApp Solution API v3.1
 Endpoints:
   - Session Comm: https://media.sendmsg.in/sessioncomm
   - Bulk Send:    https://media.sendmsg.in/mediasend
+
+Multi-tenant: each outbound send resolves the SENDING credentials
+(user / pass / from) from the WABA number it is sent as (``from_override``,
+the number the user messaged). Per-tenant credentials live on the
+``messaging_channel_map`` row (``send_user`` + Fernet-encrypted
+``send_pass_enc``); when none are configured the env globals
+(ICS_WABA_USER/PASS/FROM) are used, so single-tenant deployments are
+unaffected.
 ====================================================================
 """
 import logging
 import os
 import httpx
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +35,8 @@ class ICSWABAService:
     """Client for the ICS WhatsApp Business API."""
 
     def __init__(self):
+        # Env globals — the fallback account used when a WABA number has no
+        # per-tenant credentials configured on its channel-map row.
         self.user = ICS_USER
         self.pw   = ICS_PASS
         self.from_ = ICS_FROM
@@ -36,21 +46,52 @@ class ICSWABAService:
         self._interactive_unsupported = bool(os.environ.get("ICS_DISABLE_INTERACTIVE", "true").lower() != "false")
         if not self.enabled:
             logger.warning(
-                "ICS WABA not configured. Set ICS_WABA_USER, ICS_WABA_PASS, ICS_WABA_FROM in .env"
+                "ICS WABA env globals not fully set. Per-tenant credentials (via "
+                "channel-mapping) still work; otherwise set ICS_WABA_USER/PASS/FROM in .env."
             )
+
+    # ------------------------------------------------------------------
+    # Credential resolution (per-tenant → env fallback)
+    # ------------------------------------------------------------------
+    async def _resolve_creds(self, from_override: str = "") -> Tuple[str, str, str]:
+        """Return (user, pass, from) for this send. If the WABA number has
+        per-tenant credentials on its channel-map row, use those; otherwise the
+        env globals. ``from_override`` is the WABA number (channel-map external_id)."""
+        number = (from_override or "").strip() or self.from_
+        if number:
+            try:
+                from services.messaging_channel_resolver import (
+                    resolve_channel_credentials, CHANNEL_ICS_WABA,
+                )
+                creds = await resolve_channel_credentials(CHANNEL_ICS_WABA, number)
+                if creds:
+                    return creds["user"], creds["pass"], creds["from"]
+            except Exception as e:
+                logger.warning("[ICS] per-tenant credential resolve failed for %s: %s", number, e)
+        return self.user, self.pw, (number or self.from_)
 
     # ------------------------------------------------------------------
     # Internal helper
     # ------------------------------------------------------------------
     async def _post(self, url: str, payload: Dict) -> Dict:
-        """Send a POST request to ICS API and return JSON response."""
-        if not self.enabled:
-            logger.warning("[ICS DISABLED] ICS WABA service not configured. Set ICS_WABA_USER, ICS_WABA_PASS, ICS_WABA_FROM in .env")
-            logger.debug("[ICS MOCK] POST %s | payload=%s", url, payload)
+        """Send a POST request to ICS API and return JSON response.
+
+        Gated on the credentials actually present in the payload (per-tenant or
+        env) rather than the env globals, so a tenant-credentialed send works
+        even when the env account is unset."""
+        if not (payload.get("user") and payload.get("pass")):
+            logger.warning(
+                "[ICS DISABLED] No ICS WABA credentials for this send (neither "
+                "per-tenant nor env). Configure per-tenant creds via channel-mapping "
+                "or set ICS_WABA_USER/PASS/FROM in .env."
+            )
             return {"status": "mock", "mid": "mock_mid", "warning": "ICS WABA not configured"}
         import json as _json
-        logger.info("[ICS SEND] POST %s | to=%s", url, payload.get("sessiondata", {}).get("to", "unknown"))
-        logger.info("[ICS PAYLOAD] %s", _json.dumps(payload, default=str))
+        _to = payload.get("sessiondata", {}).get("to") or payload.get("to", "unknown")
+        logger.info("[ICS SEND] POST %s | to=%s", url, _to)
+        # Never log credentials — mask user/pass in the payload dump.
+        _safe = {**payload, "user": "***", "pass": "***"}
+        logger.info("[ICS PAYLOAD] %s", _json.dumps(_safe, default=str))
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(url, json=payload)
@@ -62,9 +103,7 @@ class ICSWABAService:
                 result = resp.json()
                 logger.info(
                     "[ICS SUCCESS] to=%s | mid=%s | full_response=%s",
-                    payload.get("sessiondata", {}).get("to", "unknown"),
-                    result.get("mid", "no_mid"),
-                    result,
+                    _to, result.get("mid", "no_mid"), result,
                 )
                 return result
         except httpx.HTTPStatusError as exc:
@@ -84,14 +123,11 @@ class ICSWABAService:
             logger.error("[ICS EXCEPTION] %s", error_msg)
             return {"error": error_msg, "error_type": type(exc).__name__, "success": False}
 
-    def _base_session(self, to: str, from_override: str = "") -> Dict:
-        """Build the common sessiondata wrapper.
-        from_override: use the WABA number from the incoming webhook when available
-        (more reliable than the static .env value)."""
-        sender = from_override.strip() or self.from_
+    def _base_session(self, to: str, user: str, pw: str, sender: str) -> Dict:
+        """Build the common sessiondata wrapper with explicit credentials."""
         return {
-            "user": self.user,
-            "pass": self.pw,
+            "user": user,
+            "pass": pw,
             "sessiondata": {
                 "from": sender,
                 "to": to,
@@ -103,7 +139,8 @@ class ICSWABAService:
     # ------------------------------------------------------------------
     async def send_text(self, to: str, text: str, from_override: str = "") -> Dict:
         """Send a plain-text session message."""
-        payload = self._base_session(to, from_override)
+        user, pw, sender = await self._resolve_creds(from_override)
+        payload = self._base_session(to, user, pw, sender)
         payload["sessiondata"]["type"] = "text"
         payload["sessiondata"]["message"] = {"text": text}
         return await self._post(ICS_SESSION_COMM_URL, payload)
@@ -138,7 +175,8 @@ class ICSWABAService:
             if footer:
                 interactive["footer"] = {"text": footer[:60]}
 
-            payload = self._base_session(to, from_override)
+            user, pw, sender = await self._resolve_creds(from_override)
+            payload = self._base_session(to, user, pw, sender)
             payload["sessiondata"]["type"] = "interactive"
             payload["sessiondata"]["interactive"] = interactive
             result = await self._post(ICS_SESSION_COMM_URL, payload)
@@ -189,7 +227,8 @@ class ICSWABAService:
             if footer:
                 interactive["footer"] = {"text": footer[:60]}
 
-            payload = self._base_session(to, from_override)
+            user, pw, sender = await self._resolve_creds(from_override)
+            payload = self._base_session(to, user, pw, sender)
             payload["sessiondata"]["type"] = "interactive"
             payload["sessiondata"]["interactive"] = interactive
             result = await self._post(ICS_SESSION_COMM_URL, payload)
@@ -227,6 +266,7 @@ class ICSWABAService:
         url: str,
         caption: Optional[str] = None,
         filename: Optional[str] = None,
+        from_override: str = "",
     ) -> Dict:
         """Send a media message (image / document / video)."""
         message: Dict[str, Any] = {"url": url}
@@ -235,7 +275,8 @@ class ICSWABAService:
         if filename and media_type == "document":
             message["filename"] = filename
 
-        payload = self._base_session(to)
+        user, pw, sender = await self._resolve_creds(from_override)
+        payload = self._base_session(to, user, pw, sender)
         payload["sessiondata"]["type"] = media_type
         payload["sessiondata"]["message"] = message
         return await self._post(ICS_SESSION_COMM_URL, payload)
@@ -250,12 +291,14 @@ class ICSWABAService:
         placeholders: Optional[List[Dict]] = None,
         media_id: Optional[str] = None,
         smsgid: Optional[str] = None,
+        from_override: str = "",
     ) -> Dict:
         """Send a pre-approved WhatsApp template message."""
+        user, pw, sender = await self._resolve_creds(from_override)
         payload: Dict[str, Any] = {
-            "user": self.user,
-            "pass": self.pw,
-            "from": self.from_,
+            "user": user,
+            "pass": pw,
+            "from": sender,
             "to": to,
             "templateid": template_id,
             "placeholders": placeholders or [],

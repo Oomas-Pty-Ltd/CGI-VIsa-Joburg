@@ -8,7 +8,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Plus, Trash2, Edit2, RefreshCw, Smartphone, Facebook, AlertCircle,
+  Plus, Trash2, Edit2, RefreshCw, Smartphone, Facebook, AlertCircle, KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -170,6 +170,11 @@ export default function ChannelMappingsTab({ companies, token }) {
                       <ChannelIcon type={row.channel_type} className="h-3 w-3" />
                       {channelLabel(row.channel_type)}
                     </Badge>
+                    {row.has_credentials && (
+                      <Badge variant="outline" className="ml-1 gap-1" title="Sends from this tenant's own ICS account">
+                        <KeyRound className="h-3 w-3" /> own creds
+                      </Badge>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">{row.external_id}</td>
                   <td className="px-4 py-3">
@@ -233,6 +238,12 @@ function MappingDialog({ row, companies, token, onClose, onSaved }) {
       ? JSON.stringify(row.metadata, null, 2)
       : ""
   );
+  // Per-tenant ICS WABA send credentials. The password is never returned by the
+  // API (redacted to `has_credentials`), so it's never prefilled — blank on save
+  // means "keep the existing password".
+  const [sendUser, setSendUser] = useState(row?.send_user ?? "");
+  const [sendPass, setSendPass] = useState("");
+  const hasCreds = !!row?.has_credentials;
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -245,6 +256,18 @@ function MappingDialog({ row, companies, token, onClose, onSaved }) {
       catch { toast.error("Metadata must be valid JSON or empty"); return; }
     }
 
+    const payload = { company_id: companyId, metadata: metaObj };
+    if (channelType === "ics_waba") {
+      const u = sendUser.trim();
+      // Require a username alongside a new password (unless one is already stored).
+      if (sendPass && !u && !hasCreds) {
+        toast.error("ICS username is required when setting a password");
+        return;
+      }
+      if (u) payload.send_user = u;
+      if (sendPass) payload.send_pass = sendPass;  // omit when blank → keep existing
+    }
+
     setSaving(true);
     try {
       const path = `${API}/super-admin/channel-mappings/${channelType}/${encodeURIComponent(externalId.trim())}`;
@@ -254,7 +277,7 @@ function MappingDialog({ row, companies, token, onClose, onSaved }) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ company_id: companyId, metadata: metaObj }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Save failed");
@@ -317,6 +340,46 @@ function MappingDialog({ row, companies, token, onClose, onSaved }) {
               className="font-mono text-xs"
             />
           </div>
+
+          {channelType === "ics_waba" && (
+            <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <KeyRound className="h-3.5 w-3.5" />
+                Per-tenant ICS WABA credentials
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave blank to send from the platform's default ICS account. Set these to send
+                as this tenant's own ICS account. The password is stored encrypted and never
+                shown again.
+              </p>
+              <div>
+                <Label className="text-xs">ICS username</Label>
+                <Input
+                  value={sendUser}
+                  onChange={(e) => setSendUser(e.target.value)}
+                  placeholder="ics-username"
+                  className="font-mono"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">ICS password</Label>
+                <Input
+                  type="password"
+                  value={sendPass}
+                  onChange={(e) => setSendPass(e.target.value)}
+                  placeholder={hasCreds ? "•••••••• (leave blank to keep current)" : "ics-password"}
+                  autoComplete="new-password"
+                />
+                {hasCreds && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Credentials are configured. Leave blank to keep the existing password.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
