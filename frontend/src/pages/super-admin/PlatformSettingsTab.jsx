@@ -129,6 +129,21 @@ export default function PlatformSettingsTab({ token }) {
         "frontend_tts_chunk_size_chars",
       ],
     },
+    {
+      // Platform-wide limits on /chat + /chat/stream. 0 on any row disables
+      // that dimension. Per-second rows are off (0) by default — enable with
+      // care if many users share an IP behind NAT.
+      title: "Rate limits (0 = no limit on that dimension)",
+      keys: [
+        "rate_limit_ip_per_sec",
+        "rate_limit_ip_per_min",
+        "rate_limit_ip_per_hour",
+        "rate_limit_burst_multiplier",
+        "rate_limit_user_per_sec",
+        "rate_limit_user_per_min",
+        "rate_limit_user_per_day",
+      ],
+    },
   ];
 
   const knownKeys = new Set(groups.flatMap((g) => g.keys));

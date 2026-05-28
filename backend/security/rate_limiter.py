@@ -7,6 +7,15 @@ Implements rate limiting to prevent abuse and control costs:
 - Per-user quotas
 - Per-phone number caps
 - Configurable thresholds
+
+Enforcement is DISTRIBUTED via MongoDB (atomic ``$inc`` fixed-window
+counters in the ``rate_limits`` collection). This is correct across
+multiple workers / Cloud Run instances — a per-process in-memory
+counter would let the effective limit scale with the instance count
+(each instance counts only its own slice). The in-memory ``RateLimiter``
+below is retained ONLY for the dashboard stats (``get_stats``); it no
+longer gates requests. Swap-in for Redis later is a drop-in: same
+key + counter semantics, faster backend.
 ====================================================================
 """
 
@@ -18,6 +27,11 @@ from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from dataclasses import dataclass, field
 from fastapi import Request, HTTPException, status
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+
+from database import get_database
+from services import platform_config as _pcfg
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +95,12 @@ class RateLimitBucket:
 class RateLimiter:
     """
     In-memory rate limiter with multiple limit types.
-    For production, consider using Redis for distributed rate limiting.
+
+    NOTE: request gating now runs through the Mongo-backed distributed
+    path (``check_limits_distributed`` / ``check_rate_limit``). This class
+    is kept for the per-process dashboard counters exposed by ``get_stats``
+    (``total_requests`` / ``blocked_requests``, bumped from the Mongo path).
+    The ``check_*_limit`` methods are no longer on the request path.
     """
     
     def __init__(self, config: Dict = None):
@@ -306,8 +325,110 @@ class RateLimiter:
         }
 
 
-# Global rate limiter instance
+# Global rate limiter instance (stats only; see class docstring)
 rate_limiter = RateLimiter()
+
+
+# =====================================================================
+# DISTRIBUTED (MongoDB) ENFORCEMENT
+# =====================================================================
+# Fixed-window counters in the ``rate_limits`` collection. One atomic
+# ``find_one_and_update`` ($inc, upsert) per dimension — correct across
+# workers/instances, no shared memory needed. The TTL index on
+# ``expires_at`` auto-evicts old windows (no cleanup job). Limits config
+# (RATE_LIMIT_CONFIG) is read in-process; only the COUNTERS hit Mongo.
+
+async def _hit_window(db, key_prefix: str, identifier: str, limit: int, window_seconds: int) -> bool:
+    """Count this request in the current fixed window and report whether it is
+    still within ``limit``. Atomic ``$inc`` upsert → safe under concurrency and
+    across instances. Returns True if ALLOWED, False if the window is over limit.
+
+    Retries once on the upsert race: two instances creating the same brand-new
+    window key can collide on the unique ``key`` index; the retry finds the now-
+    existing doc and simply increments it.
+    """
+    now = time.time()
+    window_start = int(now // window_seconds) * window_seconds
+    full_key = f"{key_prefix}:{identifier}:{window_start}"
+    # Keep the doc a bit past the window end so a late request in the window
+    # still sees the count before the TTL sweep removes it.
+    expires_at = datetime.fromtimestamp(window_start + window_seconds + 60, tz=timezone.utc)
+    for _ in range(2):
+        try:
+            doc = await db.rate_limits.find_one_and_update(
+                {"key": full_key},
+                {"$inc": {"count": 1}, "$setOnInsert": {"expires_at": expires_at}},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+                projection={"count": 1},
+            )
+            return int((doc or {}).get("count", 1)) <= limit
+        except DuplicateKeyError:
+            continue
+    return True  # persistent upsert race → fail-open for this hit
+
+
+def _limit(key: str, default: int) -> int:
+    """Read a rate-limit knob from platform_config (DB → env → default).
+    Coerces to int; a non-positive / unparseable value means "no limit on
+    this dimension" (the caller skips the window)."""
+    try:
+        return int(_pcfg.get(key, default) or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+async def check_limits_distributed(db, ip: str, user_id: Optional[str] = None) -> Tuple[bool, str]:
+    """Enforce per-IP (second/minute/hour) and, for authenticated users,
+    per-user (second/minute/day) limits via Mongo. Short-circuits on the first
+    breach. Limits come from ``platform_config`` (super-admin editable, env
+    fallback); **0 on any dimension disables that window**.
+
+    No single global counter: that would be one hot document every request
+    writes to (a Mongo write-contention point) — global capacity is better
+    bounded by Cloud Run ``max-instances`` + concurrency. Phone limits live in
+    the webhook paths, not here (web ``/chat`` has no phone)."""
+    try:
+        burst = float(_pcfg.get("rate_limit_burst_multiplier", 1.5) or 1.0)
+    except (TypeError, ValueError):
+        burst = 1.5
+    ip_per_sec = _limit("rate_limit_ip_per_sec", 0)
+    ip_minute_limit = int(_limit("rate_limit_ip_per_min", 30) * burst)
+    ip_per_hour = _limit("rate_limit_ip_per_hour", 500)
+    user_per_sec = _limit("rate_limit_user_per_sec", 0)
+    user_per_min = _limit("rate_limit_user_per_min", 20)
+    user_per_day = _limit("rate_limit_user_per_day", 500)
+
+    if ip_per_sec > 0 and not await _hit_window(db, "ip_sec", ip, ip_per_sec, 1):
+        return False, "Too many requests. Please slow down."
+    if ip_minute_limit > 0 and not await _hit_window(db, "ip_min", ip, ip_minute_limit, 60):
+        return False, "Rate limit exceeded. Please wait a minute and try again."
+    if ip_per_hour > 0 and not await _hit_window(db, "ip_hour", ip, ip_per_hour, 3600):
+        return False, "Hourly rate limit exceeded. Please try again later."
+
+    if user_id and user_id != "guest":
+        if user_per_sec > 0 and not await _hit_window(db, "user_sec", user_id, user_per_sec, 1):
+            return False, "You're sending messages too fast. Please slow down."
+        if user_per_min > 0 and not await _hit_window(db, "user_min", user_id, user_per_min, 60):
+            return False, "You're sending messages too fast. Please slow down."
+        if user_per_day > 0 and not await _hit_window(db, "user_day", user_id, user_per_day, 86400):
+            return False, "Daily message limit reached. Please try again tomorrow."
+
+    return True, "OK"
+
+
+def _extract_user_id(request: Request) -> Optional[str]:
+    """Best-effort user id from an unverified Bearer token (used only to key the
+    rate limit — signature is verified elsewhere on the real auth path)."""
+    try:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            import jwt
+            payload = jwt.decode(auth_header[7:], options={"verify_signature": False})
+            return payload.get('user_id')
+    except Exception:
+        pass
+    return None
 
 
 # =====================================================================
@@ -321,29 +442,27 @@ async def check_rate_limit(request: Request) -> bool:
     # Skip rate limiting if disabled
     if os.environ.get('RATE_LIMIT_DISABLED', '').lower() == 'true':
         return True
-    
+
     ip = request.client.host if request.client else "unknown"
-    
-    # Try to get user_id from auth header or body
-    user_id = None
+    user_id = _extract_user_id(request)
+    rate_limiter.total_requests += 1  # per-process counter for get_stats()
+
     try:
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Bearer '):
-            import jwt
-            token = auth_header[7:]
-            payload = jwt.decode(token, options={"verify_signature": False})
-            user_id = payload.get('user_id')
-    except Exception:
-        pass
-    
-    allowed, reason = rate_limiter.check_all_limits(ip, user_id)
-    
+        db = await get_database()
+        allowed, reason = await check_limits_distributed(db, ip, user_id)
+    except Exception as e:
+        # Fail OPEN: never block real users on a limiter/DB hiccup. The app
+        # itself can't serve a chat without Mongo, so this isn't a bypass risk.
+        logger.warning("rate limiter backend error (failing open): %s", e)
+        return True
+
     if not allowed:
+        rate_limiter.blocked_requests += 1
         logger.warning(f"Rate limit hit: IP={ip}, user={user_id}, reason={reason}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=reason,
             headers={"Retry-After": "60"}
         )
-    
+
     return True

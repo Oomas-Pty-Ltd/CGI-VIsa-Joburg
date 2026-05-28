@@ -63,7 +63,7 @@ DEFAULTS: Dict[str, Any] = {
     # fixed dev value (security_config.otp_dev_value, default 123456) and no
     # email is sent — convenient for testing. Turn OFF for production: a real
     # random OTP is generated and emailed, and the dev value is rejected.
-    "dev_auth_mode": True,
+    "dev_auth_mode": False,
 
     # ── WhatsApp channel ──────────────────────────────────────────────
     "whatsapp_body_char_limit":     1024,
@@ -79,6 +79,20 @@ DEFAULTS: Dict[str, Any] = {
     "frontend_tts_timeout_ms":          30000,
     "frontend_inactivity_check_ms":     30000,
     "frontend_tts_chunk_size_chars":    250,
+
+    # ── Rate limits (platform-wide, enforced on /chat + /chat/stream) ──
+    # Distributed fixed-window counters in Mongo (security/rate_limiter.py).
+    # 0 on any row disables that dimension. The per-IP minute cap is
+    # multiplied by the burst multiplier. Per-second rows default to 0
+    # (off) — turn them on per deployment, mindful that many users can
+    # share one IP behind NAT.
+    "rate_limit_ip_per_sec":        0,
+    "rate_limit_ip_per_min":        30,
+    "rate_limit_ip_per_hour":       500,
+    "rate_limit_burst_multiplier":  1.5,
+    "rate_limit_user_per_sec":      0,
+    "rate_limit_user_per_min":      20,
+    "rate_limit_user_per_day":      500,
 }
 
 # Env-var overrides. Maps the ``platform_config`` key → env-var name.
@@ -88,6 +102,15 @@ _ENV_OVERRIDES: Dict[str, str] = {
     "kb_crawl_interval_seconds":    "KB_CRAWL_INTERVAL_SECONDS",
     "kb_cache_ttl_seconds":         "KB_CACHE_TTL_SECONDS",
     "session_cleanup_interval_seconds": "SESSION_CLEANUP_INTERVAL_SECONDS",
+    # Rate limits keep their existing env-var names as the deploy-time
+    # override layer (DB value set via the UI still wins over these).
+    "rate_limit_ip_per_sec":        "RATE_LIMIT_IP_PER_SEC",
+    "rate_limit_ip_per_min":        "RATE_LIMIT_IP_PER_MIN",
+    "rate_limit_ip_per_hour":       "RATE_LIMIT_IP_PER_HOUR",
+    "rate_limit_burst_multiplier":  "RATE_LIMIT_BURST_MULTIPLIER",
+    "rate_limit_user_per_sec":      "RATE_LIMIT_USER_PER_SEC",
+    "rate_limit_user_per_min":      "RATE_LIMIT_USER_PER_MIN",
+    "rate_limit_user_per_day":      "RATE_LIMIT_USER_PER_DAY",
 }
 
 
