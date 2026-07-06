@@ -124,8 +124,10 @@ function readCompanyId() {
   const currentScript =
     document.currentScript ||
     document.querySelector('script[data-company-id][src*="seva-widget"]') ||
-    document.querySelector('script[data-company-id]');
-  const fromTag = currentScript?.dataset?.companyId;
+    document.querySelector('script[data-company-id]') ||
+    document.querySelector('script[data-bot-id][src*="seva-widget"]') ||
+    document.querySelector('script[data-bot-id]');
+  const fromTag = currentScript?.dataset?.companyId || currentScript?.dataset?.botId;
   if (fromTag) return fromTag.trim();
 
   // 2. Pre-set window global (host page sets it before loading us)
