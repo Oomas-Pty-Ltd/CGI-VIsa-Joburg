@@ -1887,7 +1887,7 @@ export default function ChatWidget() {
               </div>
             </div>
             {/* LANGUAGE DROPDOWN */}
-            <div className="lang-dropdown-wrap" style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
+            <div className="lang-dropdown-wrap" style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
               {(() => {
                 // Filter to the languages the operator has enabled.
                 // If only one language is configured, hide the picker entirely.
