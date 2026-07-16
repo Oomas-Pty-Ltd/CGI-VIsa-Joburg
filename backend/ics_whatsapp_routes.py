@@ -803,7 +803,7 @@ def _normalize_phone(raw: str, waba_number: str = "", country_code: str = "") ->
     if cc and waba.startswith(cc) and not phone.startswith(cc):
         m = re.match(r"^(\d{2})(\d{10})$", phone)
         if m and cc != m.group(1):
-            candidate = cc[-1:] + m.group(2) if len(cc) == 2 else cc + m.group(2)
+            candidate = cc[:1] + m.group(2) if len(cc) == 2 else cc + m.group(2)
             if candidate.startswith(cc):
                 logger.info("[PHONE NORM] CC-mangle corrected: %s → %s", phone, candidate)
                 phone = candidate
