@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001")
 SUPER_ADMIN_EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "superadmin@sarthak.ai")
-SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "Admin@2025")
+SUPER_ADMIN_PASSWORD = os.environ["SUPER_ADMIN_PASSWORD"]
 
 
 @pytest.fixture(scope="module")

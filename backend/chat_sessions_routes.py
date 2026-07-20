@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from auth_utils import verify_admin, enforce_tenant_scope
@@ -141,7 +141,7 @@ def _extract_product_areas(messages: list) -> List[str]:
     for area, patterns in _PRODUCT_AREA_PATTERNS.items():
         if any(p in combined for p in patterns):
             areas.append(area)
-    return areas
+    return sorted(areas)
 
 
 def _compute_sentiment(messages: list) -> float:
@@ -228,12 +228,9 @@ async def list_chat_sessions(
         query["company_id"] = company_id
     if since:
         try:
-            # Validate the timestamp and use it as a string comparison (ISO-8601 sorts
-            # lexicographically when zero-padded, which is the storage format).
-            datetime.fromisoformat(since.replace("Z", "+00:00"))
-            query["created_at"] = {"$gt": since}
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            query["created_at"] = {"$gt": since_dt}
         except ValueError:
-            from fastapi import HTTPException
             raise HTTPException(status_code=422, detail="`since` must be a valid ISO-8601 timestamp")
 
     raw = await (
