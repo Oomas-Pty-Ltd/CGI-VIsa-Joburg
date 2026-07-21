@@ -469,12 +469,31 @@ _WA_REPLACEMENTS = [
 ]
 
 
+def _strip_md_link(m: "re.Match") -> str:
+    """[label](url) → bare url, or "label: url" when label adds information.
+
+    WhatsApp has no markdown link rendering — a raw ``[text](url)`` reaches
+    the user as literal brackets/parentheses. WhatsApp DOES auto-linkify a
+    bare ``https://...`` URL, so unwrapping to plain text keeps it tappable.
+    """
+    label, url = m.group(1).strip(), m.group(2).strip()
+    if not label or label.lower() == url.lower() or label.lower().startswith(("http://", "https://")):
+        return url
+    return f"{label}: {url}"
+
+
 def _md_to_wa(text: str) -> str:
     """
     Convert a markdown bot response to WhatsApp-compatible text.
-    Handles: **bold**, headings, tables, code blocks, lists, blockquotes.
+    Handles: **bold**, headings, tables, code blocks, lists, blockquotes, links.
     Also strips web-UI instructions and replaces them with WhatsApp equivalents.
     """
+    # ── [label](url) → bare/labelled url — safety net in case the LLM emits
+    # markdown link syntax despite the system-prompt instruction not to. Must
+    # run before bold conversion so a label containing **text** doesn't confuse
+    # the bold regex.
+    text = re.sub(r'\[([^\]\n]+)\]\((https?://[^\s)]+)\)', _strip_md_link, text)
+
     # ── Fenced code blocks → WhatsApp monospace ──────────────────────
     text = re.sub(r'```[a-zA-Z]*\n?(.*?)```', r'```\1```', text, flags=re.DOTALL)
 
@@ -668,7 +687,12 @@ If the answer is not in the data, say so and direct the user to contact us direc
 {_lang_line}
 
 RESPONSE STYLE:
-- Be concise, accurate, and helpful.
+- Be concise. Default to 3-5 short sentences.
+- When the answer comes from a source, quote only the key facts, then add the source
+  link on its own line as a bare URL (e.g. https://example.com/page) — WhatsApp
+  auto-links plain URLs but does NOT render [text](url) markdown, so never wrap a
+  link in brackets/parentheses. Prefer the URL given in any "(Source: ...)" tag in
+  the official data below.
 - Do NOT echo the user's question back.
 - Do NOT add feedback/rating prompts or sign-off phrases.
 - Use bullet points only when listing multiple items.

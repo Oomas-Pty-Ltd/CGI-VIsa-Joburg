@@ -85,9 +85,12 @@ _STOP_WORDS = {
     "need", "want", "get", "tell", "know", "please", "about",
 }
 
-# Holiday / event name aliases: maps variant spellings to all equivalent forms.
-# When any key is found in a query, all its aliases are also searched.
+# Term aliases: maps variant spellings / abbreviations to all equivalent forms.
+# When any key is found in a query, all its aliases are also searched. Covers
+# both holiday-name spelling variants and common consular-service abbreviations
+# (users routinely type "POA" instead of "power of attorney", etc.).
 _TERM_ALIASES: Dict[str, List[str]] = {
+    # Holidays / events
     "eid":      ["id", "idul", "eidul"],
     "id":       ["eid", "idul", "eidul"],
     "fitr":     ["fitar", "fitri"],
@@ -95,6 +98,11 @@ _TERM_ALIASES: Dict[str, List[str]] = {
     "muharram": ["moharram"],
     "diwali":   ["deepavali"],
     "holi":     ["holika"],
+    # Consular service abbreviations
+    "poa":      ["power of attorney", "gpa", "general power of attorney"],
+    "gpa":      ["power of attorney", "general power of attorney", "poa"],
+    "pcc":      ["police clearance certificate", "police clearance", "clearance certificate"],
+    "oci":      ["overseas citizen of india", "overseas citizen"],
 }
 
 
@@ -322,18 +330,23 @@ async def _hybrid_search_impl(query: str, knowledge_base: Dict, tenant_id: str) 
     try:
         from services.knowledge_service import knowledge_service
         await knowledge_service.initialize()
+        # Expand abbreviations (e.g. "poa" → "power of attorney") into the query
+        # text itself so relevance scoring — which matches on substrings of the
+        # raw query — can still find KB entries indexed under the full term.
+        extra_terms = [t for t in _expand_keywords(keywords) if t not in keywords]
+        search_query = f"{query} {' '.join(extra_terms)}" if extra_terms else query
         # Fetch top 20 so full PDFs (e.g. holiday calendars with many sections)
         # and multi-topic queries (fee + service combos) all surface
-        kb_results = await knowledge_service.search(query, tenant_id, limit=20)
+        kb_results = await knowledge_service.search(search_query, tenant_id, limit=20)
         if kb_results:
-            top_score = knowledge_service._calculate_relevance(query.lower(), kb_results[0])
+            top_score = knowledge_service._calculate_relevance(search_query.lower(), kb_results[0])
             if top_score >= _KB_CONFIDENCE_THRESHOLD:
                 logger.debug(f"[HYBRID L1] '{cache_key}' — MongoDB hit (score {top_score:.1f})")
                 # Keep only entries above threshold, then cap to top N to stay within
                 # the LLM context budget (the search() result is already ordered by score).
                 strong = [
                     e for e in kb_results
-                    if knowledge_service._calculate_relevance(query.lower(), e) >= _KB_CONFIDENCE_THRESHOLD
+                    if knowledge_service._calculate_relevance(search_query.lower(), e) >= _KB_CONFIDENCE_THRESHOLD
                 ][:_LLM_KB_TOP_N]
                 return _format_kb_entries(strong)
     except Exception as e:

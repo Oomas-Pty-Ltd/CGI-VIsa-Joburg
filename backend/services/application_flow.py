@@ -270,7 +270,16 @@ async def preload_service_patterns(company_id: Optional[str]) -> None:
         for s in services:
             if not s.enabled:
                 continue
-            kws = [str(k).lower() for k in (s.raw.get("keywords") or []) if k]
+            tenant_kws = [str(k).lower() for k in (s.raw.get("keywords") or []) if k]
+            # Merge with the platform's built-in synonym list for this service_key
+            # (if any) rather than replacing it. Tenant rows seeded without a
+            # `keywords` field (e.g. via migrations) would otherwise silently lose
+            # every abbreviation/synonym (e.g. "poa", "pcc", "oci") the moment a
+            # tenant has ANY services configured, since this cache fully overrides
+            # `_DEFAULT_SERVICE_PATTERNS` for that company. Merging keeps the
+            # built-in vocabulary as a floor while still letting tenants add more.
+            default_kws = _DEFAULT_SERVICE_PATTERNS.get(s.service_key, [])
+            kws = list(dict.fromkeys(default_kws + tenant_kws))
             # Always include the service name + key itself as keywords —
             # avoids tenants having to repeat the obvious ones.
             kws.append(s.service_key.lower())

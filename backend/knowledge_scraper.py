@@ -828,7 +828,8 @@ _DEFAULT_KB_SERVICE_KEYWORDS = {
                     "marry", "marriage certificate", "marriage fee"],
     "birth":       ["birth", "born", "newborn", "child registration", "birth certificate"],
     "attestation": ["attestation", "apostille", "notary", "affidavit",
-                    "power of attorney", "legalization", "legalisation"],
+                    "power of attorney", "poa", "gpa", "general power of attorney",
+                    "legalization", "legalisation"],
     "renunciation":["renunciation", "renounce", "surrender passport",
                     "citizenship", "give up citizenship"],
     # Generic topic-routers (currency-neutral, tenant-neutral)
