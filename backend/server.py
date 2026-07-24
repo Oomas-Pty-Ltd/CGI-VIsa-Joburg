@@ -377,6 +377,7 @@ async def sevasetu_delivery_webhook(
 
 from user_routes import router as user_router
 from seva_setu_auth_routes import router as seva_setu_router
+from chat_sessions_routes import router as chat_sessions_router
 
 api_router.include_router(auth_router)
 api_router.include_router(super_admin_router)
@@ -390,6 +391,7 @@ api_router.include_router(monitoring_router)
 api_router.include_router(admin_router)
 api_router.include_router(user_router)
 api_router.include_router(seva_setu_router)
+api_router.include_router(chat_sessions_router)
 
 app.include_router(api_router)
 
